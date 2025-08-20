@@ -1,0 +1,13 @@
+# install cmd: pip3 install -r requirements.txt
+
+# core
+flask
+jinja2
+PyYAML
+requests
+
+# DB
+mysql-connector-python
+
+# VMware vSphere
+pyvmomi

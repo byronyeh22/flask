@@ -1,0 +1,10 @@
+services:
+  flask-login:
+    image: python:3.11-slim
+    container_name: sra_console
+    working_dir: /app
+    volumes:
+      - ./app:/app
+    ports:
+      - "16999:16999"
+    command: bash -c "pip install flask cryptography requests pyyaml && python sra_console.py"

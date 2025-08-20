@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    :root {
+        --primary-color: #2c3e50;
+        --accent-color: #3498db;
+        --success-color: #27ae60;
+        --warning-color: #f39c12;
+        --danger-color: #e74c3c;
+        --light-bg: #f8f9fa;
+        --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        --border-radius: 8px;
+    }
+
+    .page-header {
+        background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%);
+        color: white;
+        padding: 2rem 0;
+        margin: -15px -15px 30px -15px;
+        border-radius: var(--border-radius) var(--border-radius) 0 0;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .page-header h2 {
+        margin: 0;
+        font-weight: 300;
+        font-size: 2rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .status-badge {
+        padding: 0.4rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+        min-width: 70px;
+        text-align: center;
+        background: rgba(241, 196, 15, 0.2);
+        color: #f39c12;
+    }
+
+    .workflow-id {
+        font-family: 'Courier New', monospace;
+        background: rgba(52, 152, 219, 0.1);
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-size: 1.1rem;
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+</style>
+
+<div class="container-fluid">
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container-fluid">
+            <h2>
+                <i class="fas fa-check-circle"></i>
+                Pipeline Approval
+            </h2>
+            <p class="subtitle">Review and approve pipeline execution</p>
+        </div>
+    </div>
+
+    <form method="post" action="{{ url_for('vm.trigger_manual_job', pipeline_id=pipeline.pipeline_id) }}" onsubmit="return confirmSubmit();">
+
+        <!-- Pipeline Information -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light text-dark fw-bold">
+                <i class="fas fa-info-circle me-2"></i>Pipeline Information
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Workflow ID：</strong>
+                                <span class="workflow-id">{{ pipeline.workflow_id }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Pipeline ID：</strong>
+                                <span>{{ pipeline.pipeline_id }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Status：</strong>
+                                <span class="status-badge">{{ pipeline.status }}</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Created：</strong>
+                                <span>{{ pipeline.created_at }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Triggered By：</strong>
+                                <span>{{ pipeline.triggered_by or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Web URL：</strong>
+                                {% if pipeline.web_url %}
+                                    <a href="{{ pipeline.web_url }}" target="_blank" class="text-primary">View Pipeline</a>
+                                {% else %}
+                                    <span>-</span>
+                                {% endif %}
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Jira Ticket Information -->
+        {% if jira_ticket %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light text-dark fw-bold">
+                <i class="fas fa-ticket-alt me-2"></i>Jira Ticket Information
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between">
+                        <strong>Ticket ID：</strong>
+                        <a href="{{ jira_ticket.url }}" target="_blank" class="text-primary">{{ jira_ticket.ticket_id }}</a>
+                    </li>
+                    <li class="list-group-item">
+                        <strong>Summary：</strong><br>
+                        <span class="mt-2 d-block">{{ jira_ticket.summary or '-' }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <strong>Status：</strong>
+                        <span>{{ jira_ticket.status or '-' }}</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- vSphere Configuration -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light text-dark fw-bold">
+                <i class="fas fa-server me-2"></i>vSphere Configuration
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Environment：</strong>
+                                <span>{{ pipeline.environment or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Datacenter：</strong>
+                                <span>{{ pipeline.vsphere_datacenter or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Cluster：</strong>
+                                <span>{{ pipeline.vsphere_cluster or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Template：</strong>
+                                <span>{{ pipeline.vsphere_template or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Datastore：</strong>
+                                <span>{{ pipeline.vsphere_datastore or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Network：</strong>
+                                <span>{{ pipeline.vsphere_network or '-' }}</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>IPv4 Gateway：</strong>
+                                <span>{{ pipeline.vm_ipv4_gateway or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Action Type：</strong>
+                                <span>{{ pipeline.action_type or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Resource：</strong>
+                                <span>{{ pipeline.resource or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Project：</strong>
+                                <span>{{ pipeline.project_name or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Branch：</strong>
+                                <span>{{ pipeline.branch or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Commit SHA：</strong>
+                                <span style="font-family: monospace; font-size: 0.9em;">{{ (pipeline.commit_sha or '-')[:8] }}</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VM Configuration -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light text-dark fw-bold">
+                <i class="fas fa-desktop me-2"></i>VM Configuration
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>VM Name Prefix：</strong>
+                                <span>{{ pipeline.vm_name_prefix or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>OS Type：</strong>
+                                <span>{{ pipeline.os_type or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Instance Type：</strong>
+                                <span>{{ pipeline.vm_instance_type or '-' }}</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>vCPU：</strong>
+                                <span>{{ pipeline.vm_num_cpus or '-' }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <strong>Memory (MB)：</strong>
+                                <span>{{ pipeline.vm_memory or '-' }}</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NetBox Configuration -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light text-dark fw-bold">
+                <i class="fas fa-network-wired me-2"></i>NetBox Configuration
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between">
+                        <strong>NetBox Prefix：</strong>
+                        <span>{{ pipeline.netbox_prefix or '-' }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <strong>NetBox Tenant：</strong>
+                        <span>{{ pipeline.netbox_tenant or '-' }}</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+
+
+        <!-- Action Buttons -->
+        <div class="d-flex justify-content-end mt-4 gap-2">
+            <a href="{{ url_for('vm.overview_index') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Cancel
+            </a>
+            <button type="submit" class="btn btn-primary px-4">
+                <i class="fas fa-check me-2"></i>Approve & Execute
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- 確認對話框 -->
+<script>
+    function confirmSubmit() {
+        return confirm("Are you sure you want to approve and execute this pipeline?");
+    }
+</script>
+
+{% endblock %}

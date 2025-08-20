@@ -1,0 +1,16 @@
+users:
+  admin:
+    password: admin123
+    role: admin
+  byron:
+    password: 1qaz@WSX
+    role: admin
+  danny:
+    password: '!QAZ2wsx'
+    role: admin
+  marty:
+    password: B09802088
+    role: admin
+  test:
+    password: test
+    role: admin

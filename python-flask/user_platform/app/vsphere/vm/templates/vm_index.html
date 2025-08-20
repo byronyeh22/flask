@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1 class="fs-4 fw-bold mb-4 ">Manage Virtual Machine</h1>
+
+<form method="post" id="vm-management-form" class="mb-4">
+  <input type="hidden" name="action_type" id="hidden-action-type" value="Create">
+
+  <ul class="nav nav-tabs mb-4" id="actionTypeTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="create-tab" data-bs-toggle="tab" data-bs-target="#create-fields"
+        type="button" role="tab">Create</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="update-tab" data-bs-toggle="tab" data-bs-target="#update-fields"
+        type="button" role="tab">Update</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="delete-tab" data-bs-toggle="tab" data-bs-target="#delete-fields"
+        type="button" role="tab">Delete</button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="vm-tab-content">
+
+    <div class="tab-pane fade show active" id="create-fields" role="tabpanel">
+      <div class="card mb-3 border">
+        <div class="card-body text-dark">
+          <p>
+            In this step, you can configure the environment settings for creating a new Virtual Machine (VM).
+          </p>
+          <p>
+            After selecting the appropriate options, click <strong>Review</strong> to verify your configuration.
+          </p>
+          <p>
+            Once confirmed, click <strong>Submit</strong> to automatically create a Jira ticket and trigger the VM provisioning process,
+            including software installation based on the selected instance type.
+          </p>
+        </div>
+      </div>
+      {% set action_type = 'Create' %}
+      {% include "create/form.html" %}
+    </div>
+
+    <div class="tab-pane fade" id="update-fields" role="tabpanel">
+      <div class="alert alert-warning">（請依需求填入更新欄位）</div>
+      {% set action_type = 'Update' %}
+      {% include "update/form.html" %}
+    </div>
+
+    <div class="tab-pane fade" id="delete-fields" role="tabpanel">
+      <div class="alert alert-danger">（請選擇要刪除的 VM 名稱）</div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">VM Name Prefix</label>
+          <select name="vm_name_prefix" class="form-select" data-required="true">
+            <option value="" disabled selected>--- Select ---</option>
+            {% for vm_name in vm_name %}
+            <option value="{{ vm_name }}">{{ vm_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="d-flex justify-content-end mt-4">
+    <a href="{{ url_for('vm.vsphere_cancel_vm_form') }}" class="btn btn-outline-danger me-2">Cancel</a>
+    <button type="submit" id="review-btn" class="btn btn-outline-secondary me-2">Review</button>
+    </div>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const actionTabs = document.querySelectorAll('#actionTypeTabs button[data-bs-toggle="tab"]');
+    const actionTypeInput = document.getElementById('hidden-action-type');
+    const mainForm = document.getElementById('vm-management-form');
+
+    function updateFormState(activeTabId) {
+        document.querySelectorAll('#vm-tab-content .tab-pane [name]').forEach(el => {
+            el.disabled = true;
+        });
+        document.querySelectorAll('#vm-tab-content [data-required="true"]').forEach(el => {
+            el.removeAttribute('required');
+        });
+
+        const activePane = document.querySelector(activeTabId);
+        if (activePane) {
+            activePane.querySelectorAll('[name]').forEach(el => {
+                el.disabled = false;
+            });
+            activePane.querySelectorAll('[data-required="true"]').forEach(el => {
+                el.setAttribute('required', '');
+            });
+        }
+    }
+
+    function updateFormAction(action) {
+        if (action === 'Create') {
+            mainForm.action = "{{ url_for('vm.vsphere_create_vm_review') }}";
+        } else if (action === 'Update') {
+            mainForm.action = "{{ url_for('vm.vsphere_update_vm_review') }}";
+        } else if (action === 'Delete') {
+            mainForm.action = "/vsphere_delete_vm_review"; 
+        } else {
+            mainForm.action = "{{ url_for('vm.vsphere_create_vm_review') }}";
+        }
+    }
+
+    actionTabs.forEach(tab => {
+        tab.addEventListener('shown.bs.tab', event => { 
+            const action = event.target.textContent.trim();
+            const targetPaneId = event.target.getAttribute('data-bs-target');
+            
+            actionTypeInput.value = action;
+            updateFormState(targetPaneId);
+            updateFormAction(action);
+        });
+    });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const activeTabName = urlParams.get('active_tab');
+
+    let initialTab = document.getElementById('create-tab'); 
+
+    if (activeTabName === 'update') {
+        const updateTab = document.getElementById('update-tab');
+        if (updateTab) {
+            initialTab = updateTab;
+        }
+    }
+    
+    if (initialTab) {
+        const tab = new bootstrap.Tab(initialTab);
+        tab.show();
+        
+        const initialAction = initialTab.textContent.trim();
+        const initialPaneId = initialTab.getAttribute('data-bs-target');
+        actionTypeInput.value = initialAction;
+        updateFormState(initialPaneId);
+        updateFormAction(initialAction);
+    }
+});
+</script>
+
+{% endblock %}

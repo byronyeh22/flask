@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<form method="post" action="{{ url_for('vm.vsphere_update_vm_submit') }}" onsubmit="return confirm('Are you sure you want to submit this VM UPDATE request?');">
+  <h2 class="fw-bold fs-3 mb-4">Review VM Update</h2>
+  <p class="text-primary fw-bold">Current Action: {{ data.new_config.action_type }} {{ data.new_config.resource }}</p>
+  <p class="text-primary fw-bold">
+      Updating VM: <strong>{{ data.new_config.vm_name_prefix }}</strong> in <strong>{{ data.new_config.environment }}</strong> environment
+  </p>
+
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-light text-dark fw-bold">Configuration Changes</div>
+    <div class="card-body">
+        <table class="table table-bordered align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 25%;">Field</th>
+                    <th style="width: 37.5%;">Original Value</th>
+                    <th style="width: 37.5%;">New Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>vCPU</strong></td>
+                    <td>{{ data.original_config.vm_num_cpus }}</td>
+                    <td>
+                        {% if data.original_config.vm_num_cpus|string != data.new_config.vm_num_cpus %}
+                            <span class="text-danger fw-bold">{{ data.new_config.vm_num_cpus }} <i class="bi bi-arrow-left-right"></i></span>
+                        {% else %}
+                            {{ data.new_config.vm_num_cpus }}
+                        {% endif %}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td><strong>Memory (MB)</strong></td>
+                    <td>{{ data.original_config.vm_memory }}</td>
+                    <td>
+                        {% if data.original_config.vm_memory|string != data.new_config.vm_memory %}
+                            <span class="text-danger fw-bold">{{ data.new_config.vm_memory }} <i class="bi bi-arrow-left-right"></i></span>
+                        {% else %}
+                            {{ data.new_config.vm_memory }}
+                        {% endif %}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td><strong>Additional Disks</strong></td>
+
+                    {# -------------------- Original Value（以 DB 為準，不顯示 SCSI） -------------------- #}
+                    <td>
+                        {% set original_disks = data.original_config.additional_disks or [] %}
+                        {% if original_disks and original_disks|length > 0 %}
+                            {% for d in original_disks %}
+                                {% set label_txt = ('Hard Disk ' ~ d.ui_disk_number) if d.ui_disk_number is not none else (d.label or 'Hard Disk') %}
+                                {% set prov_txt  = (d.disk_provisioning or 'thin')|replace('_',' ')|title %}
+                                <div class="mb-1">
+                                    <span class="badge bg-secondary">
+                                        {{ label_txt }}: {{ d.size }} GB, {{ prov_txt }}
+                                    </span>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            {# 退回舊 JSON 欄位（極端保險） #}
+                            {% set original_sizes = data.original_config.vm_disk_size | fromjson if data.original_config.vm_disk_size else [] %}
+                            {% set original_provs  = data.original_config.vm_disk_provisioning | fromjson if data.original_config.vm_disk_provisioning else [] %}
+                            {% if original_sizes %}
+                                {% for i in range(original_sizes|length) %}
+                                    {% set prov_txt = (original_provs[i] if i < original_provs|length else 'thin')|replace('_',' ')|title %}
+                                    <div class="mb-1">
+                                        <span class="badge bg-secondary">
+                                            Hard Disk {{ i + 2 }}: {{ original_sizes[i] }} GB, {{ prov_txt }}
+                                        </span>
+                                    </div>
+                                {% endfor %}
+                            {% else %}
+                                <span class="text-muted">No additional disks</span>
+                            {% endif %}
+                        {% endif %}
+                    </td>
+
+                    {# -------------------- New Value（依表單 session 值顯示，不重排、不重編號；不顯示 SCSI） -------------------- #}
+                    <td>
+                        {% set new_ids    = data.new_config['update_disk_db_id[]'] if 'update_disk_db_id[]' in data.new_config else [] %}
+                        {% set new_sizes  = data.new_config['update_vm_disk_size[]'] if 'update_vm_disk_size[]' in data.new_config else [] %}
+                        {% set new_provs  = data.new_config['update_vm_disk_provisioning[]'] if 'update_vm_disk_provisioning[]' in data.new_config else [] %}
+                        {% set new_labels = data.new_config['update_disk_label[]'] if 'update_disk_label[]' in data.new_config else [] %}
+
+                        {% set has_new = (new_sizes|length) > 0 %}
+                        {% if not has_new and (not original_disks or original_disks|length == 0) %}
+                            <span class="text-muted">No additional disks</span>
+                        {% else %}
+                            {# 建立 id → 原始磁碟對照 #}
+                            {% set original_by_id = {} %}
+                            {% for d in original_disks %}
+                                {% set _ = original_by_id.update({ (d.id|string): d }) %}
+                            {% endfor %}
+
+                            {# 1) 依表單項目逐一顯示（舊碟：比對變更；新碟：標示 New） #}
+                            {% set nlen = new_sizes|length %}
+                            {% for i in range(nlen) %}
+                                {% set nid    = (new_ids[i]|string if i < new_ids|length else '') %}
+                                {% set nsize  = new_sizes[i] %}
+                                {% set nprov  = (new_provs[i] if i < new_provs|length else 'thin') %}
+                                {% set nlabel = (new_labels[i] if i < new_labels|length else '') %}
+                                {% set prov_txt = (nprov or 'thin')|replace('_',' ')|title %}
+
+                                <div class="mb-1">
+                                {% if nid and nid in original_by_id %}
+                                    {# 既有磁碟：用 DB 的 label（Hard Disk ui_disk_number） #}
+                                    {% set od = original_by_id[nid] %}
+                                    {% set od_label = ('Hard Disk ' ~ od.ui_disk_number) if od.ui_disk_number is not none else (od.label or 'Hard Disk') %}
+                                    {% set changed = (od.size|string != nsize|string) or ((od.disk_provisioning or 'thin') != (nprov or 'thin')) or ((nlabel or od_label) != od_label) %}
+                                    {% if changed %}
+                                        <span class="badge bg-warning text-dark">
+                                            {{ (nlabel or od_label) }}: {{ od.size }} GB → {{ nsize }} GB, {{ prov_txt }}
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-primary">
+                                            {{ (nlabel or od_label) }}: {{ nsize }} GB, {{ prov_txt }}
+                                        </span>
+                                    {% endif %}
+                                {% else %}
+                                    {# 新增磁碟：使用表單的 label（已於表單決定），不重編號 #}
+                                    {% set show_label = nlabel if nlabel else 'Hard Disk ?' %}
+                                    <span class="badge bg-success">
+                                        {{ show_label }}: {{ nsize }} GB, {{ prov_txt }} (New)
+                                    </span>
+                                {% endif %}
+                                </div>
+                            {% endfor %}
+
+                            {# 2) 被移除：原始有 id，但不在 new_ids 裡 #}
+                            {% set new_id_set = (new_ids | map('string') | list) %}
+                            {% for d in original_disks %}
+                                {% if (d.id|string) not in new_id_set %}
+                                    {% set od_label = ('Hard Disk ' ~ d.ui_disk_number) if d.ui_disk_number is not none else (d.label or 'Hard Disk') %}
+                                    {% set prov_txt = (d.disk_provisioning or 'thin')|replace('_',' ')|title %}
+                                    <div class="mb-1">
+                                        <span class="badge bg-danger">
+                                            <del>{{ od_label }}: {{ d.size }} GB, {{ prov_txt }} (Removed)</del>
+                                        </span>
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-end mt-4">
+    <a href="{{ url_for('vm.vsphere_cancel_vm_form') }}" class="btn btn-outline-danger me-2">Cancel</a>
+    <a href="{{ url_for('vm.vm_index', active_tab='update') }}" class="btn btn-outline-secondary me-2">Previous</a>
+    <button type="submit" class="btn btn-primary px-5">Confirm & Submit Update</button>
+  </div>
+</form>
+
+{% endblock %}

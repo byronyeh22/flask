@@ -1,0 +1,715 @@
+{% if action_type %}
+  <div class="alert alert-info fw-bold mb-3">
+    Current Action: {{ action_type }}
+  </div>
+{% endif %}
+
+<input type="hidden" name="resource" value="vm">
+<input type="hidden" name="action_type" value="update">
+
+<style>
+  /* Custom styles for the comparison layout */
+  .config-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #eee;
+  }
+  .config-label {
+    font-weight: bold;
+    color: #555;
+    width: 180px; /* Fixed label width */
+  }
+  .config-current {
+    flex: 1;
+    padding: 0 15px;
+    color: #6c757d;
+    background-color: #f8f9fa;
+    border-radius: .25rem;
+    padding: .375rem .75rem;
+    margin-right: 15px;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    word-break: break-all;
+  }
+  .config-new {
+    flex: 1;
+  }
+  .disk-config-current {
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    min-height: 100px;
+  }
+  .btn-remove {
+    background-color: #dc3545;
+    color: #fff;
+  }
+  .btn-remove:hover { background-color: #c82333; color: #fff; }
+  .btn-add {
+    background-color: #28a745;
+    color: #fff;
+  }
+  .btn-add:hover { background-color: #218838; color: #fff; }
+
+  /* Label 欄位反灰（不可編輯） */
+  .disk-label[disabled] {
+    background-color: #e9ecef !important;
+    opacity: 1;
+    cursor: not-allowed;
+  }
+</style>
+
+<div class="card mb-4 shadow-sm">
+  <div class="card-header bg-primary text-white fw-bold">Select VM to Update</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label for="environment-select" class="form-label">Environment</label>
+        <select
+          id="environment-select"
+          name="environment"
+          class="form-select"
+          data-required="true"
+          data-vms-url="{{ url_for('vm.get_vms_by_environment_api', environment='PLACEHOLDER') }}"
+        >
+          <option value="" disabled {% if not session.update_vm_form_data %}selected{% endif %}>--- Select Environment ---</option>
+          {% for env in environment %}
+          <option value="{{ env }}" {% if session.update_vm_form_data and session.update_vm_form_data.environment == env %}selected{% endif %}>{{ env }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label for="vm-name-prefix-select" class="form-label">VM Name Prefix</label>
+        <select
+          id="vm-name-prefix-select"
+          name="vm_name_prefix"
+          class="form-select"
+          data-required="true"
+          disabled
+          data-config-url="{{ url_for('vm.get_vm_config_api', environment='ENV_PLACEHOLDER', vm_name_prefix='VM_PLACEHOLDER') }}"
+        >
+          <option value="" disabled selected>--- Select Environment First ---</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="configuration-form" style="display: none;">
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-success text-white fw-bold">Review and Modify VM Configuration</div>
+    <div class="card-body">
+
+      <div class="row mb-3">
+        <div class="col-6"><h6 class="text-center text-secondary">Current Configuration</h6></div>
+        <div class="col-6"><h6 class="text-center text-primary">New Configuration</h6></div>
+      </div>
+
+      <div class="config-row">
+        <div class="config-label">vCPU</div>
+        <div id="current-cpu" class="config-current">N/A</div>
+        <div class="config-new">
+          <input type="number" name="vm_num_cpus" class="form-control" min="1">
+        </div>
+      </div>
+
+      <div class="config-row">
+        <div class="config-label">Memory (MB)</div>
+        <div id="current-memory" class="config-current">N/A</div>
+        <div class="config-new">
+          <input type="number" name="vm_memory" class="form-control" min="512" step="256">
+        </div>
+      </div>
+
+      <hr class="my-4">
+
+      <h5 class="mb-3">Additional Disks</h5>
+      <div class="row">
+        <div class="col-md-6">
+          <div id="current-disk-container" class="disk-config-current">
+            <p class="text-muted">N/A</p>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div id="new-disk-container"></div>
+          <div class="alert alert-warning d-flex align-items-center py-2 px-3 mt-3" role="alert">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2 flex-shrink-0" viewBox="0 0 16 16" role="img" aria-label="Warning:"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.708c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>
+            NOTE: Hard Disk 1 uses the disk configuration from the template.
+          </div>
+          <button type="button" class="btn btn-sm btn-add" onclick="addDisk_for_update_form()">
+            <i class="bi bi-plus-circle"></i> Add Disk
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Toast for one-operation-at-a-time message -->
+<div class="position-fixed top-0 end-0 p-3" style="z-index:1080">
+  <div id="opToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" id="opToastMsg">
+        Only one operation at a time: either add or remove disks. Please submit them separately.
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // --- 變數與 DOM ---
+    const vm_update_form_data = {{ session.vm_update_form_data | default(none) | tojson | safe }};
+    const envSelect = document.getElementById('environment-select');
+    const vmPrefixSelect = document.getElementById('vm-name-prefix-select');
+    const configForm = document.getElementById('configuration-form');
+    const reviewBtn = document.getElementById('review-btn');
+    const newDiskContainer = document.getElementById('new-disk-container');
+
+    let initialVMConfig = {};
+    let originalById = {}; // id -> disk (from DB)
+
+    // vSphere SCSI 常數
+    const MAX_SCSI_CONTROLLER = 3; // controllers 0..3
+    const VALID_UNITS = [0,1,2,3,4,5,6,8,9,10,11,12,13,14,15]; // skip 7
+    const RESERVED = new Set(['0:0']); // 系統碟保留 (0:0)
+
+    // ---------- 小工具 ----------
+    const asArray = (v) => Array.isArray(v) ? v : (v != null && v !== '' ? [v] : []);
+
+    function showToast(msg) {
+      const el = document.getElementById('opToast');
+      const body = document.getElementById('opToastMsg');
+      if (body) body.textContent = msg;
+      const t = bootstrap.Toast.getOrCreateInstance(el, { delay: 3500, autohide: true });
+      t.show();
+    }
+
+    // 還原到載入該 VM 當下的配置（不動環境/VM 選擇，且不吃 session 回填）
+    function revertToInitialVmConfig() {
+      if (!initialVMConfig || !initialVMConfig.vm_name_prefix) return;
+      populateForm(initialVMConfig, null);
+      updateReviewButtonState();
+    }
+
+    function parseLabelNumber(label) {
+      const m = String(label || '').match(/hard\s*disk\s*(\d+)/i);
+      return m ? parseInt(m[1], 10) : null;
+    }
+
+    function getUsedLabelNumbers() {
+      const inputs = newDiskContainer.querySelectorAll('input[name="update_disk_label[]"]');
+      const used = new Set();
+      inputs.forEach(inp => {
+        const n = parseLabelNumber(inp.value);
+        if (n) used.add(n);
+      });
+      return used;
+    }
+
+    function nextFreeLabel() {
+      // 取「最小可用」Hard Disk N（從 2 起）
+      const used = getUsedLabelNumbers();
+      let n = 2;
+      while (used.has(n)) n++;
+      return `Hard Disk ${n}`;
+    }
+
+    function getUsedSlotsFromRows() {
+      const used = new Set(Array.from(newDiskContainer.querySelectorAll('.disk-item')).map(row => {
+        const c = row.querySelector('input[name="update_scsi_controller[]"]')?.value;
+        const u = row.querySelector('input[name="update_unit_number[]"]')?.value;
+        if (c === '' || u === '' || c == null || u == null) return null;
+        return `${parseInt(c,10)}:${parseInt(u,10)}`;
+      }).filter(Boolean));
+      RESERVED.forEach(x => used.add(x));
+      return used;
+    }
+
+    function nextFreeScsiSlot() {
+      const used = getUsedSlotsFromRows();
+      for (let bus = 0; bus <= MAX_SCSI_CONTROLLER; bus++) {
+        for (let i = 0; i < VALID_UNITS.length; i++) {
+          const unit = VALID_UNITS[i];
+          if (bus === 0 && unit === 0) continue; // 0:0 保留
+          const key = `${bus}:${unit}`;
+          if (!used.has(key)) return { controller: bus, unit: unit };
+        }
+      }
+      return null; // 沒空位
+    }
+
+    function scsiTitle(controller, unit) { return `scsi(${controller}:${unit})`; }
+
+    function ensureTooltip(el, title) {
+      el.setAttribute('title', title);
+      const tip = bootstrap.Tooltip.getOrCreateInstance(el);
+      tip.setContent({ '.tooltip-inner': title });
+    }
+
+    function sortNewDiskRowsByLabel() {
+      const rows = Array.from(newDiskContainer.querySelectorAll('.disk-item'));
+      rows.sort((a, b) => {
+        const la = parseLabelNumber(a.querySelector('input[name="update_disk_label[]"]').value);
+        const lb = parseLabelNumber(b.querySelector('input[name="update_disk_label[]"]').value);
+        const va = (la == null ? 9999 : la);
+        const vb = (lb == null ? 9999 : lb);
+        return va - vb;
+      });
+      rows.forEach(r => newDiskContainer.appendChild(r));
+    }
+
+    function normalizedLabelFromConfig(d) {
+      return (d && d.ui_disk_number != null)
+        ? `Hard Disk ${parseInt(d.ui_disk_number, 10)}`
+        : (d.label || null);
+    }
+
+    // 計算目前表單中「新加入」的硬碟數量（沒有 id 的 row）
+    function getNewAddedDiskCount() {
+      const idInputs = newDiskContainer.querySelectorAll('input[name="update_disk_db_id[]"]');
+      let count = 0;
+      idInputs.forEach(inp => { if (!inp.value) count++; });
+      return count;
+    }
+
+    // ---------- 變更偵測 ----------
+    function getCurrentDisksFromForm() {
+      const ids    = Array.from(configForm.querySelectorAll('input[name="update_disk_db_id[]"]')).map(i => (i.value || '').trim());
+      const labels = Array.from(configForm.querySelectorAll('input[name="update_disk_label[]"]')).map(i => (i.value || '').trim());
+      const sizes  = Array.from(configForm.querySelectorAll('input[name="update_vm_disk_size[]"]')).map(i => (i.value || '').trim());
+      const provs  = Array.from(configForm.querySelectorAll('select[name="update_vm_disk_provisioning[]"]')).map(i => (i.value || '').trim());
+
+      const n = Math.max(ids.length, labels.length, sizes.length, provs.length);
+      const arr = [];
+      for (let i = 0; i < n; i++) {
+        arr.push({
+          id:     ids[i] || null,
+          label:  labels[i] || null,
+          size:   sizes[i] || null,
+          prov:   provs[i] || 'thin'
+        });
+      }
+      return arr.filter(d => d.size !== null || d.prov !== null || d.id !== null || (d.label && d.label !== ''));
+    }
+
+    function getInitialDisksFromConfig() {
+      const src = initialVMConfig && Array.isArray(initialVMConfig.additional_disks)
+        ? initialVMConfig.additional_disks : [];
+      return src.map(d => ({
+        id:    (d.id != null ? String(d.id) : null),
+        label: normalizedLabelFromConfig(d), // 與表單一致
+        size:  (d.size != null ? String(d.size) : null),
+        prov:  (d.disk_provisioning || 'thin')
+      }));
+    }
+
+    function computeChangeSummary() {
+      const summary = { cpuChanged: false, memChanged: false, added: 0, removed: 0, modified: 0, hasChanges: false };
+      if (!initialVMConfig || !initialVMConfig.vm_name_prefix) return summary;
+
+      const cpuVal = (configForm.querySelector('input[name="vm_num_cpus"]').value || '').trim();
+      const memVal = (configForm.querySelector('input[name="vm_memory"]').value || '').trim();
+      summary.cpuChanged = String(cpuVal) !== String(initialVMConfig.vm_num_cpus);
+      summary.memChanged = String(memVal) !== String(initialVMConfig.vm_memory);
+
+      const initDisks = getInitialDisksFromConfig();   // [{id,label,size,prov}]
+      const curDisks  = getCurrentDisksFromForm();     // [{id,label,size,prov}]
+
+      const initIds = new Set(initDisks.map(d => d.id).filter(Boolean));
+      const curIds  = new Set(curDisks.map(d => d.id).filter(Boolean));
+
+      // 刪除
+      summary.removed = [...initIds].filter(id => !curIds.has(id)).length;
+      // 新增
+      summary.added = curDisks.filter(d => !d.id).length;
+
+      // 修改
+      const initById = new Map(initDisks.filter(d => d.id).map(d => [d.id, d]));
+      for (const d of curDisks) {
+        if (!d.id) continue;
+        const od = initById.get(d.id);
+        if (!od) continue;
+        if (String(od.size) !== String(d.size) ||
+            (od.prov || 'thin') !== (d.prov || 'thin') ||
+            (od.label || '').trim() !== (d.label || '').trim()) {
+          summary.modified++;
+        }
+      }
+
+      summary.hasChanges = summary.cpuChanged || summary.memChanged ||
+                           summary.added > 0 || summary.removed > 0 || summary.modified > 0;
+      return summary;
+    }
+
+    // 衝突（同時新增與刪除）偵測與處理：Toast + 還原
+    function handleAddRemoveConflictIfAny() {
+      const s = computeChangeSummary();
+      if (s.added > 0 && s.removed > 0) {
+        showToast('Only one operation at a time: either add or remove disks. Please submit them separately.');
+        revertToInitialVmConfig();
+        return true;
+      }
+      return false;
+    }
+
+    // Review 按鈕狀態（僅依是否有變更）
+    function updateReviewButtonState() {
+      if (!reviewBtn) return;
+      const s = computeChangeSummary();
+      reviewBtn.disabled = !s.hasChanges;
+      reviewBtn.textContent = s.hasChanges ? 'Review' : 'No Changes to Review';
+    }
+
+    // ---------- 建立一個磁碟表單項（舊碟固定 SCSI；新碟自動分配；不自動重新連號） ----------
+    function addDisk_for_update_form(disk = {}) {
+      const isExisting = !!disk.id;
+      const id    = disk.id || '';
+      const size  = (disk.size != null ? disk.size : 50);
+      const prov  = disk.disk_provisioning || 'thin';
+      const fromRestore = !!disk._internalFromRestore;
+
+      // 新增硬碟上限（同次操作）
+      if (!isExisting && !fromRestore) {
+        const curNew = getNewAddedDiskCount();
+        if (curNew >= 5) {
+          showToast('You can add at most 5 disks per request.');
+          return;
+        }
+      }
+
+      // Label：既有用 ui_disk_number → "Hard Disk N"；新增拿最小可用 N
+      let labelText = '';
+      if (isExisting) {
+        if (disk.ui_disk_number != null) {
+          labelText = `Hard Disk ${parseInt(disk.ui_disk_number,10)}`;
+        } else if (disk.label) {
+          labelText = disk.label;
+        } else {
+          labelText = nextFreeLabel();
+        }
+      } else {
+        labelText = nextFreeLabel();
+      }
+
+      // SCSI：舊碟用 DB；新碟找下一個可用 slot
+      let scsiController = '';
+      let unitNumber = '';
+      if (isExisting && (disk.scsi_controller != null) && (disk.unit_number != null)) {
+        scsiController = String(disk.scsi_controller);
+        unitNumber = String(disk.unit_number);
+      } else {
+        const slot = nextFreeScsiSlot();
+        if (!slot) {
+          alert('No free SCSI slot available (controllers 0–3, units 0..15 except 7).');
+          return;
+        }
+        scsiController = String(slot.controller);
+        unitNumber = String(slot.unit);
+      }
+
+      const isThin  = (prov === 'thin') ? 'true' : 'false';
+      const isEager = (prov === 'thick_eager') ? 'true' : 'false';
+      const tipTitle = scsiTitle(scsiController, unitNumber);
+
+      // 既有磁碟限制：min=原始大小；Provisioning disabled（並用 hidden 同步值以便送出）
+      const sizeMinAttr = isExisting ? `min="${size}"` : `min="1"`;
+      const provDisabledAttr = isExisting ? 'disabled' : '';
+      const provTip = isExisting ? 'Existing disk provisioning cannot be changed.' : '';
+
+      const html = `
+        <div class="disk-item mb-2 p-3 border rounded bg-light">
+          <input type="hidden" name="update_disk_db_id[]" value="${id}">
+          <input type="hidden" name="update_disk_label[]" value="${labelText}">
+          <input type="hidden" name="update_scsi_controller[]" value="${scsiController}">
+          <input type="hidden" name="update_unit_number[]" value="${unitNumber}">
+          <div class="row align-items-end g-2">
+            <div class="col-4 col-md-3">
+              <label class="form-label mb-0">
+                Label
+                <i class="bi bi-info-circle ms-1 text-secondary scsi-tip"
+                   data-bs-toggle="tooltip" data-bs-placement="top"
+                   title="${tipTitle}"></i>
+              </label>
+              <input type="text" class="form-control disk-label" value="${labelText}" disabled>
+            </div>
+            <div class="col-4 col-md-2">
+              <label class="form-label mb-0">Size (GB)</label>
+              <input type="number" name="update_vm_disk_size[]" class="form-control" ${sizeMinAttr} value="${size}" data-required="true">
+            </div>
+            <div class="col-8 col-md-5">
+              <label class="form-label mb-0">Disk Provisioning</label>
+              <select name="update_vm_disk_provisioning[]" class="form-select disk-provisioning" ${provDisabledAttr} title="${provTip}">
+                <option value="thin" ${prov === 'thin' ? 'selected' : ''}>Thin Provision</option>
+                <option value="thick_lazy" ${prov === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
+                <option value="thick_eager" ${prov === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
+              </select>
+              ${isExisting ? `<input type="hidden" name="update_vm_disk_provisioning[]" value="${prov}">` : ''}
+              <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
+              <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
+            </div>
+            <div class="col-4 col-md-2 d-flex align-items-center">
+              <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
+                <i class="bi bi-trash"></i> Remove
+              </button>
+            </div>
+          </div>
+        </div>`;
+      newDiskContainer.insertAdjacentHTML('beforeend', html);
+
+      // 初始化 / 更新 tooltip
+      const tipIcon = newDiskContainer.lastElementChild.querySelector('.scsi-tip');
+      if (tipIcon) {
+        bootstrap.Tooltip.getOrCreateInstance(tipIcon);
+        ensureTooltip(tipIcon, tipTitle);
+      }
+
+      sortNewDiskRowsByLabel();
+
+      // 若同時有新增與刪除 → Toast + 還原（與 Review 無關）
+      if (handleAddRemoveConflictIfAny()) return;
+
+      updateReviewButtonState();
+    }
+
+    function removeDisk_for_update_form(btn) {
+      btn.closest('.disk-item').remove();
+      sortNewDiskRowsByLabel();
+
+      // 若同時有新增與刪除 → Toast + 還原（與 Review 無關）
+      if (handleAddRemoveConflictIfAny()) return;
+
+      updateReviewButtonState();
+    }
+
+    function updateProvisioningValues_for_update_form(selectEl) {
+      const diskItem = selectEl.closest('.disk-item');
+      const thinVal = diskItem.querySelector('.thin-provisioned-value');
+      const eagerVal = diskItem.querySelector('.eagerly-scrub-value');
+      const v = selectEl.value;
+      if (v === 'thin') { thinVal.value = 'true';  eagerVal.value = 'false'; }
+      else if (v === 'thick_lazy') { thinVal.value = 'false'; eagerVal.value = 'false'; }
+      else { thinVal.value = 'false'; eagerVal.value = 'true'; } // thick_eager
+    }
+
+    // ---------- 畫面渲染 ----------
+    function populateCurrentDiskConfig(config) {
+      const container = document.getElementById('current-disk-container');
+      container.innerHTML = '';
+      const raw = config.additional_disks || [];
+      const disks = [...raw].sort((a,b) => {
+        const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
+        const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
+        return ua - ub;
+      });
+
+      if (disks.length > 0) {
+        disks.forEach(d => {
+          const prov = (d.disk_provisioning || 'thin').replace(/_/g, ' ');
+          const label = (d.ui_disk_number != null)
+            ? `Hard Disk ${d.ui_disk_number}`
+            : (d.label || 'Hard Disk');
+          container.insertAdjacentHTML(
+            'beforeend',
+            `<div class="mb-2"><strong>${label}:</strong> ${d.size} GB, ${prov}</div>`
+          );
+        });
+      } else {
+        container.innerHTML = '<p class="text-muted">No additional disks</p>';
+      }
+    }
+
+    function populateNewDiskConfig(config) {
+      newDiskContainer.innerHTML = '';
+      originalById = {};
+      (config.additional_disks || []).forEach(d => { originalById[String(d.id)] = d; });
+
+      const s = (vm_update_form_data && vm_update_form_data.new_config) ? vm_update_form_data.new_config : null;
+      let ids    = asArray(s && s['update_disk_db_id[]']);
+      let sizes  = asArray(s && s['update_vm_disk_size[]']);
+      let provs  = asArray(s && s['update_vm_disk_provisioning[]']);
+      let labels = asArray(s && s['update_disk_label[]']);
+      let ctrls  = asArray(s && s['update_scsi_controller[]']);
+      let units  = asArray(s && s['update_unit_number[]']);
+
+      // 第一次載入（尚無 session 值）
+      if (ids.length === 0 && config.additional_disks && config.additional_disks.length > 0) {
+        const sorted = [...config.additional_disks].sort((a,b) => {
+          const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
+          const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
+          return ua - ub;
+        });
+        sorted.forEach(d => {
+          addDisk_for_update_form({
+            id: d.id,
+            ui_disk_number: d.ui_disk_number,
+            label: (d.ui_disk_number != null) ? `Hard Disk ${d.ui_disk_number}` : (d.label || ''),
+            size: d.size,
+            disk_provisioning: d.disk_provisioning || 'thin',
+            scsi_controller: d.scsi_controller,
+            unit_number: d.unit_number
+          });
+        });
+        sortNewDiskRowsByLabel();
+        return;
+      }
+
+      // session 有值就逐項建立；舊碟沿用提供的 SCSI，沒有則用 DB；新碟如果沒 SCSI 就現場分配。
+      const len = Math.max(ids.length, sizes.length, provs.length, labels.length, ctrls.length, units.length);
+      for (let i = 0; i < len; i++) {
+        const id    = ids[i] != null ? String(ids[i]) : '';
+        const size  = sizes[i] != null ? sizes[i] : '';
+        const prov  = provs[i] || 'thin';
+
+        let label = labels[i];
+        if (!label) {
+          if (id && originalById[id]?.ui_disk_number != null) {
+            label = `Hard Disk ${originalById[id].ui_disk_number}`;
+          } else if (id && originalById[id]?.label) {
+            label = originalById[id].label;
+          } else {
+            label = nextFreeLabel();
+          }
+        }
+
+        let ctrl = ctrls[i];
+        let unit = units[i];
+        if (id && originalById[id] && (ctrl == null || ctrl === '') && (unit == null || unit === '')) {
+          ctrl = String(originalById[id].scsi_controller);
+          unit = String(originalById[id].unit_number);
+        }
+
+        addDisk_for_update_form({
+          id,
+          size,
+          disk_provisioning: prov,
+          label,
+          scsi_controller: (ctrl !== undefined ? ctrl : undefined),
+          unit_number: (unit !== undefined ? unit : undefined),
+          ui_disk_number: originalById[id]?.ui_disk_number,
+          _internalFromRestore: true // ← 避免 session 回填觸發 15 顆上限
+        });
+      }
+    }
+
+    function populateForm(current_config, session_data_to_restore) {
+      const cfg = (session_data_to_restore && session_data_to_restore.new_config)
+        ? session_data_to_restore.new_config
+        : current_config;
+
+      document.getElementById('current-cpu').textContent = current_config.vm_num_cpus || 'N/A';
+      document.getElementById('current-memory').textContent = current_config.vm_memory || 'N/A';
+      populateCurrentDiskConfig(current_config);
+
+      configForm.querySelector('input[name="vm_num_cpus"]').value = cfg.vm_num_cpus || '';
+      configForm.querySelector('input[name="vm_memory"]').value = cfg.vm_memory || '';
+      populateNewDiskConfig(cfg);
+    }
+
+    // ---------- API 載入 ----------
+    async function fetchVmList(selectedEnv) {
+      vmPrefixSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+      vmPrefixSelect.disabled = true;
+      configForm.style.display = 'none';
+      if (!selectedEnv) {
+        vmPrefixSelect.innerHTML = '<option value="" disabled selected>--- Select Environment First ---</option>';
+        return;
+      }
+      try {
+        const urlTemplate = envSelect.dataset.vmsUrl;
+        const fetchUrl = urlTemplate.replace('PLACEHOLDER', selectedEnv);
+        const res = await fetch(fetchUrl);
+        if (!res.ok) throw new Error('Failed to fetch VM list');
+        const vms = await res.json();
+        let options = '<option value="" disabled selected>--- Select VM ---</option>';
+        vms.forEach(vm => options += `<option value="${vm}">${vm}</option>`);
+        vmPrefixSelect.innerHTML = options;
+        vmPrefixSelect.disabled = false;
+      } catch (e) {
+        console.error(e);
+        vmPrefixSelect.innerHTML = '<option value="" disabled selected>--- Error Loading VMs ---</option>';
+      }
+    }
+
+    // ---------- 事件 ----------
+    envSelect.addEventListener('change', async function() {
+      await fetchVmList(this.value);
+      if (vm_update_form_data && vm_update_form_data.new_config && this.value === vm_update_form_data.new_config.environment) {
+        vmPrefixSelect.value = vm_update_form_data.new_config.vm_name_prefix;
+        vmPrefixSelect.dispatchEvent(new Event('change'));
+      }
+    });
+
+    vmPrefixSelect.addEventListener('change', async function() {
+      const selectedEnv = envSelect.value;
+      const selectedVm = this.value;
+      if (!selectedEnv || !selectedVm) {
+        configForm.style.display = 'none';
+        return;
+      }
+      try {
+        const urlTemplate = this.dataset.configUrl;
+        const fetchUrl = urlTemplate.replace('ENV_PLACEHOLDER', selectedEnv).replace('VM_PLACEHOLDER', selectedVm);
+        const res = await fetch(fetchUrl);
+        if (!res.ok) throw new Error('Failed to fetch VM configuration');
+        const cfg = await res.json();
+        initialVMConfig = JSON.parse(JSON.stringify(cfg));
+
+        let session_to_use = null;
+        if (vm_update_form_data && vm_update_form_data.new_config &&
+            vm_update_form_data.new_config.environment === selectedEnv &&
+            vm_update_form_data.new_config.vm_name_prefix === selectedVm) {
+          session_to_use = vm_update_form_data;
+        }
+
+        populateForm(cfg, session_to_use);
+        configForm.style.display = 'block';
+
+        configForm.querySelector('input[name="vm_num_cpus"]').addEventListener('input', updateReviewButtonState);
+        configForm.querySelector('input[name="vm_memory"]').addEventListener('input', updateReviewButtonState);
+        updateReviewButtonState();
+      } catch (e) {
+        console.error(e);
+        alert('Could not load VM configuration.');
+        configForm.style.display = 'none';
+      }
+    });
+
+    newDiskContainer.addEventListener('change', function(e) {
+      if (e.target.classList.contains('disk-provisioning')) {
+        updateProvisioningValues_for_update_form(e.target);
+      }
+      updateReviewButtonState();
+    });
+
+    // 防止既有磁碟容量被調小（小於 min 時自動拉回 min）
+    newDiskContainer.addEventListener('input', function(e) {
+      if (e.target && e.target.name === 'update_vm_disk_size[]') {
+        const min = parseInt(e.target.getAttribute('min') || '1', 10);
+        const val = parseInt(e.target.value || '0', 10);
+        if (!Number.isNaN(min) && !Number.isNaN(val) && val < min) {
+          e.target.value = String(min);
+        }
+      }
+      updateReviewButtonState();
+    });
+
+    newDiskContainer.addEventListener('click', function(e) {
+      const btn = e.target.closest('.remove-disk-btn');
+      if (btn) removeDisk_for_update_form(btn);
+    });
+
+    document.querySelector('#configuration-form button.btn-add').addEventListener('click', () => addDisk_for_update_form());
+
+    // 初始載入
+    if (vm_update_form_data && vm_update_form_data.new_config && vm_update_form_data.new_config.environment) {
+      envSelect.value = vm_update_form_data.new_config.environment;
+      envSelect.dispatchEvent(new Event('change'));
+    }
+  });
+</script>

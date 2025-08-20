@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<form method="post" action="{{ url_for('vm.vsphere_create_vm_submit') }}" onsubmit="return confirmSubmit();">
+  <h2 class="fw-bold fs-3 mb-4">Review</h2>
+  <p class="text-primary fw-bold">
+    Current Action: {{ data.action_type }} {{ data.vsphere_resource }}
+  </p>
+
+  <!-- vSphere Configuration -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-light text-dark fw-bold">vSphere Configuration</div>
+    <div class="card-body">
+      <ul class="list-group">
+        <li class="list-group-item"><strong>Environment：</strong> {{ data.environment }}</li>
+        <li class="list-group-item"><strong>Datacenter：</strong> {{ data.vsphere_datacenter }}</li>
+        <li class="list-group-item"><strong>Cluster：</strong> {{ data.vsphere_cluster }}</li>
+        <li class="list-group-item"><strong>VM Template：</strong> {{ data.vsphere_template }}</li>
+        <li class="list-group-item"><strong>Datastore：</strong> {{ data.vsphere_datastore }}</li>
+        <li class="list-group-item"><strong>Network：</strong> {{ data.vsphere_network }}</li>
+        <li class="list-group-item"><strong>IPv4 Gateway：</strong> {{ data.vm_ipv4_gateway }}</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- VM Configuration -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-light text-dark fw-bold">VM Configuration</div>
+    <div class="card-body">
+      <ul class="list-group">
+        <li class="list-group-item"><strong>VM Name Prefix：</strong> {{ data.vm_name_prefix }}</li>
+        <li class="list-group-item"><strong>OS Type：</strong> {{ data.os_type }}</li>
+        <li class="list-group-item"><strong>VM Instance Type：</strong> {{ data.vm_instance_type }}</li>
+        <li class="list-group-item"><strong>vCPU：</strong> {{ data.vm_num_cpus }}</li>
+        <li class="list-group-item"><strong>Memory (MB)：</strong> {{ data.vm_memory }}</li>
+
+        <li class="list-group-item">
+          <strong>Additional Hard Disk：</strong>
+          {% set sizes = data['create_vm_disk_size[]'] or [] %}
+          {% set provs = data['create_vm_disk_provisioning[]'] or [] %}
+          {% set ctrls = data['create_vm_disk_scsi_controller[]'] or [] %}
+          {% set units = data['create_vm_disk_unit_number[]'] or [] %}
+          {% set scsi_cnt = data.get('create_vm_scsi_controller_count', 1) %}
+
+          {% if sizes and sizes|length > 0 %}
+            <!-- 總 SCSI 控制器數 -->
+            <div class="mb-2">
+              <span class="badge bg-info text-dark">
+                SCSI Controller Count：{{ scsi_cnt }}
+              </span>
+            </div>
+
+            <!-- 硬碟明細：Hard Disk N + SCSI(c:u) + Size + Provisioning -->
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th style="width: 20%">Hard Disk Label</th>
+                    <th style="width: 20%">SCSI Slot</th>
+                    <th style="width: 20%">Size (GB)</th>
+                    <th style="width: 40%">Provisioning</th>
+                  </tr>
+                </thead>
+                <tbody>
+                {% for i in range(sizes|length) %}
+                  {% set sz = sizes[i] %}
+                  {% set prov = (provs[i] if i < provs|length else 'thin') %}
+                  {% set prov_display = 'Thin Provision' if prov == 'thin'
+                                        else 'Thick Provision Lazy Zeroed' if prov == 'thick_lazy'
+                                        else 'Thick Provision Eager Zeroed' %}
+                  {% set c = (ctrls[i] if i < ctrls|length else '') %}
+                  {% set u = (units[i] if i < units|length else '') %}
+                  <tr>
+                    <td>
+                      <span class="badge bg-primary">Hard Disk {{ i + 2 }}</span>
+                    </td>
+                    <td>
+                      <span class="badge bg-secondary"
+                            data-bs-toggle="tooltip"
+                            data-bs-placement="top"
+                            title="vSphere SCSI address">
+                        scsi({{ c }}:{{ u }})
+                      </span>
+                    </td>
+                    <td>{{ sz }}</td>
+                    <td>{{ prov_display }}</td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <span class="text-muted">No additional disks</span>
+          {% endif %}
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- NetBox Configuration -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-light text-dark fw-bold">NetBox Configuration</div>
+    <div class="card-body">
+      <ul class="list-group">
+        <li class="list-group-item"><strong>NetBox Prefix：</strong> {{ data.netbox_prefix }}</li>
+        <li class="list-group-item"><strong>NetBox Tenant：</strong> {{ data.netbox_tenant }}</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-end mt-4">
+    <a href="{{ url_for('vm.vsphere_cancel_vm_form') }}" class="btn btn-outline-danger me-2">Cancel</a>
+    <a href="{{ url_for('vm.vm_index') }}" class="btn btn-outline-secondary me-2">Previous</a>
+    <button type="submit" class="btn btn-primary px-5">Confirm & Submit to Jira</button>
+  </div>
+</form>
+
+<script>
+  function confirmSubmit() {
+    return confirm("Are you sure you want to submit this VM request to Jira?");
+  }
+  document.addEventListener('DOMContentLoaded', function() {
+    const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+    [...tooltipTriggerList].map(el => new bootstrap.Tooltip(el));
+  });
+</script>
+
+{% endblock %}

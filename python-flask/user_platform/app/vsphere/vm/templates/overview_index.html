@@ -1,0 +1,876 @@
+{% extends "base.html" %}
+{% block title %}User Platform{% endblock %}
+{% block content %}
+<style>
+    :root {
+        --primary-color: #2c3e50;
+        --accent-color: #3498db;
+        --success-color: #27ae60;
+        --warning-color: #f39c12;
+        --danger-color: #e74c3c;
+        --light-bg: #f8f9fa;
+        --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        --border-radius: 8px;
+    }
+
+    .page-header {
+        background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%);
+        color: white;
+        padding: 2rem 0;
+        margin: -15px -15px 30px -15px;
+        border-radius: var(--border-radius) var(--border-radius) 0 0;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .page-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 100px;
+        height: 100px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        transform: translate(30px, -30px);
+    }
+
+    .page-header h1 {
+        margin: 0;
+        font-weight: 300;
+        font-size: 2.5rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .page-header .subtitle {
+        opacity: 0.9;
+        margin-top: 0.5rem;
+        font-size: 1.1rem;
+    }
+
+    .stats-row {
+        margin-bottom: 2rem;
+    }
+
+    .stat-card {
+        background: white;
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+        box-shadow: var(--card-shadow);
+        border-left: 4px solid var(--accent-color);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        text-align: center;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .stat-card .stat-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: var(--primary-color);
+        margin: 0;
+    }
+
+    .stat-card .stat-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-top: 0.5rem;
+    }
+
+    /* 統計卡顏色區分 */
+    .stat-card.running {
+        border-left-color: #3498db; /* blue */
+    }
+    .stat-card.success {
+        border-left-color: #27ae60; /* green */
+    }
+    .stat-card.failed {
+        border-left-color: #e74c3c; /* red */
+    }
+    .stat-card.manual {
+        border-left-color: #f39c12; /* orange */
+    }
+
+    .table-container {
+        background: white;
+        border-radius: var(--border-radius);
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+        margin-top: 2rem;
+    }
+
+    .table-header {
+        background: var(--light-bg);
+        padding: 1.5rem;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .table-header h3 {
+        margin: 0;
+        color: var(--primary-color);
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .search-controls {
+        margin-top: 1rem;
+    }
+
+    .search-input {
+        border: 2px solid #e9ecef;
+        border-radius: var(--border-radius);
+        padding: 0.75rem 1rem;
+        transition: border-color 0.2s ease;
+    }
+
+    .search-input:focus {
+        border-color: var(--accent-color);
+        box-shadow: none;
+    }
+
+    .filter-btn {
+        padding: 0.5rem 1rem;
+        border: 2px solid #e9ecef;
+        background: white;
+        color: #6c757d;
+        border-radius: var(--border-radius);
+        transition: all 0.2s ease;
+        margin-right: 0.5rem;
+        cursor: pointer;
+    }
+
+    .filter-btn:hover, .filter-btn.active {
+        background: var(--accent-color);
+        color: white;
+        border-color: var(--accent-color);
+    }
+
+    /* 分頁控制區域 */
+    .pagination-controls {
+        background: var(--light-bg);
+        padding: 1rem 1.5rem;
+        border-top: 1px solid #dee2e6;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .entries-control {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+        color: #6c757d;
+    }
+
+    .entries-select {
+        padding: 0.4rem 0.8rem;
+        border: 1px solid #dee2e6;
+        border-radius: var(--border-radius);
+        background: white;
+        font-size: 0.9rem;
+    }
+
+    .entries-select:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+
+    .pagination-info {
+        font-size: 0.9rem;
+        color: #6c757d;
+    }
+
+    .pagination-nav {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    .pagination-btn {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid #dee2e6;
+        background: white;
+        color: #6c757d;
+        border-radius: var(--border-radius);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.85rem;
+        min-width: 35px;
+        text-align: center;
+    }
+
+    .pagination-btn:hover:not(:disabled) {
+        background: var(--accent-color);
+        color: white;
+        border-color: var(--accent-color);
+    }
+
+    .pagination-btn.active {
+        background: var(--accent-color);
+        color: white;
+        border-color: var(--accent-color);
+    }
+
+    .pagination-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .custom-table {
+        margin: 0;
+        border: none;
+        font-size: 0.85rem; /* 縮小字體 */
+    }
+
+    .custom-table thead th {
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 1rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        font-size: 0.75rem; /* 縮小表頭字體 */
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+        text-align: center; /* 表格標題欄位置中 */
+    }
+
+    .custom-table tbody td {
+        padding: 1rem;
+        vertical-align: middle;
+        border-bottom: 1px solid #f1f3f4;
+    }
+
+    .custom-table tbody tr:hover {
+        background-color: rgba(52, 152, 219, 0.05);
+    }
+
+    .custom-table tbody td:nth-child(1), /* Workflow ID 欄位下的內容置中*/
+    .custom-table tbody td:nth-child(2), /* Ticket ID 欄位下的內容置中*/
+    .custom-table tbody td:nth-child(4), /* Status 欄位下的內容置中*/
+    .custom-table tbody td:nth-child(7), /* Duration 欄位下的內容置中*/
+    .custom-table tbody td:nth-child(8)  /* Approve 欄位下的內容置中*/
+    {
+        text-align: center;
+    }
+
+
+    .status-badge {
+        padding: 0.4rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+        min-width: 70px;
+        text-align: center;
+    }
+
+    /* 定義 Pipeline Status 的顏色 */
+    .status-success {
+        background: rgba(39, 174, 96, 0.2);
+        color: #27ae60;
+    }
+    .status-failed {
+        background: rgba(231, 76, 60, 0.2);
+        color: #e74c3c;
+    }
+    .status-created,
+    .status-running,
+    .status-pending,
+    .status-preparing,
+    .status-canceled,
+    .status-waiting_for_resource {
+        background: rgba(52, 152, 219, 0.2);
+        color: #3498db;
+    }
+    .status-manual {
+        background: rgba(241, 196, 15, 0.2);
+        color: #f39c12;
+    }
+    .status-approved {
+        background: rgba(46, 204, 113, 0.2);
+        color: #2ecc71;
+    }
+
+    .workflow-id {
+        font-family: 'Courier New', monospace;
+        background: rgba(52, 152, 219, 0.1);
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+
+    .ticket-link {
+        color: var(--accent-color);
+        text-decoration: none;
+        font-weight: 500;
+        transition: color 0.2s ease;
+    }
+
+    .ticket-link:hover {
+        color: var(--primary-color);
+        text-decoration: underline;
+    }
+
+    /* 防止 Start/End 日期換行 */
+    .date-cell {
+        white-space: nowrap;
+        min-width: 120px;
+    }
+
+    /* 防止 Summary 換行 */
+    .summary-cell {
+        white-space: nowrap;
+        max-width: 250px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .summary-cell:hover {
+        white-space: normal;
+        overflow: visible;
+        background: rgba(52, 152, 219, 0.05);
+        padding: 0.5rem;
+        border-radius: 4px;
+        max-width: none;
+    }
+
+    /* Search 元件 */
+    .search-controls {
+        margin-top: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .search-section {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex: 1;
+        min-width: 300px;
+    }
+
+    .search-label {
+        font-weight: 500;
+        color: var(--primary-color);
+        white-space: nowrap;
+    }
+
+    .filter-section {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: nowrap;
+    }
+
+    .filter-btn {
+        padding: 0.5rem 1rem;
+        border: 2px solid #e9ecef;
+        background: white;
+        color: #6c757d;
+        border-radius: var(--border-radius);
+        transition: all 0.2s ease;
+        cursor: pointer;
+        white-space: nowrap;
+        font-size: 0.85rem;
+    }
+</style>
+
+<div class="container-fluid">
+    <!-- Page Header -->
+<!--     <div class="page-header">
+        <div class="container-fluid">
+            <h1>
+                <i class="fas fa-shield-alt"></i>
+                Welcome to SRA Console
+            </h1>
+            <p class="subtitle">Central platform for managing FortiGate Policies and Accounts</p>
+        </div>
+    </div> -->
+
+    <!-- Statistics Cards -->
+    <div class="row stats-row">
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card running">
+                <div class="stat-number">
+                    {{ pipeline_data | selectattr('status', 'in', ['created', 'waiting_for_resource', 'preparing', 'pending', 'running']) | list | length }}
+                </div>
+                <div class="stat-label">Running</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card success">
+                <div class="stat-number">
+                    {{ pipeline_data | selectattr('status', 'equalto', 'success') | list | length }}
+                </div>
+                <div class="stat-label">Success</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card failed">
+                <div class="stat-number">
+                    {{ pipeline_data | selectattr('status', 'equalto', 'failed') | list | length }}
+                </div>
+                <div class="stat-label">Failed</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card manual">
+                <div class="stat-number">
+                    {{ pipeline_data | selectattr('status', 'equalto', 'manual') | list | length }}
+                </div>
+                <div class="stat-label">Approved</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pipeline Table -->
+    <div class="table-container">
+        <div class="table-header">
+<!--             <h3>
+                <i class="fas fa-tasks"></i>
+                Pipelines
+            </h3> -->
+
+            <!-- Search and Filter Controls -->
+            <div class="search-controls">
+                <!-- 搜尋輸入框 -->
+                <div class="position-relative w-100" style="max-width: 600px;">
+                  <i class="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-muted"></i>
+                  <input type="text"
+                         class="form-control ps-5 rounded-pill"
+                         placeholder="Search"
+                         id="searchInput">
+                </div>
+                <div class="filter-section">
+                    <button class="filter-btn active" data-status="all">All</button>
+                    <button class="filter-btn" data-status="success">Success</button>
+                    <button class="filter-btn" data-status="failed">Failed</button>
+                    <button class="filter-btn" data-status="manual">Approved</button>
+                    <button class="filter-btn" data-status="created">Running</button>
+                </div>
+                <!-- 时区选择器 -->
+                <div class="timezone-control d-flex align-items-center gap-2 small">
+                    <span class="timezone-label fw-bold">
+                        <i class="fas fa-globe me-1"></i> Timezone
+                    </span>
+                    <select class="timezone-select form-select form-select-sm w-auto" id="timezoneSelect">
+                        <option value="local">Local time</option>
+                        <option value="UTC">UTC</option>
+                        <option value="America/New_York">EST (New York)</option>
+                        <option value="America/Los_Angeles">PST (Los Angeles)</option>
+                        <option value="Europe/London">GMT (London)</option>
+                        <option value="Europe/Paris">CET (Paris)</option>
+                        <option value="Asia/Tokyo">JST (Tokyo)</option>
+                        <option value="Asia/Singapore">SGT (Singapore)</option>
+                        <option value="Australia/Sydney">AEDT (Sydney)</option>
+                    </select>
+                </div>
+                <!-- auto refresh -->
+                <div id="refreshStatus" class="text-muted small my-2 ms-2"></div>
+            </div>
+        </div>
+
+        <table class="table custom-table" id="pipelinesTable">
+            <thead>
+                <tr>
+                    <th><i class="fas fa-code"></i> Workflow ID</th>
+                    <th><i class="fas fa-ticket-alt"></i> Ticket ID</th>
+                    <th><i class="fas fa-list"></i> Summary</th>
+                    <th><i class="fas fa-info-circle"></i> Status</th>
+                    <th><i class="fas fa-calendar-plus"></i> Start</th>
+                    <th><i class="fas fa-calendar-check"></i> End</th>
+                    <th><i class="fas fa-stopwatch"></i> Duration</th>
+                    <th><i class="fas fa-check"></i> Approve</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pipeline in pipeline_data %}
+                {% set jira_ticket = (jira_tickets | selectattr('workflow_id', 'equalto', pipeline.workflow_id) | list | first) %}
+                {% set raw_status = pipeline.status.lower() %}
+                {% set normalized_status = raw_status %}
+                <tr data-status="{{ normalized_status }}">
+                    <td><span class="workflow-id">{{ pipeline.workflow_id }}</span></td>
+                    <td>
+                        {% if jira_ticket %}
+                            <a href="{{ jira_ticket.url }}" target="_blank" class="ticket-link">{{ jira_ticket.ticket_id }}</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ jira_ticket.summary if jira_ticket else '-' }}
+                    </td>
+                    <td>
+                        <span class="status-badge status-{{ normalized_status }}">{{ pipeline.status }}</span>
+                    </td>
+                    <td class="date-cell" data-datetime="{{ pipeline.created_at }}">{{ pipeline.created_at }}</td>
+                    <td class="date-cell" data-datetime="{{ pipeline.finished_at }}">{{ pipeline.finished_at or '-' }}</td>
+                    <td class="duration-cell" data-seconds="{{ pipeline.duration or 0 }}"></td>
+                    <td>
+                        {% if normalized_status == 'manual' %}
+                            <a href="{{ url_for('vm.pipeline_approve', pipeline_id=pipeline.pipeline_id) }}" class="btn btn-sm btn-primary">Approve</a>
+                        {% else %}
+                            <button class="btn btn-sm btn-secondary" disabled>Approve</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- Pagination Controls -->
+        <div class="pagination-controls">
+            <div class="entries-control">
+                <span>Show</span>
+                <select class="entries-select" id="entriesPerPage">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+                <span>entries</span>
+            </div>
+
+            <div class="pagination-info" id="paginationInfo">
+                Showing 1 to 10 of 100 entries
+            </div>
+
+            <div class="pagination-nav" id="paginationNav">
+                <button class="pagination-btn" id="firstPage" title="First">&laquo;</button>
+                <button class="pagination-btn" id="prevPage" title="Previous">&lsaquo;</button>
+                <span id="pageNumbers"></span>
+                <button class="pagination-btn" id="nextPage" title="Next">&rsaquo;</button>
+                <button class="pagination-btn" id="lastPage" title="Last">&raquo;</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    class TimezoneManager {
+        constructor() {
+            this.currentTimezone = 'local';
+            this.timezoneSelect = document.getElementById('timezoneSelect');
+            this.bindEvents();
+            this.detectUserTimezone();
+            this.updateAllDateCells(); // 初始化时格式化所有日期
+        }
+
+        bindEvents() {
+            this.timezoneSelect.addEventListener('change', (e) => {
+                this.currentTimezone = e.target.value;
+                this.updateAllDateCells();
+            });
+        }
+
+        detectUserTimezone() {
+            try {
+                const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                // 更新 Local time 选项显示用户的实际时区
+                const localOption = this.timezoneSelect.querySelector('option[value="local"]');
+                if (localOption) {
+                    localOption.textContent = `Local time (${userTimezone})`;
+                }
+            } catch (e) {
+                console.warn('Cannot detect user timezone:', e);
+            }
+        }
+
+        // 時區轉換
+        formatDateTime(datetimeStr, timezone) {
+            if (!datetimeStr || datetimeStr === '-' || datetimeStr === 'None' ) return '-';
+
+            try {
+                // 假設輸入是 UTC 时间格式 (ISO string)
+                const date = new Date(datetimeStr);
+                if (isNaN(date.getTime())) return datetimeStr; // 如果不是有效日期，返回原始字符串
+
+                let options = {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                };
+
+                let formattedDate;
+
+                if (timezone === 'local') {
+                    // 使用 Local Time
+                    formattedDate = date.toLocaleString('en-CA', options);
+                } else {
+                    // 使用指定時區
+                    options.timeZone = timezone;
+                    formattedDate = date.toLocaleString('en-CA', options);
+                }
+
+                // 格式化為 YYYY-MM-DD HH:mm:ss 格式
+                return formattedDate.replace(',', '');
+            } catch (e) {
+                console.error('Error formatting date:', e);
+                return datetimeStr;
+            }
+        }
+
+        updateAllDateCells() {
+            const dateCells = document.querySelectorAll('.date-cell[data-datetime]');
+
+            dateCells.forEach(cell => {
+                const originalDateTime = cell.getAttribute('data-datetime');
+                const formattedDateTime = this.formatDateTime(originalDateTime, this.currentTimezone);
+                cell.textContent = formattedDateTime;
+            });
+        }
+
+        // 供外部調用的方法，用在添加新行時去格式化時間
+        formatNewDateTime(datetimeStr) {
+            return this.formatDateTime(datetimeStr, this.currentTimezone);
+        }
+    }
+
+    class TablePagination {
+        constructor() {
+            this.currentPage = 1;
+            this.entriesPerPage = 10;
+            this.allRows = Array.from(document.querySelectorAll('#pipelinesTable tbody tr'));
+            this.filteredRows = [...this.allRows];
+            this.currentFilter = 'all';
+
+            this.initializeElements();
+            this.bindEvents();
+            this.applyFilters();
+            this.updateDisplay();
+
+            // 自動刷新
+            this.startAutoRefresh();
+        }
+
+        initializeElements() {
+            this.searchInput = document.getElementById('searchInput');
+            this.entriesSelect = document.getElementById('entriesPerPage');
+            this.paginationInfo = document.getElementById('paginationInfo');
+            this.pageNumbers = document.getElementById('pageNumbers');
+            this.firstPageBtn = document.getElementById('firstPage');
+            this.prevPageBtn = document.getElementById('prevPage');
+            this.nextPageBtn = document.getElementById('nextPage');
+            this.lastPageBtn = document.getElementById('lastPage');
+            this.filterButtons = document.querySelectorAll('.filter-btn');
+        }
+
+        bindEvents() {
+            this.searchInput.addEventListener('input', () => {
+                this.applyFilters();
+                this.currentPage = 1;
+                this.updateDisplay();
+            });
+
+            this.entriesSelect.addEventListener('change', e => {
+                this.entriesPerPage = parseInt(e.target.value);
+                this.currentPage = 1;
+                this.updateDisplay();
+            });
+
+            this.filterButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    this.filterButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    this.currentFilter = btn.dataset.status;
+                    this.applyFilters();
+                    this.currentPage = 1;
+                    this.updateDisplay();
+                });
+            });
+
+            this.firstPageBtn.addEventListener('click', () => this.goToPage(1));
+            this.prevPageBtn.addEventListener('click', () => this.goToPage(this.currentPage - 1));
+            this.nextPageBtn.addEventListener('click', () => this.goToPage(this.currentPage + 1));
+            this.lastPageBtn.addEventListener('click', () => this.goToPage(this.getTotalPages()));
+        }
+
+        applyFilters() {
+            const searchTerm = this.searchInput.value.toLowerCase();
+
+            this.filteredRows = this.allRows.filter(row => {
+                // Filter by status
+                if (this.currentFilter !== 'all' && row.dataset.status !== this.currentFilter) {
+                    return false;
+                }
+
+                // Filter by search term (search in all columns text)
+                return Array.from(row.cells).some(td =>
+                    td.textContent.toLowerCase().includes(searchTerm)
+                );
+            });
+        }
+
+        updateDisplay() {
+            const totalEntries = this.filteredRows.length;
+            const totalPages = this.getTotalPages();
+
+            if (this.currentPage > totalPages) {
+                this.currentPage = totalPages || 1;
+            }
+            const start = (this.currentPage - 1) * this.entriesPerPage;
+            const end = start + this.entriesPerPage;
+
+            this.allRows.forEach(row => row.style.display = 'none');
+            this.filteredRows.slice(start, end).forEach(row => row.style.display = '');
+
+            // Update pagination info text
+            const showingStart = totalEntries === 0 ? 0 : start + 1;
+            const showingEnd = Math.min(end, totalEntries);
+            this.paginationInfo.textContent = `Showing ${showingStart} to ${showingEnd} of ${totalEntries} entries`;
+
+            // Update pagination buttons state
+            this.firstPageBtn.disabled = this.currentPage === 1;
+            this.prevPageBtn.disabled = this.currentPage === 1;
+            this.nextPageBtn.disabled = this.currentPage === totalPages || totalPages === 0;
+            this.lastPageBtn.disabled = this.currentPage === totalPages || totalPages === 0;
+
+            // Update page numbers display
+            this.renderPageNumbers(totalPages);
+
+            // Update duration display
+            this.updateDurationCells();
+        }
+
+        // Auto refresh
+        startAutoRefresh() {
+            const intervalMs = 3000; // setup refresh seconds (unit: ms)
+            const intervalSec = intervalMs / 1000;
+
+            setInterval(() => {
+                const refreshStatusEl = document.getElementById('refreshStatus');
+                const now = new Date().toLocaleTimeString();
+                if (refreshStatusEl) {
+                    refreshStatusEl.textContent = `Refreshing data every ${intervalSec} seconds... (${now})`;
+                }
+
+                console.log(`Refreshing data every ${intervalSec} seconds...`);
+                this.refreshData();
+            }, intervalMs);
+        }
+
+        refreshData() {
+            fetch(window.location.href) // 重新取得當前頁面的 HTML
+                .then(response => response.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const newTbody = doc.querySelector('#pipelinesTable tbody');
+
+                    if (newTbody) {
+                        const tbody = document.querySelector('#pipelinesTable tbody');
+                        tbody.innerHTML = newTbody.innerHTML;
+
+                        // 重新收集 rows
+                        this.allRows = Array.from(document.querySelectorAll('#pipelinesTable tbody tr'));
+                        this.applyFilters();
+                        this.updateDisplay();
+                    }
+                })
+                .catch(error => {
+                    console.error('刷新資料失敗:', error);
+                });
+        }
+
+        getTotalPages() {
+            return Math.ceil(this.filteredRows.length / this.entriesPerPage);
+        }
+
+        goToPage(page) {
+            const totalPages = this.getTotalPages();
+            if (page < 1) page = 1;
+            if (page > totalPages) page = totalPages;
+            if (page === this.currentPage) return;
+
+            this.currentPage = page;
+            this.updateDisplay();
+        }
+
+        renderPageNumbers(totalPages) {
+            this.pageNumbers.innerHTML = '';
+
+            const maxPagesToShow = 7;
+            let startPage = Math.max(this.currentPage - Math.floor(maxPagesToShow / 2), 1);
+            let endPage = startPage + maxPagesToShow - 1;
+
+            if (endPage > totalPages) {
+                endPage = totalPages;
+                startPage = Math.max(endPage - maxPagesToShow + 1, 1);
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                const btn = document.createElement('button');
+                btn.textContent = i;
+                btn.classList.add('pagination-btn');
+                if (i === this.currentPage) {
+                    btn.classList.add('active');
+                    btn.disabled = true;
+                }
+                btn.addEventListener('click', () => this.goToPage(i));
+                this.pageNumbers.appendChild(btn);
+            }
+        }
+
+        // Convert duration to display time
+        updateDurationCells() {
+            document.querySelectorAll('.duration-cell').forEach(cell => {
+                const seconds = parseInt(cell.dataset.seconds, 10);
+
+                if (isNaN(seconds) || seconds <= 0) {
+                    cell.textContent = '-';
+                } else {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    cell.textContent = `${mins > 0 ? `${mins}m` : ''}${secs}s`;
+                }
+            });
+        }
+
+    }
+
+    // 初始化页面
+    // document.addEventListener('DOMContentLoaded', () => {
+    //     new TablePagination();
+    // });
+
+    // 初始化页面
+    document.addEventListener('DOMContentLoaded', () => {
+        // 初始化 TimeZone
+        const timezoneManager = new TimezoneManager();
+
+        // 初始化表格分頁
+        const tablePagination = new TablePagination();
+
+        // 將 TimeZone 掛載到 Global, 給其他 Module 使用
+        window.timezoneManager = timezoneManager;
+        window.tablePagination = tablePagination;
+
+    });
+
+</script>
+
+{% endblock %}

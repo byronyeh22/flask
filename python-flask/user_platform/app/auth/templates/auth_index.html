@@ -1,0 +1,650 @@
+{% extends "base.html" %}
+{% block title %}User Platform{% endblock %}
+{% block content %}
+<style>
+    :root {
+        --primary-color: #2c3e50;
+        --accent-color: #3498db;
+        --success-color: #27ae60;
+        --warning-color: #f39c12;
+        --danger-color: #e74c3c;
+        --light-bg: #f8f9fa;
+        --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        --border-radius: 8px;
+    }
+
+    .page-header {
+        background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%);
+        color: white;
+        padding: 2rem 0;
+        margin: -15px -15px 30px -15px;
+        border-radius: var(--border-radius) var(--border-radius) 0 0;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .page-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 100px;
+        height: 100px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        transform: translate(30px, -30px);
+    }
+
+    .page-header h1 {
+        margin: 0;
+        font-weight: 300;
+        font-size: 2.5rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .page-header .subtitle {
+        opacity: 0.9;
+        margin-top: 0.5rem;
+        font-size: 1.1rem;
+    }
+
+    .stats-row {
+        margin-bottom: 2rem;
+    }
+
+    .stat-card {
+        background: white;
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+        box-shadow: var(--card-shadow);
+        border-left: 4px solid var(--accent-color);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        text-align: center;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .stat-card .stat-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: var(--primary-color);
+        margin: 0;
+    }
+
+    .stat-card .stat-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-top: 0.5rem;
+    }
+
+    .table-container {
+        background: white;
+        border-radius: var(--border-radius);
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+        margin-top: 2rem;
+    }
+
+    .table-header {
+        background: var(--light-bg);
+        padding: 1.5rem;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .table-header h3 {
+        margin: 0;
+        color: var(--primary-color);
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .search-controls {
+        margin-top: 1rem;
+    }
+
+    .search-input {
+        border: 2px solid #e9ecef;
+        border-radius: var(--border-radius);
+        padding: 0.75rem 1rem;
+        transition: border-color 0.2s ease;
+    }
+
+    .search-input:focus {
+        border-color: var(--accent-color);
+        box-shadow: none;
+    }
+
+    .filter-btn {
+        padding: 0.5rem 1rem;
+        border: 2px solid #e9ecef;
+        background: white;
+        color: #6c757d;
+        border-radius: var(--border-radius);
+        transition: all 0.2s ease;
+        margin-right: 0.5rem;
+    }
+
+    .filter-btn:hover, .filter-btn.active {
+        background: var(--accent-color);
+        color: white;
+        border-color: var(--accent-color);
+    }
+
+    /* 分頁控制區域 */
+    .pagination-controls {
+        background: var(--light-bg);
+        padding: 1rem 1.5rem;
+        border-top: 1px solid #dee2e6;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .entries-control {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+        color: #6c757d;
+    }
+
+    .entries-select {
+        padding: 0.4rem 0.8rem;
+        border: 1px solid #dee2e6;
+        border-radius: var(--border-radius);
+        background: white;
+        font-size: 0.9rem;
+    }
+
+    .entries-select:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+
+    .pagination-info {
+        font-size: 0.9rem;
+        color: #6c757d;
+    }
+
+    .pagination-nav {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    .pagination-btn {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid #dee2e6;
+        background: white;
+        color: #6c757d;
+        border-radius: var(--border-radius);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.85rem;
+        min-width: 35px;
+        text-align: center;
+    }
+
+    .pagination-btn:hover:not(:disabled) {
+        background: var(--accent-color);
+        color: white;
+        border-color: var(--accent-color);
+    }
+
+    .pagination-btn.active {
+        background: var(--accent-color);
+        color: white;
+        border-color: var(--accent-color);
+    }
+
+    .pagination-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .custom-table {
+        margin: 0;
+        border: none;
+    }
+
+    .custom-table thead th {
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 1rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+        letter-spacing: 0.5px;
+    }
+
+    .custom-table tbody td {
+        padding: 1rem;
+        vertical-align: middle;
+        border-bottom: 1px solid #f1f3f4;
+    }
+
+    .custom-table tbody tr:hover {
+        background-color: rgba(52, 152, 219, 0.05);
+    }
+
+    .status-badge {
+        padding: 0.4rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .status-to-do { background: rgba(241, 196, 15, 0.2); color: #f39c12; }
+    .status-in-progress { background: rgba(52, 152, 219, 0.2); color: #3498db; }
+    .status-closed { background: rgba(39, 174, 96, 0.2); color: #27ae60; }
+    .status-done { background: rgba(39, 174, 96, 0.2); color: #27ae60; }
+    .status-blocked { background: rgba(231, 76, 60, 0.2); color: #e74c3c; }
+    .status-pending { background: rgba(241, 196, 15, 0.2); color: #f39c12; }
+
+    .ticket-link {
+        color: var(--accent-color);
+        text-decoration: none;
+        font-weight: 500;
+        transition: color 0.2s ease;
+    }
+
+    .ticket-link:hover {
+        color: var(--primary-color);
+        text-decoration: underline;
+    }
+
+    .workflow-id {
+        font-family: 'Courier New', monospace;
+        background: rgba(52, 152, 219, 0.1);
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.9rem;
+    }
+
+    .description-cell {
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .description-cell:hover {
+        white-space: normal;
+        overflow: visible;
+        background: rgba(52, 152, 219, 0.05);
+        padding: 0.5rem;
+        border-radius: 4px;
+    }
+
+    @media (max-width: 768px) {
+        .page-header h1 {
+            font-size: 1.8rem;
+        }
+
+        .stat-card {
+            margin-bottom: 1rem;
+        }
+
+        .custom-table {
+            font-size: 0.9rem;
+        }
+
+        .description-cell {
+            max-width: 150px;
+        }
+
+        .pagination-controls {
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .pagination-nav {
+            justify-content: center;
+        }
+    }
+</style>
+
+<div class="container-lg">
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container-lg">
+            <h1>
+                <i class="fas fa-shield-alt"></i>
+                Welcome to SRA Console
+            </h1>
+            <p class="subtitle">Central platform for managing FortiGate Policies and Accounts</p>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row stats-row">
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card">
+                <div class="stat-number" id="totalTickets">{{ jira_tickets|length }}</div>
+                <div class="stat-label">Total Tickets</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card">
+                <div class="stat-number" id="openTickets">
+                    {{ jira_tickets | selectattr('status', 'in', ['TO DO', 'to-do', 'To Do']) | list | length }}
+                </div>
+                <div class="stat-label">TO DO</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card">
+                <div class="stat-number" id="inProgressTickets">
+                    {{ jira_tickets | selectattr('status', 'in', ['In Progress', 'In-Progress']) | list | length }}
+                </div>
+                <div class="stat-label">In Progress</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <div class="stat-card">
+                <div class="stat-number" id="closedTickets">
+                    {{ jira_tickets | selectattr('status', 'in', ['Closed', 'Done']) | list | length }}
+                </div>
+                <div class="stat-label">Closed</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jira Tickets Table -->
+    <div class="table-container">
+        <div class="table-header">
+            <h3>
+                <i class="fas fa-ticket-alt"></i>
+                Jira Tickets
+            </h3>
+
+            <!-- Search and Filter Controls -->
+            <div class="row search-controls">
+                <div class="col-md-8">
+                    <input type="text" class="form-control search-input" placeholder="Search tickets..." id="searchInput">
+                </div>
+                <div class="col-md-4">
+                    <div class="d-flex flex-wrap">
+                        <button class="filter-btn active" data-status="all">All</button>
+                        <button class="filter-btn" data-status="to-do">TO DO</button>
+                        <button class="filter-btn" data-status="in-progress">In Progress</button>
+                        <button class="filter-btn" data-status="closed">Closed</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table custom-table" id="ticketsTable">
+                <thead>
+                    <tr>
+                        <th><i class="fas fa-code"></i> Workflow ID</th>
+                        <th><i class="fas fa-ticket-alt"></i> Ticket ID</th>
+                        <th><i class="fas fa-list"></i> Summary</th>
+                        <th><i class="fas fa-align-left"></i> Description</th>
+                        <th><i class="fas fa-info-circle"></i> Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ticket in jira_tickets %}
+                    {% set raw_status = ticket.status.lower() %}
+                    {% if raw_status in ['to do', 'to-do'] %}
+                        {% set normalized_status = 'to-do' %}
+                    {% elif raw_status in ['In progress', 'in-progress'] %}
+                        {% set normalized_status = 'in-progress' %}
+                    {% elif raw_status in ['closed', 'done'] %}
+                        {% set normalized_status = 'closed' %}
+                    {% else %}
+                        {% set normalized_status = raw_status.replace(' ', '-') %}
+                    {% endif %}
+                    <tr data-status="{{ normalized_status }}">
+                        <td><span class="workflow-id">{{ ticket.workflow_id }}</span></td>
+                        <td><a href="{{ ticket.url }}" target="_blank" class="ticket-link">{{ ticket.ticket_id }}</a></td>
+                        <td>{{ ticket.summary }}</td>
+                        <td class="description-cell" title="{{ ticket.description }}">{{ ticket.description }}</td>
+                        <td>
+                            <span class="status-badge status-{{ normalized_status }}">{{ ticket.status }}</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="pagination-controls">
+            <div class="entries-control">
+                <span>Show</span>
+                <select class="entries-select" id="entriesPerPage">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+                <span>entries</span>
+            </div>
+
+            <div class="pagination-info" id="paginationInfo">
+                Showing 1 to 10 of 100 entries
+            </div>
+
+            <div class="pagination-nav" id="paginationNav">
+                <button class="pagination-btn" id="firstPage" title="First">««</button>
+                <button class="pagination-btn" id="prevPage" title="Previous">‹</button>
+                <div id="pageNumbers"></div>
+                <button class="pagination-btn" id="nextPage" title="Next">›</button>
+                <button class="pagination-btn" id="lastPage" title="Last">»»</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    class TablePagination {
+        constructor() {
+            this.currentPage = 1;
+            this.entriesPerPage = 10;
+            this.allRows = Array.from(document.querySelectorAll('#ticketsTable tbody tr'));
+            this.filteredRows = [...this.allRows];
+            
+            this.initializeElements();
+            this.bindEvents();
+            this.updateDisplay();
+        }
+
+        initializeElements() {
+            this.searchInput = document.getElementById('searchInput');
+            this.entriesSelect = document.getElementById('entriesPerPage');
+            this.paginationInfo = document.getElementById('paginationInfo');
+            this.pageNumbers = document.getElementById('pageNumbers');
+            this.firstPageBtn = document.getElementById('firstPage');
+            this.prevPageBtn = document.getElementById('prevPage');
+            this.nextPageBtn = document.getElementById('nextPage');
+            this.lastPageBtn = document.getElementById('lastPage');
+        }
+
+        bindEvents() {
+            // 搜尋功能
+            this.searchInput.addEventListener('input', () => {
+                this.applyFilters();
+                this.currentPage = 1;
+                this.updateDisplay();
+            });
+
+            // 每頁條目數選擇
+            this.entriesSelect.addEventListener('change', (e) => {
+                this.entriesPerPage = parseInt(e.target.value);
+                this.currentPage = 1;
+                this.updateDisplay();
+            });
+
+            // 篩選按鈕
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    this.applyFilters();
+                    this.currentPage = 1;
+                    this.updateDisplay();
+                });
+            });
+
+            // 分頁按鈕
+            this.firstPageBtn.addEventListener('click', () => this.goToPage(1));
+            this.prevPageBtn.addEventListener('click', () => this.goToPage(this.currentPage - 1));
+            this.nextPageBtn.addEventListener('click', () => this.goToPage(this.currentPage + 1));
+            this.lastPageBtn.addEventListener('click', () => this.goToPage(this.getTotalPages()));
+        }
+
+        applyFilters() {
+            const searchTerm = this.searchInput.value.toLowerCase();
+            const activeFilter = document.querySelector('.filter-btn.active').dataset.status;
+
+            this.filteredRows = this.allRows.filter(row => {
+                const text = row.textContent.toLowerCase();
+                const status = row.dataset.status;
+
+                // 搜尋篩選
+                const matchSearch = text.includes(searchTerm);
+
+                // 狀態篩選
+                let matchFilter = false;
+                if (activeFilter === 'all') {
+                    matchFilter = true;
+                } else if (activeFilter === 'to-do' && status === 'to-do') {
+                    matchFilter = true;
+                } else if (activeFilter === 'in-progress' && status === 'in-progress') {
+                    matchFilter = true;
+                } else if (activeFilter === 'closed' && status === 'closed') {
+                    matchFilter = true;
+                }
+
+                return matchSearch && matchFilter;
+            });
+        }
+
+        getTotalPages() {
+            return Math.ceil(this.filteredRows.length / this.entriesPerPage);
+        }
+
+        goToPage(page) {
+            const totalPages = this.getTotalPages();
+            if (page < 1 || page > totalPages) return;
+            
+            this.currentPage = page;
+            this.updateDisplay();
+        }
+
+        updateDisplay() {
+            this.updateTableRows();
+            this.updatePaginationInfo();
+            this.updatePaginationNav();
+            this.updateStats();
+        }
+
+        updateTableRows() {
+            // 隱藏所有行
+            this.allRows.forEach(row => row.style.display = 'none');
+
+            // 計算顯示範圍
+            const startIndex = (this.currentPage - 1) * this.entriesPerPage;
+            const endIndex = startIndex + this.entriesPerPage;
+
+            // 顯示當前頁的行
+            this.filteredRows.slice(startIndex, endIndex).forEach(row => {
+                row.style.display = '';
+            });
+        }
+
+        updatePaginationInfo() {
+            const total = this.filteredRows.length;
+            const startIndex = total === 0 ? 0 : (this.currentPage - 1) * this.entriesPerPage + 1;
+            const endIndex = Math.min(startIndex + this.entriesPerPage - 1, total);
+            
+            this.paginationInfo.textContent = `Showing ${startIndex} to ${endIndex} of ${total} entries`;
+        }
+
+        updatePaginationNav() {
+            const totalPages = this.getTotalPages();
+            
+            // 更新按鈕狀態
+            this.firstPageBtn.disabled = this.currentPage === 1;
+            this.prevPageBtn.disabled = this.currentPage === 1;
+            this.nextPageBtn.disabled = this.currentPage === totalPages || totalPages === 0;
+            this.lastPageBtn.disabled = this.currentPage === totalPages || totalPages === 0;
+
+            // 更新頁碼按鈕
+            this.updatePageNumbers(totalPages);
+        }
+
+        updatePageNumbers(totalPages) {
+            this.pageNumbers.innerHTML = '';
+            
+            if (totalPages === 0) return;
+
+            // 計算顯示的頁碼範圍
+            let startPage = Math.max(1, this.currentPage - 2);
+            let endPage = Math.min(totalPages, this.currentPage + 2);
+
+            // 調整範圍以顯示最多5個頁碼
+            if (endPage - startPage < 4) {
+                if (startPage === 1) {
+                    endPage = Math.min(totalPages, startPage + 4);
+                } else if (endPage === totalPages) {
+                    startPage = Math.max(1, endPage - 4);
+                }
+            }
+
+            // 添加頁碼按鈕
+            for (let i = startPage; i <= endPage; i++) {
+                const pageBtn = document.createElement('button');
+                pageBtn.className = `pagination-btn ${i === this.currentPage ? 'active' : ''}`;
+                pageBtn.textContent = i;
+                pageBtn.addEventListener('click', () => this.goToPage(i));
+                this.pageNumbers.appendChild(pageBtn);
+            }
+        }
+
+        updateStats() {
+            let total = 0;
+            let toDo = 0;
+            let inProgress = 0;
+            let closed = 0;
+
+            this.filteredRows.forEach(row => {
+                const status = row.dataset.status;
+                total++;
+                if (status === 'to-do') toDo++;
+                else if (status === 'in-progress') inProgress++;
+                else if (status === 'closed') closed++;
+            });
+
+            document.getElementById('totalTickets').textContent = total;
+            document.getElementById('openTickets').textContent = toDo;
+            document.getElementById('inProgressTickets').textContent = inProgress;
+            document.getElementById('closedTickets').textContent = closed;
+        }
+    }
+
+    // 初始化分頁功能
+    document.addEventListener('DOMContentLoaded', function() {
+        new TablePagination();
+    });
+</script>
+
+{% endblock %}

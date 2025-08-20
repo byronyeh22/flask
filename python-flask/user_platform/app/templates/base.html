@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}User Platform{% endblock %}</title>
+    <!-- CSS Dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/flowbite@1.6.5/dist/flowbite.min.css" rel="stylesheet" />
+    <!-- JavaScript Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flowbite@1.6.5/dist/flowbite.min.js"></script>
+    <style>
+      /* General Body Styles */
+      body {
+        background-color: #ffffff;
+        color: #212529;
+        margin: 0;
+        overflow-x: hidden;
+      }
+
+      /* Main Content Styles */
+      .main-content {
+        margin-left: 280px;
+        transition: margin-left 0.3s ease;
+        padding: 2rem;
+      }
+      .main-content.collapsed {
+        margin-left: 60px;
+      }
+
+      /* Sidebar Styles */
+      .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 280px;
+        background-color: #ffffff;
+        padding: 1rem;
+        white-space: nowrap;
+        overflow-x: hidden;
+        z-index: 1000;
+        transition: width 0.3s ease;
+      }
+      .sidebar.collapsed {
+        width: 60px;
+        padding: 1rem 0.5rem;
+      }
+      .sidebar.collapsed .sidebar-toggle-item {
+        display: none;
+      }
+      .sidebar-toggle {
+        position: absolute;
+        top: 1rem;
+        right: -1.5rem;
+        background-color: #1f6feb;
+        color: white;
+        border-radius: 0 0.3rem 0.3rem 0;
+        border: none;
+        padding: 0.3rem 0.6rem;
+        font-size: 1rem;
+        cursor: pointer;
+        z-index: 1100;
+      }
+
+      /* Form and Input Styles */
+      .form-control,
+      .form-select {
+        background-color: #ffffff;
+        color: #212529;
+        border: 1px solid #ced4da;
+      }
+      .form-control::placeholder {
+        color: #6c757d;
+      }
+      .form-control:focus,
+      .form-select:focus {
+        border-color: #58a6ff;
+        box-shadow: 0 0 0 0.2rem rgba(88, 166, 255, 0.25);
+      }
+
+      /* Button Styles */
+      .btn-outline-danger {
+        color: #dc3545;
+        border-color: #dc3545;
+      }
+      .btn-outline-danger:hover {
+        background-color: #dc3545;
+        color: white;
+      }
+      .btn-primary {
+        background-color: #238636;
+        border-color: #2ea043;
+      }
+      .btn-primary:hover {
+        background-color: #2ea043;
+        border-color: #3fb950;
+      }
+      .btn-secondary {
+        background-color: #6c757d;
+        border-color: #6c757d;
+        color: #ffffff;
+      }
+      .btn-secondary:hover {
+        background-color: #5c636a;
+        border-color: #5c636a;
+      }
+
+      /* Policy Block Styles */
+      .policy-block {
+        overflow-x: auto;
+        white-space: pre-wrap;
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        font-size: 0.95rem;
+        margin-bottom: 1rem;
+      }
+
+      /* Sidebar Active State */
+      .sidebar .active {
+        background-color: #e9ecef !important;
+        color: #212529 !important;
+      }
+      .sidebar .active svg {
+        color: #212529 !important;
+      }
+
+      /* Submenu Styles */
+      .sidebar .sub-menu a {
+        padding-left: 43px !important;
+      }
+
+      /* Responsive Styles */
+      @media (max-width: 576px) {
+        .sidebar {
+          position: absolute;
+          height: 100vh;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar fixed top-0 left-0 z-20 flex flex-col flex-shrink-0 w-64 h-full pt-16 font-normal duration-75 lg:flex transition-width" aria-label="Sidebar">
+      <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+      <div class="relative flex flex-col flex-1 min-h-0 pt-0 bg-[#ffffff] border-r border-[#dee2e6]">
+        <div class="flex flex-col flex-1 pt-5 pb-4 overflow-y-auto">
+          <div class="flex-1 px-1 space-y-1 bg-[#ffffff] divide-y divide-[#dee2e6]">
+            <ul class="pb-2 space-y-2">
+              <!-- Dashboard Menu Item -->
+              <li>
+                <a href="/" class="flex items-center p-2 text-base text-[#212529] rounded-lg hover:bg-[#e9ecef] group {% if request.path == '/' %} active {% endif %}">
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z"></path>
+                    <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z"></path>
+                  </svg>
+                  <span class="ml-3 sidebar-toggle-item">Dashboard</span>
+                </a>
+              </li>
+              <!-- Fortigate Menu Item with Submenu -->
+              <li>
+                <button type="button" class="flex items-center w-full p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if 'forti_policy' in request.path %} active {% endif %}" aria-controls="fortigateSub" data-collapse-toggle="fortigateSub">
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 18 18">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.143 1H1.857A.857.857 0 0 0 1 1.857v4.286c0 .473.384.857.857.857h4.286A.857.857 0 0 0 7 6.143V1.857A.857.857 0 0 0 6.143 1Zm10 0h-4.286a.857.857 0 0 0-.857.857v4.286c0 .473.384.857.857.857h4.286A.857.857 0 0 0 17 6.143V1.857A.857.857 0 0 0 16.143 1Zm-10 10H1.857a.857.857 0 0 0-.857.857v4.286c0 .473.384.857.857.857h4.286A.857.857 0 0 0 7 16.143v-4.286A.857.857 0 0 0 6.143 11Zm10 0h-4.286a.857.857 0 0 0-.857.857v4.286c0 .473.384.857.857.857h4.286a.857.857 0 0 0 .857-.857v-4.286a.857.857 0 0 0-.857-.857Z" />
+                  </svg>
+                  <span class="flex-1 ml-3 text-left whitespace-nowrap sidebar-toggle-item">Fortigate</span>
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                  </svg>
+                </button>
+                <ul id="fortigateSub" class="sub-menu py-2 space-y-2 {% if 'forti_policy' in request.path %} block {% else %} hidden {% endif %}">
+                  <li>
+                    <a href="/forti_policy" class="flex items-center p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if request.path == '/forti_policy' %} active {% endif %}">
+                      Policy Control
+                    </a>
+                  </li>
+                </ul>
+              </li>
+              <!-- Cisco Menu Item -->
+              <li>
+                <a href="#" class="flex items-center p-2 text-base text-[#212529] rounded-lg hover:bg-[#e9ecef] group">
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path>
+                    <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span class="ml-3 sidebar-toggle-item">Cisco</span>
+                </a>
+              </li>
+              <!-- Vsphere Menu Item with Submenu -->
+              <li>
+                <button type="button" class="flex items-center w-full p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if '/vsphere' in request.path %} active {% endif %}" aria-controls="vsphereSub" data-collapse-toggle="vsphereSub">
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" d="M8.34 1.804A1 1 0 019.32 1h1.36a1 1 0 01.98.804l.295 1.473c.497.144.971.342 1.416.587l1.25-.834a1 1 0 011.262.125l.962.962a1 1 0 01.125 1.262l-.834 1.25c.245.445.443.919.587 1.416l1.473.294a1 1 0 01.804.98v1.361a1 1 0 01-.804.98l-1.473.295a6.95 6.95 0 01-.587 1.416l.834 1.25a1 1 0 01-.125 1.262l-.962.962a1 1 0 01-1.262.125l-1.25-.834a6.953 6.953 0 01-1.416.587l-.294 1.473a1 1 0 01-.98.804H9.32a1 1 0 01-.98-.804l-.295-1.473a6.957 6.957 0 01-1.416-.587l-1.25.834a1 1 0 01-1.262-.125l-.962-.962a1 1 0 01-.125-1.262l.834-1.25a6.957 6.957 0 01-.587-1.416l-1.473-.294A1 1 0 011 10.68V9.32a1 1 0 01.804-.98l1.473-.295c.144-.497.342-.971.587-1.416l-.834-1.25a1 1 0 01.125-1.262l.962-.962A1 1 0 015.38 3.03l1.25.834a6.957 6.957 0 011.416-.587l.294-1.473zM13 10a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                  </svg>
+                  <span class="flex-1 ml-3 text-left whitespace-nowrap sidebar-toggle-item">Vsphere</span>
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                  </svg>
+                </button>
+                <ul id="vsphereSub" class="sub-menu py-2 space-y-2 {% if '/vsphere' in request.path %} block {% else %} hidden {% endif %}">
+                  <li>
+                    <a href="/vsphere/overview" class="flex items-center p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if request.path == '/vsphere/overview' %} active {% endif %}">
+                      Overview
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/vsphere/vm" class="flex items-center p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if request.path == '/vsphere/vm' %} active {% endif %}">
+                      Virtual Machine
+                    </a>
+                  </li>
+                </ul>
+              </li>
+              <!-- Logging Menu Item with Submenu -->
+              <li>
+                <button type="button" class="flex items-center w-full p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if 'log' in request.path %} active {% endif %}" aria-controls="logSub" data-collapse-toggle="logSub">
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z"></path>
+                  </svg>
+                  <span class="flex-1 ml-3 text-left whitespace-nowrap sidebar-toggle-item">Logging</span>
+                  <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                  </svg>
+                </button>
+                <ul id="logSub" class="sub-menu py-2 space-y-2 {% if 'log' in request.path %} block {% else %} hidden {% endif %}">
+                  <li>
+                    <a href="/log" class="flex items-center p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if request.path == '/log' %} active {% endif %}">
+                      Operation Log
+                    </a>
+                  </li>
+                </ul>
+              </li>
+
+              <hr class="my-2 border-t border-[#dee2e6]">
+
+              <!-- Logout Menu Item -->
+              <li class="mt-auto">
+                <a href="/logout" class="flex items-center p-2 text-base text-[#dc3545] rounded-lg hover:bg-[#e9ecef] group {% if request.path == '/logout' %} active {% endif %}">
+                  <svg class="w-6 h-6 text-[#dc3545] group-hover:text-[#dc3545]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l4-4a1 1 0 000-1.414l-4-4a1 1 0 00-1.414 1.414L16.586 9H7a1 1 0 100 2h9.586l-3.293 3.293z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span class="ml-3 sidebar-toggle-item">Logout</span>
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main-content" class="main-content">
+      <!-- User Info and Logout Button -->
+      <div class="d-flex justify-content-end align-items-center mb-3">
+        {% if session.username %}
+          <div class="me-3 d-flex align-items-center text-[#6c757d]">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="#6c757d" class="bi bi-person-circle me-2" viewBox="0 0 16 16">
+              <path d="M11 10c1.657 0 3 1.343 3 3H2c0-1.657 1.343-3 3-3h6z"/>
+              <path fill-rule="evenodd" d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zM4 8a4 4 0 1 1 8 0A4 4 0 0 1 4 8z"/>
+            </svg>
+            <span class="fw-semibold">{{ session.username }}</span>
+          </div>
+        {% endif %}
+        <a href="/logout" class="btn btn-outline-danger btn-sm">Logout</a>
+      </div>
+
+      <!-- Flash Messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="mb-3">
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <!-- Content Block -->
+      {% block content %}{% endblock %}
+    </main>
+
+    <!-- JavaScript for Sidebar Toggle and Dropdown -->
+    <script>
+      function toggleSidebar() {
+        const sidebar = document.getElementById("sidebar");
+        const main = document.getElementById("main-content");
+        sidebar.classList.toggle("collapsed");
+        main.classList.toggle("collapsed");
+      }
+    </script>
+
+    <!-- Additional Scripts Block -->
+    {% block scripts %}{% endblock %}
+  </body>
+</html>
