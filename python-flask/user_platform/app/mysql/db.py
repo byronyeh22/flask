@@ -29,7 +29,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS workflow_runs (
             workflow_id INT AUTO_INCREMENT PRIMARY KEY,
             triggered_by VARCHAR(100),
-            triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status VARCHAR(50) DEFAULT 'PENDING_APPROVAL',
+            failed_message TEXT,
+            request_payload TEXT NULL
         )
     """)
 
@@ -130,9 +133,8 @@ def init_db():
 
             size INT NOT NULL,
             disk_provisioning VARCHAR(50) NOT NULL,
-            thin_provisioned BOOLEAN NOT NULL,
-            eagerly_scrub BOOLEAN NOT NULL,
-
+            status VARCHAR(50) DEFAULT 'PENDING_CREATION',
+            vmdk_path VARCHAR(255) NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
 
