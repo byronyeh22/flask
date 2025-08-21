@@ -35,6 +35,7 @@
 
         <li class="list-group-item">
           <strong>Additional Hard Disks:</strong>
+          {# 註解: 確保從 session/form_data 傳來的陣列可以被正確處理 #}
           {% set sizes = data['create_vm_disk_size[]'] if data['create_vm_disk_size[]'] is sequence else [data['create_vm_disk_size[]']] if data['create_vm_disk_size[]'] else [] %}
           {% set provs = data['create_vm_disk_provisioning[]'] if data['create_vm_disk_provisioning[]'] is sequence else [data['create_vm_disk_provisioning[]']] if data['create_vm_disk_provisioning[]'] else [] %}
 
