@@ -1,0 +1,182 @@
+新版 VM 請求工作流程
+---
+graph TD
+    %% 階段一：建立請求與草稿管理
+    subgraph 階段一：建立請求與草稿管理
+        A[使用者填寫表單] -->|按下 '儲存為草稿'| B{後端儲存請求};
+        B --> C[DB: workflow_runs\n狀態: DRAFT];
+    end
+
+    %% 階段二：審批與自動化流程觸發
+    subgraph 階段二：審批與自動化流程觸發
+        C --> D[Overview 頁面];
+        D -->|草稿狀態時| E{使用者動作};
+        E -->|點擊 'Edit'| F[重新填寫表單];
+        F --> A;
+        E -->|點擊 'Delete'| G[DB: 軟刪除 workflow_runs];
+        E -->|點擊 'Review' 或 'Submit'| H{提交審批};
+        H --> I[DB: 更新 workflow_runs\n狀態: PENDING_APPROVAL];
+        I --> J[後端：觸發 Jira & GitLab];
+        J --> K[DB: 寫入 Jira & GitLab 資料];
+        K --> L[Overview 頁面\n顯示 Pipeline 狀態];
+    end
+
+    %% 階段三：正式執行與最終狀態
+    subgraph 階段三：正式執行與最終狀態
+        L -->|狀態為 PENDING_APPROVAL| M{使用者動作};
+        M --> N[點擊 'CANCELLED'];
+        N --> O[DB: 更新 workflow_runs\n狀態: CANCELLED];
+        L -->|狀態為 MANUAL| P{審批者動作};
+        P --> Q[點擊 'Approve'];
+        P --> R[點擊 'RETURNED'];
+        R --> S[DB: 更新 workflow_runs\n狀態: RETURNED];
+        Q --> T[後端：更新 workflow_runs\n(approved_by/at, IN_PROGRESS)];
+        T --> U[後端：執行 GitLab Manual Job];
+        U --> V{Pipeline 執行結果};
+        V -->|成功| W[DB: 更新 workflow_runs\n狀態: SUCCESS];
+        V -->|失敗| X[DB: 更新 workflow_runs\n狀態: FAILED];
+    end
+
+
+這個流程的核心是將請求的生命週期分為三個主要階段：請求草稿、審批與提交、以及最終執行。
+
+階段一：請求草稿與管理 (Draft & Management)
+
+建立請求草稿：
+使用者在 Create / Update 表單頁面中填寫 VM 的設定。
+按下一個新的按鈕（例如「儲存為草稿 (Save to Draft)」）。
+後端操作：後端路由會將表單內容作為 JSON 格式，儲存到 workflow_runs 資料表的 request_payload 欄位中。
+此時，workflow_runs.status 被設定為 DRAFT。
+同時，created_by 和 created_at 欄位會記錄下發起人的資訊和時間。
+
+管理草稿：
+整合到現有的 overview_index.html 頁面中，以一個更全面的方式來顯示所有請求的狀態。
+在這些草稿記錄旁邊，會提供三個操作按鈕：
+Edit：點擊後，後端會從 workflow_runs.request_payload 讀取資料，並用其內容重新填寫表單，讓使用者進行修改。
+Review：點擊後，進入一個唯讀的預覽頁面，顯示請求的完整細節。
+Delete：點擊後，後端會執行軟刪除，將 workflow_runs.deleted_at 欄位填入時間戳，而不是直接刪除資料。
+
+----
+階段二：審批與自動化流程觸發 (Approval & Trigger)
+
+提交審批：
+當使用者確認草稿無誤後，在 Edit 或 Review 頁面點擊「提交 (Submit)」按鈕。
+後端操作：後端路由會將該筆 workflow_runs 記錄的 status 更新為 PENDING_APPROVAL。
+接著，觸發 Jira 和 GitLab 的自動化流程：
+呼叫 Jira API 建立工單。
+呼叫 GitLab API 觸發一個包含 manual 任務的 Pipeline。
+Jira 和 GitLab 的相關 ID 會被寫入 jira_tickets 和 gitlab_pipelines 表格，並與 workflow_id 連結。
+當請求狀態為 PENDING_APPROVAL 時，使用者可以取消（CANCELLED）」
+
+進行審批：
+在 overview.html 的「工作流執行狀態」區塊中，會顯示這筆新建立的 Pipeline，其狀態為 manual。
+後端狀態同步：一個排程器會定期檢查 GitLab Pipeline 的狀態，並同步更新 gitlab_pipelines 表格。
+只有當狀態為 manual 時，「Approve」按鈕才會從反灰變為可點擊。
+如果請求被拒絕，一個新的後端路由會將 workflow_runs.status 設為 RETURNED。
+
+---
+階段三：正式執行與最終狀態 (Execution & Final Status)
+
+核准執行：
+審批者在 overview.html 或專門的審批頁面 中，點擊「Approve & Execute」按鈕。
+
+後端操作：
+呼叫 workflow_manager.py 中的 workflow_execute 函式。
+更新 workflow_runs 表，將 approved_by 和 approved_at 欄位填入審批者資訊。
+呼叫 run_manual_job.py 來觸發 GitLab Pipeline 的 manual 任務。
+呼叫 apply_request_to_db 函式，將 workflow_runs.request_payload 的資料正式寫入 vm_configurations 和 vm_disks 等表格。
+更新 workflow_runs.status 為 IN_PROGRESS。
+
+最終狀態：
+GitLab Pipeline 執行成功或失敗後，排程器會將 gitlab_pipelines.status 同步回 SUCCESS 或 FAILED。
+此最終狀態也應同步到 workflow_runs.status 欄位中，標示整個工作流的最終結果。
+這個流程的設計非常完善，將前後端、資料庫與外部服務緊密整合，形成了強大且可追溯的自動化系統。
+
+----
+建議與強化點
+A. 提交邏輯與資料一致性
+提交（DRAFT → PENDING_APPROVAL）時機
+先 建立 Jira，再建立 pipeline。若任一步失敗，回滾為 DRAFT 並寫 failed_message。
+成功後才將 status=PENDING_APPROVAL，並把 approved_by/approved_at=NULL。
+
+批准執行（PENDING_APPROVAL → IN_PROGRESS）
+僅在 pipeline 回報「手動核准可按」時，讓 Approve 變綠。
+按 Approve & Execute 時：
+寫入 approved_by/approved_at；
+觸發 pipeline 往下跑；
+正式落盤：把 request_payload 的資料寫入正式表（vm_configurations / vm_disks 等）。
+若你希望更安全：可在 Approve 時「先行驗證落盤動作」的必要性（例如 schema 檢查、唯一鍵檢查），失敗則提示使用者。
+取消（PENDING_APPROVAL → CANCELLED）
+僅 PENDING_APPROVAL 可取消。補充：記錄 cancelled_by/at（若你想記錄誰取消，可以新增欄位或審計表）。
+退回（→ RETURNED）
+退回為「作廢」，不可再提交。提示使用者需「另開新單」。
+優點：歷史乾淨、避免同單循環不清楚；缺點：需要再填一次表。
+如果你想兼顧體驗，可做「另開新單（以本單 payload 預填）」的捷徑（UI 提供「Create New from this」）。
+
+B. 欄位與審計
+審計表（建議）：
+新增 workflow_run_events：
+id, workflow_id, event_type('CREATE','SUBMIT','APPROVE','RETURN','CANCEL','PIPELINE_UPDATE',...)
+actor、note、created_at
+這樣 overview / 詳細頁可完整展示軌跡，不污染主表。
+payload 型別：你已用 JSON 很好。若常查找特定 key，可加 generated columns + index（例如環境、專案、vm_name_prefix）。
+
+狀態邏輯收斂：
+「Approve 按鈕灰/綠」由後端根據「pipeline 是否進到手動核准節點」決定，再回傳給 UI。避免 UI 自行判斷。
+
+C. Idempotency / 併發
+Idempotency-Key（強烈建議）
+Submit / Approve / Cancel 的 POST API 要支援 idempotency（例如藉由 workflow_id + action + nonce 限制時間窗），避免使用者重複點擊或前端重送導致重複建單/重複觸發。
+
+併發鎖
+對同一 workflow_id 在關鍵轉換加行鎖或樂觀鎖（updated_at 比對），避免多視窗同時操作。
+
+D. Webhook/回呼處理
+GitLab / Jira 回呼
+GitLab job 進度、完成/失敗要有 webhook 或輪詢 worker 更新 gitlab_pipelines 與 workflow_runs.status。
+成功：IN_PROGRESS → SUCCESS；失敗：IN_PROGRESS → FAILED。
+回呼驗證
+驗簽/Token 檢查，避免外部偽造。
+
+E. 權限與可見性
+可操作人
+DRAFT 的 Edit/Delete/Submit：僅 created_by 或具有相應角色的人可按。
+
+Approve：僅具備審批權限的角色可按。
+CANCELLED：僅建立者（或擁有相應權限）在 PENDING_APPROVAL 下可按。
+UI 條件化顯示
+後端回傳 actions_available 給前端（例如 {"edit": true, "delete": false, "review": true, "submit": true, "approve": false, "cancel": true}）。前端只負責渲染，不自行推理。
+
+F. Overview 畫面（先沿用原區塊）
+列表欄位（先不動你的版位，只加必要資訊）：
+workflow_id、summary（可從 payload 拆環境/VM prefix 組字串）、status、created_by、created_at、（可選）approved_by/at、操作欄（由後端決定可見按鈕）。
+
+操作按鈕
+DRAFT：Edit/Delete/Review/Submit
+PENDING_APPROVAL：Review/Cancel/Approve(灰或綠)
+其他：Review
+
+Modal
+Edit/Review 用同一個表單元件，差在唯讀屬性；Submit/Approve/CANCELLED/RETURNED 的確認彈窗由後端返還文案。
+
+G. 落盤時機
+正式落盤放在 Approve & Execute 之後、pipeline 開始前或同步開始時：
+建議「Approve 時」先行校驗 payload 與唯一鍵（如 uq_vm (environment, vm_name_prefix)），校驗通過才允許往下。
+真正寫表：在 IN_PROGRESS 開始時（或 Approve 後立即）。如果你要百分百對齊 pipeline 成功才落盤，也可以等 SUCCESS 再寫（但這樣前端查不到“預期資源”）。
+折衷：Approve 時在暫存表寫一份影子（或 workflow_runs 派生出 snapshot 表），SUCCESS 時再「確定版」落實到 vm_configurations/vm_disks。
+
+後端 API 建議（路由草案）
+POST /vm/request → 建/存 DRAFT（Create/Update 表單 Save to Draft）
+GET /vm/request/<workflow_id> → 取回草稿內容（Edit/Review modal 使用）
+POST /vm/request/<workflow_id>/submit → DRAFT → PENDING_APPROVAL（建 Jira / 建 pipeline）
+POST /vm/request/<workflow_id>/cancel → PENDING_APPROVAL → CANCELLED
+POST /vm/request/<workflow_id>/approve → PENDING_APPROVAL（手動核准節點就緒）→ IN_PROGRESS（Approve & Execute）
+POST /vm/request/<workflow_id>/return → 任何審批階段 → RETURNED（作廢）
+DELETE /vm/request/<workflow_id> → 僅 DRAFT 可刪（軟刪：寫 deleted_at）
+POST /gitlab/webhook → 更新 gitlab_pipelines 與 workflow_runs.status
+每個 POST 建議支援 Idempotency-Key header。
+
+DB 小調整（若你覺得合適）
+workflow_runs：已含 created_by/created_at/approved_by/approved_at/updated_at/deleted_at/status(JSON)，OK。
+若要記錄「退回原因」：加 returned_reason TEXT（或寫在 workflow_run_events.note）。
+gitlab_pipelines：workflow_id + pipeline_id 可考慮 UNIQUE，搭配 upsert。

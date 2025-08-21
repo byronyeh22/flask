@@ -2,14 +2,16 @@
 import json
 from mysql.connector import Error
 import logging
+from flask import session
+from datetime import datetime
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Helper Functions (可以考慮移到一個共用的 utils.py) ---
+# --- Helper Functions ---
 class _Helpers:
     @staticmethod
-    def _first_scalar(value, defailed_messageult=None):
+    def _first_scalar(value, default=None):
         if isinstance(value, list): return value[0] if value else default
         return value if value is not None else default
 
@@ -28,35 +30,89 @@ class _Helpers:
             return default
 
 # --- Workflow Management Functions ---
-def record_pending_request(db_conn, triggered_by, form_data):
+
+def record_pending_request(db_conn, form_data):
     """
-    第一階段：在使用者提交請求時呼叫。
-    建立一個待審批的工作流，並將請求內容存入 request_payload。
+    第一階段：在使用者提交請求時呼叫，建立一個待審批的工作流。
 
     Returns:
         int: 新建立的 workflow_id
     """
     cursor = None
-    payload_json = json.dumps(form_data) # 將整個表單內容序列化
+
+    # 假設使用者名稱儲存在 session 中
+    created_by = session.get("username", "system")
+
+    payload_json = json.dumps(form_data, ensure_ascii=False)
 
     sql = """
-        INSERT INTO workflow_runs (triggered_by, request_payload)
-        VALUES (%s, %s)
+        INSERT INTO workflow_runs (created_by, status, request_payload)
+        VALUES (%s, %s, %s)
     """
     try:
         cursor = db_conn.cursor()
-        cursor.execute(sql, (triggered_by, payload_json))
+        # 將新請求的狀態預設為 'DRAFT'
+        cursor.execute(sql, (created_by, 'DRAFT', payload_json))
         workflow_id = cursor.lastrowid
         db_conn.commit()
         logging.info(f"✅ Successfully recorded pending request for workflow_id: {workflow_id}")
         return workflow_id
     except Error as e:
         logging.error(f"❌ Database error in record_pending_request: {e}")
-        if db_conn.is_connected(): db_conn.rollback()
+        if db_conn and db_conn.is_connected(): db_conn.rollback()
         raise
     finally:
         if cursor: cursor.close()
 
+def update_request_status(db_conn, workflow_id, new_status, approver=None, failed_message=None):
+    """
+    更新工作流狀態，並可選填入審批者與失敗訊息。
+    """
+    cursor = None
+    try:
+        cursor = db_conn.cursor()
+
+        sql = "UPDATE workflow_runs SET status = %s, updated_at = %s"
+        params = [new_status, datetime.now()]
+
+        if approver:
+            sql += ", approved_by = %s, approved_at = %s"
+            params.extend([approver, datetime.now()])
+
+        if failed_message:
+            sql += ", failed_message = %s"
+            params.append(failed_message)
+
+        sql += " WHERE workflow_id = %s"
+        params.append(workflow_id)
+
+        cursor.execute(sql, tuple(params))
+        db_conn.commit()
+        logging.info(f"✅ Successfully updated workflow {workflow_id} status to {new_status}.")
+    except Error as e:
+        logging.error(f"❌ Database error in update_request_status for workflow_id {workflow_id}: {e}")
+        if db_conn and db_conn.is_connected(): db_conn.rollback()
+        raise
+    finally:
+        if cursor: cursor.close()
+
+def delete_request(db_conn, workflow_id):
+    """
+    執行軟刪除，將 deleted_at 欄位填入時間戳。
+    """
+    cursor = None
+    try:
+        cursor = db_conn.cursor()
+        sql = "UPDATE workflow_runs SET deleted_at = %s WHERE workflow_id = %s"
+        cursor.execute(sql, (datetime.now(), workflow_id))
+        db_conn.commit()
+        logging.info(f"✅ Successfully soft-deleted workflow_id: {workflow_id}.")
+    except Error as e:
+        logging.error(f"❌ Database error in delete_request for workflow_id {workflow_id}: {e}")
+        if db_conn and db_conn.is_connected(): db_conn.rollback()
+        raise
+    finally:
+        if cursor: cursor.close()
 
 def apply_request_to_db(db_conn, workflow_id):
     """
@@ -72,6 +128,7 @@ def apply_request_to_db(db_conn, workflow_id):
         if not workflow or not workflow['request_payload']:
             raise ValueError(f"Workflow {workflow_id} not found or has no payload.")
 
+        # 從 JSON 欄位中解析資料
         form_data = json.loads(workflow['request_payload'])
         action_type = _Helpers._first_scalar(form_data.get('action_type'))
 
@@ -84,20 +141,18 @@ def apply_request_to_db(db_conn, workflow_id):
             raise ValueError(f"Unsupported action_type: {action_type}")
 
         # 3. 更新 workflow 狀態為 IN_PROGRESS
-        update_cursor = db_conn.cursor()
-        update_cursor.execute("UPDATE workflow_runs SET status = 'IN_PROGRESS' WHERE workflow_id = %s", (workflow_id,))
-        update_cursor.close()
+        update_request_status(db_conn, workflow_id, 'IN_PROGRESS')
 
         db_conn.commit()
         logging.info(f"✅ Successfully applied changes for workflow_id: {workflow_id} to DB.")
 
     except Error as e:
         logging.error(f"❌ Database error in apply_request_to_db for workflow_id {workflow_id}: {e}")
-        if db_conn.is_connected(): db_conn.rollback()
+        if db_conn and db_conn.is_connected(): db_conn.rollback()
         raise
     except Exception as e:
         logging.error(f"❌ Unexpected error in apply_request_to_db for workflow_id {workflow_id}: {e}")
-        if db_conn.is_connected(): db_conn.rollback()
+        if db_conn and db_conn.is_connected(): db_conn.rollback()
         raise
     finally:
         if cursor: cursor.close()
@@ -106,8 +161,6 @@ def apply_request_to_db(db_conn, workflow_id):
 
 def _apply_create_action(db_conn, form_data):
     """私有函式：處理 Create 請求的資料庫寫入"""
-    # 這部分的邏輯與我們之前設計的 create_vm_configuration_in_db 非常相似
-    # 只是現在它是被 apply_request_to_db 所呼叫
     cursor = db_conn.cursor()
 
     # 1. 插入主表
@@ -172,7 +225,6 @@ def _apply_create_action(db_conn, form_data):
 
 def _apply_update_action(db_conn, form_data):
     """私有函式：處理 Update 請求的資料庫寫入"""
-    # 這部分的邏輯與我們之前設計的 update_vm_configuration_in_db 相似
     cursor = db_conn.cursor(dictionary=True)
 
     env = _Helpers._first_scalar(form_data.get('environment'))

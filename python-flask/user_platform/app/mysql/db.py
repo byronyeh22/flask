@@ -8,35 +8,49 @@ DB_CONFIG = {
     "database": "user_platform"
 }
 
+
 def init_db():
-    # 建立 DB
+    """
+    Initialize the MySQL database and ensure all required tables exist.
+    """
+    # 建立資料庫（若不存在）
     conn = mysql.connector.connect(
-        host=DB_CONFIG['host'],
-        user=DB_CONFIG['user'],
-        password=DB_CONFIG['password']
+        host=DB_CONFIG["host"],
+        user=DB_CONFIG["user"],
+        password=DB_CONFIG["password"]
     )
     cursor = conn.cursor()
     cursor.execute("CREATE DATABASE IF NOT EXISTS user_platform")
     cursor.close()
     conn.close()
 
-    # 重新連線到 DB
+    # 連線至目標資料庫
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
-    # workflow_runs
+    # workflow_runs：紀錄請求生命週期
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS workflow_runs (
             workflow_id INT AUTO_INCREMENT PRIMARY KEY,
-            triggered_by VARCHAR(100),
-            triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status VARCHAR(50) DEFAULT 'PENDING_APPROVAL',
+            created_by VARCHAR(100) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            approved_by VARCHAR(100) NULL,
+            approved_at TIMESTAMP NULL,
+            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+            cancelled_by  VARCHAR(100) NULL,
+            cancelled_at  TIMESTAMP NULL,
+            status ENUM('DRAFT','PENDING_APPROVAL','RETURNED','IN_PROGRESS','SUCCESS','FAILED','CANCELLED')
+                DEFAULT 'DRAFT',
             failed_message TEXT,
-            request_payload TEXT NULL
+            request_payload JSON NULL,
+            INDEX idx_status (status),
+            INDEX idx_created_by (created_by),
+            INDEX idx_approved_by (approved_by),
+            INDEX idx_cancelled_by (cancelled_by)
         )
     """)
 
-    # jira_tickets
+    # jira_tickets：儲存對應 Jira Ticket 資訊
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS jira_tickets (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -52,7 +66,7 @@ def init_db():
         )
     """)
 
-    # gitlab_pipelines
+    # gitlab_pipelines：儲存 GitLab pipeline 執行資訊
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS gitlab_pipelines (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -63,35 +77,15 @@ def init_db():
             branch VARCHAR(255),
             commit_sha VARCHAR(100),
             status VARCHAR(50),
-            triggered_by VARCHAR(50),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             finished_at TIMESTAMP NULL,
             duration INT,
             web_url TEXT,
-
-            # 紀錄 VM Configuration Parameters（來自環境變數）
-            action_type VARCHAR(50),
-            environment VARCHAR(50),
-            resource VARCHAR(50),
-            os_type VARCHAR(50),
-            vsphere_datacenter VARCHAR(100),
-            vsphere_cluster VARCHAR(100),
-            vsphere_network VARCHAR(100),
-            vsphere_template VARCHAR(100),
-            vsphere_datastore VARCHAR(100),
-            vm_name_prefix VARCHAR(100),
-            vm_instance_type VARCHAR(50),
-            vm_num_cpus INT,
-            vm_memory INT,
-            vm_additional_disks_json TEXT,
-            vm_ipv4_gateway VARCHAR(50),
-            netbox_prefix VARCHAR(100),
-            netbox_tenant VARCHAR(100),
             FOREIGN KEY (workflow_id) REFERENCES workflow_runs(workflow_id) ON DELETE CASCADE
         )
     """)
 
-    # vm_configurations：新增 scsi_controller_count（預設 1）
+    # vm_configurations：VM 基本設定
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS vm_configurations (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -118,27 +112,22 @@ def init_db():
         )
     """)
 
-    # vm_disks
+    # vm_disks：紀錄 VM 硬碟資訊
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS vm_disks (
             id INT AUTO_INCREMENT PRIMARY KEY,
             vm_configuration_id INT NOT NULL,
-
-            -- 用來穩定對應 vSphere 的 SCSI 位址
+            -- 穩定對應 vSphere 的 SCSI 位址
             scsi_controller TINYINT NOT NULL DEFAULT 0,  -- 0..3
-            unit_number INT NOT NULL,                   -- 0..6, 8..15
-
-            -- 給 UI 顯示的 Hard disk N（連號、可變動）
+            unit_number INT NOT NULL,                    -- 0..6, 8..15
+            -- UI 顯示用 Hard Disk N（可變動連號）
             ui_disk_number INT NULL,
-
             size INT NOT NULL,
             disk_provisioning VARCHAR(50) NOT NULL,
             status VARCHAR(50) DEFAULT 'PENDING_CREATION',
             vmdk_path VARCHAR(255) NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-
-            -- 同一台 VM 上 (bus, unit) 必須唯一
             CONSTRAINT uq_vm_scsi UNIQUE (vm_configuration_id, scsi_controller, unit_number),
             FOREIGN KEY (vm_configuration_id) REFERENCES vm_configurations(id) ON DELETE CASCADE
         )
@@ -148,5 +137,7 @@ def init_db():
     cursor.close()
     conn.close()
 
+
 def get_db_connection():
+    """Create and return a new database connection using DB_CONFIG."""
     return mysql.connector.connect(**DB_CONFIG)
