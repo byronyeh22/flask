@@ -1,5 +1,5 @@
 # app/vsphere/vm/routes.py (Refactored for Approval Workflow)
-from flask import render_template, request, redirect, session, flash, jsonify
+from flask import render_template, request, redirect, url_for, session, flash, jsonify
 import traceback
 import json
 import logging
@@ -120,9 +120,15 @@ def vsphere_create_vm_review():
     """
     Handles the review step for VM creation.
     """
-    # 註解: Review 頁的邏輯不變，一樣使用 session 暫存表單資料供預覽。
+    # 修正：處理表單資料，將單一值的欄位從列表還原成單一字串，以避免顯示和回填錯誤。
     form_data = request.form.to_dict(flat=False)
-    processed_form_data = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in form_data.items()}
+    processed_form_data = {}
+    for key, value in form_data.items():
+        if key.endswith('[]'):
+            processed_form_data[key] = value
+        else:
+            processed_form_data[key] = value[0] if isinstance(value, list) and value else value
+
     session["form_scope"] = "create"
     session["create_vm_form_data"] = processed_form_data
     session.pop("vm_update_form_data", None)
@@ -294,10 +300,3 @@ def workflow_execute(workflow_id):
             db_conn.close()
 
     return redirect(url_for('vm.overview_index'))
-
-# --- [移除] 以下是舊有的、不再使用的函式 ---
-# 移除了 vsphere_create_vm_submit
-# 移除了 vsphere_update_vm_submit
-# 移除了 _handle_jira_and_gitlab_workflow
-# 移除了 pipeline_approve (功能被 workflow_approve_page 取代)
-# 移除了 trigger_manual_job (功能被 workflow_execute 取代)

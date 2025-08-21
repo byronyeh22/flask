@@ -1,3 +1,4 @@
+# app/vsphere/vm/templates/create/form.html
 {% if action_type %}
   <div class="alert alert-info fw-bold mb-3">
     Current Action: {{ action_type }}
@@ -15,9 +16,10 @@
     background-color: #dc3545;
     color: white;
   }
-  .btn-remove:hover {
+  /* [修正] 移除 hover 樣式，讓按鈕保持紅色 */
+  /* .btn-remove:hover {
     background-color: #c82333;
-  }
+  } */
   .btn-add {
     background-color: #198754;
     color: white;
@@ -274,7 +276,7 @@
       </div>
       <div class="row mt-2">
         <div class="col-12 text-end">
-          <button type="button" class="btn btn-sm btn-danger" onclick="removeDisk(this)">
+          <button type="button" class="btn btn-sm btn-remove" onclick="removeDisk(this)">
             <i class="bi bi-trash"></i> Remove
           </button>
         </div>

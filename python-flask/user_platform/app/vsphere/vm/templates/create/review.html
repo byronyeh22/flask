@@ -12,13 +12,13 @@
     <div class="card-header bg-light text-dark fw-bold">vSphere Configuration</div>
     <div class="card-body">
       <ul class="list-group list-group-flush">
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Environment:</strong> <span>{{ data.environment }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Datacenter:</strong> <span>{{ data.vsphere_datacenter }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Cluster:</strong> <span>{{ data.vsphere_cluster }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>VM Template:</strong> <span>{{ data.vsphere_template }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Datastore:</strong> <span>{{ data.vsphere_datastore }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Network:</strong> <span>{{ data.vsphere_network }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>IPv4 Gateway:</strong> <span>{{ data.vm_ipv4_gateway }}</span></li>
+        <li class="list-group-item"><strong>Environment:</strong> <span>{{ data.environment }}</span></li>
+        <li class="list-group-item"><strong>Datacenter:</strong> <span>{{ data.vsphere_datacenter }}</span></li>
+        <li class="list-group-item"><strong>Cluster:</strong> <span>{{ data.vsphere_cluster }}</span></li>
+        <li class="list-group-item"><strong>VM Template:</strong> <span>{{ data.vsphere_template }}</span></li>
+        <li class="list-group-item"><strong>Datastore:</strong> <span>{{ data.vsphere_datastore }}</span></li>
+        <li class="list-group-item"><strong>Network:</strong> <span>{{ data.vsphere_network }}</span></li>
+        <li class="list-group-item"><strong>IPv4 Gateway:</strong> <span>{{ data.vm_ipv4_gateway }}</span></li>
       </ul>
     </div>
   </div>
@@ -27,11 +27,11 @@
     <div class="card-header bg-light text-dark fw-bold">VM Configuration</div>
     <div class="card-body">
       <ul class="list-group list-group-flush">
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>VM Name Prefix:</strong> <span>{{ data.vm_name_prefix }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>OS Type:</strong> <span>{{ data.os_type }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>VM Instance Type:</strong> <span>{{ data.vm_instance_type }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>vCPU:</strong> <span>{{ data.vm_num_cpus }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Memory (MB):</strong> <span>{{ data.vm_memory }}</span></li>
+        <li class="list-group-item"><strong>VM Name Prefix:</strong> <span>{{ data.vm_name_prefix }}</span></li>
+        <li class="list-group-item"><strong>OS Type:</strong> <span>{{ data.os_type }}</span></li>
+        <li class="list-group-item"><strong>VM Instance Type:</strong> <span>{{ data.vm_instance_type }}</span></li>
+        <li class="list-group-item"><strong>vCPU:</strong> <span>{{ data.vm_num_cpus }}</span></li>
+        <li class="list-group-item"><strong>Memory (MB):</strong> <span>{{ data.vm_memory }}</span></li>
 
         <li class="list-group-item">
           <strong>Additional Hard Disks:</strong>
@@ -79,8 +79,8 @@
     <div class="card-header bg-light text-dark fw-bold">NetBox Configuration</div>
     <div class="card-body">
       <ul class="list-group list-group-flush">
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>NetBox Prefix:</strong> <span>{{ data.netbox_prefix }}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>NetBox Tenant:</strong> <span>{{ data.netbox_tenant }}</span></li>
+        <li class="list-group-item"><strong>NetBox Prefix:</strong> <span>{{ data.netbox_prefix }}</span></li>
+        <li class="list-group-item"><strong>NetBox Tenant:</strong> <span>{{ data.netbox_tenant }}</span></li>
       </ul>
     </div>
   </div>
