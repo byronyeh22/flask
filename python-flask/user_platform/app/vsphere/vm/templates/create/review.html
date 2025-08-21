@@ -2,64 +2,50 @@
 
 {% block content %}
 
-<form method="post" action="{{ url_for('vm.vsphere_create_vm_submit') }}" onsubmit="return confirmSubmit();">
-  <h2 class="fw-bold fs-3 mb-4">Review</h2>
+<form method="post" action="{{ url_for('vm.vsphere_submit_request') }}" onsubmit="return confirmSubmit();">
+  <h2 class="fw-bold fs-3 mb-4">Review Request</h2>
   <p class="text-primary fw-bold">
-    Current Action: {{ data.action_type }} {{ data.vsphere_resource }}
+    Current Action: {{ data.action_type | capitalize }} {{ data.resource | default('VM') | capitalize }}
   </p>
 
-  <!-- vSphere Configuration -->
   <div class="card mb-4 shadow-sm">
     <div class="card-header bg-light text-dark fw-bold">vSphere Configuration</div>
     <div class="card-body">
-      <ul class="list-group">
-        <li class="list-group-item"><strong>Environment：</strong> {{ data.environment }}</li>
-        <li class="list-group-item"><strong>Datacenter：</strong> {{ data.vsphere_datacenter }}</li>
-        <li class="list-group-item"><strong>Cluster：</strong> {{ data.vsphere_cluster }}</li>
-        <li class="list-group-item"><strong>VM Template：</strong> {{ data.vsphere_template }}</li>
-        <li class="list-group-item"><strong>Datastore：</strong> {{ data.vsphere_datastore }}</li>
-        <li class="list-group-item"><strong>Network：</strong> {{ data.vsphere_network }}</li>
-        <li class="list-group-item"><strong>IPv4 Gateway：</strong> {{ data.vm_ipv4_gateway }}</li>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Environment:</strong> <span>{{ data.environment }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Datacenter:</strong> <span>{{ data.vsphere_datacenter }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Cluster:</strong> <span>{{ data.vsphere_cluster }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>VM Template:</strong> <span>{{ data.vsphere_template }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Datastore:</strong> <span>{{ data.vsphere_datastore }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Network:</strong> <span>{{ data.vsphere_network }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>IPv4 Gateway:</strong> <span>{{ data.vm_ipv4_gateway }}</span></li>
       </ul>
     </div>
   </div>
 
-  <!-- VM Configuration -->
   <div class="card mb-4 shadow-sm">
     <div class="card-header bg-light text-dark fw-bold">VM Configuration</div>
     <div class="card-body">
-      <ul class="list-group">
-        <li class="list-group-item"><strong>VM Name Prefix：</strong> {{ data.vm_name_prefix }}</li>
-        <li class="list-group-item"><strong>OS Type：</strong> {{ data.os_type }}</li>
-        <li class="list-group-item"><strong>VM Instance Type：</strong> {{ data.vm_instance_type }}</li>
-        <li class="list-group-item"><strong>vCPU：</strong> {{ data.vm_num_cpus }}</li>
-        <li class="list-group-item"><strong>Memory (MB)：</strong> {{ data.vm_memory }}</li>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>VM Name Prefix:</strong> <span>{{ data.vm_name_prefix }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>OS Type:</strong> <span>{{ data.os_type }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>VM Instance Type:</strong> <span>{{ data.vm_instance_type }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>vCPU:</strong> <span>{{ data.vm_num_cpus }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>Memory (MB):</strong> <span>{{ data.vm_memory }}</span></li>
 
         <li class="list-group-item">
-          <strong>Additional Hard Disk：</strong>
-          {% set sizes = data['create_vm_disk_size[]'] or [] %}
-          {% set provs = data['create_vm_disk_provisioning[]'] or [] %}
-          {% set ctrls = data['create_vm_disk_scsi_controller[]'] or [] %}
-          {% set units = data['create_vm_disk_unit_number[]'] or [] %}
-          {% set scsi_cnt = data.get('create_vm_scsi_controller_count', 1) %}
+          <strong>Additional Hard Disks:</strong>
+          {% set sizes = data['create_vm_disk_size[]'] if data['create_vm_disk_size[]'] is sequence else [data['create_vm_disk_size[]']] if data['create_vm_disk_size[]'] else [] %}
+          {% set provs = data['create_vm_disk_provisioning[]'] if data['create_vm_disk_provisioning[]'] is sequence else [data['create_vm_disk_provisioning[]']] if data['create_vm_disk_provisioning[]'] else [] %}
 
           {% if sizes and sizes|length > 0 %}
-            <!-- 總 SCSI 控制器數 -->
-            <div class="mb-2">
-              <span class="badge bg-info text-dark">
-                SCSI Controller Count：{{ scsi_cnt }}
-              </span>
-            </div>
-
-            <!-- 硬碟明細：Hard Disk N + SCSI(c:u) + Size + Provisioning -->
-            <div class="table-responsive">
-              <table class="table table-sm align-middle">
-                <thead>
+            <div class="table-responsive mt-2">
+              <table class="table table-sm table-bordered align-middle">
+                <thead class="table-light">
                   <tr>
-                    <th style="width: 20%">Hard Disk Label</th>
-                    <th style="width: 20%">SCSI Slot</th>
-                    <th style="width: 20%">Size (GB)</th>
-                    <th style="width: 40%">Provisioning</th>
+                    <th style="width: 33%;">Disk Label</th>
+                    <th style="width: 20%;">Size (GB)</th>
+                    <th style="width: 47%;">Provisioning</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -69,19 +55,9 @@
                   {% set prov_display = 'Thin Provision' if prov == 'thin'
                                         else 'Thick Provision Lazy Zeroed' if prov == 'thick_lazy'
                                         else 'Thick Provision Eager Zeroed' %}
-                  {% set c = (ctrls[i] if i < ctrls|length else '') %}
-                  {% set u = (units[i] if i < units|length else '') %}
                   <tr>
                     <td>
-                      <span class="badge bg-primary">Hard Disk {{ i + 2 }}</span>
-                    </td>
-                    <td>
-                      <span class="badge bg-secondary"
-                            data-bs-toggle="tooltip"
-                            data-bs-placement="top"
-                            title="vSphere SCSI address">
-                        scsi({{ c }}:{{ u }})
-                      </span>
+                      <span class="badge bg-secondary">New Disk {{ i + 1 }}</span>
                     </td>
                     <td>{{ sz }}</td>
                     <td>{{ prov_display }}</td>
@@ -91,20 +67,19 @@
               </table>
             </div>
           {% else %}
-            <span class="text-muted">No additional disks</span>
+            <p class="text-muted mt-2 mb-0">No additional disks requested.</p>
           {% endif %}
         </li>
       </ul>
     </div>
   </div>
 
-  <!-- NetBox Configuration -->
   <div class="card mb-4 shadow-sm">
     <div class="card-header bg-light text-dark fw-bold">NetBox Configuration</div>
     <div class="card-body">
-      <ul class="list-group">
-        <li class="list-group-item"><strong>NetBox Prefix：</strong> {{ data.netbox_prefix }}</li>
-        <li class="list-group-item"><strong>NetBox Tenant：</strong> {{ data.netbox_tenant }}</li>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>NetBox Prefix:</strong> <span>{{ data.netbox_prefix }}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center"><strong>NetBox Tenant:</strong> <span>{{ data.netbox_tenant }}</span></li>
       </ul>
     </div>
   </div>
@@ -112,18 +87,14 @@
   <div class="d-flex justify-content-end mt-4">
     <a href="{{ url_for('vm.vsphere_cancel_vm_form') }}" class="btn btn-outline-danger me-2">Cancel</a>
     <a href="{{ url_for('vm.vm_index') }}" class="btn btn-outline-secondary me-2">Previous</a>
-    <button type="submit" class="btn btn-primary px-5">Confirm & Submit to Jira</button>
+    <button type="submit" class="btn btn-primary px-5">Confirm & Submit Request</button>
   </div>
 </form>
 
 <script>
   function confirmSubmit() {
-    return confirm("Are you sure you want to submit this VM request to Jira?");
+    return confirm("Are you sure you want to submit this VM request for approval?");
   }
-  document.addEventListener('DOMContentLoaded', function() {
-    const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-    [...tooltipTriggerList].map(el => new bootstrap.Tooltip(el));
-  });
 </script>
 
 {% endblock %}
