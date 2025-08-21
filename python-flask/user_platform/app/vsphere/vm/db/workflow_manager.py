@@ -65,7 +65,7 @@ def apply_request_to_db(db_conn, workflow_id):
     """
     cursor = None
     try:
-        # 1. 讀取待辦事項
+        # 1. 從資料庫讀取 request_payload
         cursor = db_conn.cursor(dictionary=True)
         cursor.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
         workflow = cursor.fetchone()
