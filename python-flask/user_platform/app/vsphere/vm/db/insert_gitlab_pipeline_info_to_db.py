@@ -8,9 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data):
     """
     將觸發 GitLab Pipeline 當下的快照資訊寫入資料庫。
-
-    這個函式現在的職責是作為一個歷史紀錄器，儲存觸發 Pipeline 時
-    傳遞的所有 CI/CD 變數，以便未來追蹤與審計。
+    此函式現在的職責是儲存 GitLab Pipeline 的執行資訊。
 
     Args:
         db_conn: 資料庫連線物件。
@@ -21,10 +19,10 @@ def insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data):
 
     sql = """
         INSERT INTO gitlab_pipelines (
-            workflow_id, pipeline_id, job_id, project_name, branch,
+            workflow_id, pipeline_id, project_name, branch,
             commit_sha, status, started_at, finished_at, duration, web_url
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
     """
 
@@ -32,7 +30,6 @@ def insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data):
         params = (
             workflow_id,
             pipeline_data.get("id"),
-            pipeline_data.get("job_id"),
             f"project-{pipeline_data.get('project_id')}",
             pipeline_data.get("ref"),
             pipeline_data.get("sha"),
@@ -47,27 +44,20 @@ def insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data):
         cursor.execute(sql, params)
         db_conn.commit()
 
-        logging.info(f"✅ Successfully inserted GitLab pipeline info for workflow_id: {workflow_id}, pipeline_id: {pipeline_data.get('pipeline_id')}")
+        logging.info(f"✅ Successfully inserted GitLab pipeline info for workflow_id: {workflow_id}, pipeline_id: {pipeline_data.get('id')}")
 
     except Error as e:
         # 當資料庫操作出錯時，提供詳細的錯誤回饋
         logging.error(f"❌ Database error in insert_gitlab_pipeline_info_to_db for workflow_id: {workflow_id}")
         logging.error(f"   - MySQL Error: {e}")
-        # 為了偵錯，可以選擇性地印出 SQL 和參數
-        # logging.debug(f"   - Failing SQL: {sql}")
-        # logging.debug(f"   - Parameters: {params}")
-
-        # 回滾交易，確保資料庫狀態的一致性
-        if db_conn.is_connected():
+        if db_conn and db_conn.is_connected():
             db_conn.rollback()
-
-        # 將例外重新拋出，讓上層呼叫者知道操作失敗，以便顯示 flash message
         raise
 
     except Exception as e:
         # 捕捉其他非資料庫的預期外錯誤
         logging.error(f"❌ An unexpected error occurred in insert_gitlab_pipeline_info_to_db: {e}")
-        if db_conn.is_connected():
+        if db_conn and db_conn.is_connected():
             db_conn.rollback()
         raise
 

@@ -72,8 +72,8 @@ def update_request_status(db_conn, workflow_id, new_status, approver=None, faile
     try:
         cursor = db_conn.cursor()
 
-        sql = "UPDATE workflow_runs SET status = %s, updated_at = %s"
-        params = [new_status, datetime.now()]
+        sql = "UPDATE workflow_runs SET status = %s"
+        params = [new_status]
 
         if approver:
             sql += ", approved_by = %s, approved_at = %s"
@@ -96,19 +96,20 @@ def update_request_status(db_conn, workflow_id, new_status, approver=None, faile
     finally:
         if cursor: cursor.close()
 
-def delete_request(db_conn, workflow_id):
+def cancel_request(db_conn, workflow_id):
     """
-    執行軟刪除，將 deleted_at 欄位填入時間戳。
+    執行取消操作，將 cancelled_by 與 cancelled_at 欄位填入。
     """
     cursor = None
     try:
+        cancelled_by = session.get("username", "system")
         cursor = db_conn.cursor()
-        sql = "UPDATE workflow_runs SET deleted_at = %s WHERE workflow_id = %s"
-        cursor.execute(sql, (datetime.now(), workflow_id))
+        sql = "UPDATE workflow_runs SET status = 'CANCELLED', cancelled_by = %s, cancelled_at = %s WHERE workflow_id = %s"
+        cursor.execute(sql, (cancelled_by, datetime.now(), workflow_id))
         db_conn.commit()
-        logging.info(f"✅ Successfully soft-deleted workflow_id: {workflow_id}.")
+        logging.info(f"✅ Successfully cancelled workflow_id: {workflow_id}.")
     except Error as e:
-        logging.error(f"❌ Database error in delete_request for workflow_id {workflow_id}: {e}")
+        logging.error(f"❌ Database error in cancel_request for workflow_id {workflow_id}: {e}")
         if db_conn and db_conn.is_connected(): db_conn.rollback()
         raise
     finally:
@@ -142,7 +143,7 @@ def apply_request_to_db(db_conn, workflow_id):
 
         # 3. 更新 workflow 狀態為 IN_PROGRESS
         update_request_status(db_conn, workflow_id, 'IN_PROGRESS')
-
+        
         db_conn.commit()
         logging.info(f"✅ Successfully applied changes for workflow_id: {workflow_id} to DB.")
 

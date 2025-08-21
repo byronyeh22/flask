@@ -1,4 +1,5 @@
 # app/vsphere/vm/db/get_jira_tickets_and_stats.py
+from mysql.connector import Error
 
 def get_jira_tickets_and_stats(db_conn):
     """
@@ -7,14 +8,13 @@ def get_jira_tickets_and_stats(db_conn):
     cursor = db_conn.cursor(dictionary=True)
     try:
         cursor.execute("""
-            SELECT *
+            SELECT workflow_id, ticket_id, project_key, summary, description, status, url, created_at
             FROM jira_tickets
             ORDER BY created_at DESC
         """)
         jira_tickets = cursor.fetchall()
         return jira_tickets
     finally:
-        # [修正] 確保 cursor 在函式結束時被關閉
         if cursor:
             cursor.close()
 
@@ -25,7 +25,7 @@ def get_jira_ticket_by_workflow_id(db_conn, workflow_id):
     cursor = db_conn.cursor(dictionary=True)
     try:
         cursor.execute("""
-            SELECT *
+            SELECT workflow_id, ticket_id, project_key, summary, description, status, url, created_at
             FROM jira_tickets
             WHERE workflow_id = %s
             LIMIT 1
@@ -33,7 +33,6 @@ def get_jira_ticket_by_workflow_id(db_conn, workflow_id):
         jira_ticket = cursor.fetchone()
         return jira_ticket
     finally:
-        # [修正] 確保 cursor 在函式結束時被關閉
         if cursor:
             cursor.close()
 
@@ -42,7 +41,7 @@ def get_jira_ticket_by_pipeline_id(db_conn, pipeline_id):
     cursor = db_conn.cursor(dictionary=True)
     try:
         cursor.execute("""
-            SELECT jt.*
+            SELECT jt.workflow_id, jt.ticket_id, jt.project_key, jt.summary, jt.description, jt.status, jt.url, jt.created_at
             FROM jira_tickets jt
             JOIN gitlab_pipelines gp ON jt.workflow_id = gp.workflow_id
             WHERE gp.pipeline_id = %s
@@ -50,6 +49,5 @@ def get_jira_ticket_by_pipeline_id(db_conn, pipeline_id):
         jira_ticket = cursor.fetchone()
         return jira_ticket
     finally:
-        # [修正] 確保 cursor 在函式結束時被關閉
         if cursor:
             cursor.close()
