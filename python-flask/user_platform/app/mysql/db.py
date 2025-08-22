@@ -1,31 +1,30 @@
 import mysql.connector
-
-DB_CONFIG = {
-    "host": "172.26.1.176",
-    # "host": "localhost",
-    "user": "root",
-    "password": "rootpassword",
-    "database": "user_platform"
-}
-
+from flask import current_app # 導入 current_app
 
 def init_db():
     """
     Initialize the MySQL database and ensure all required tables exist.
     """
+    db_config = {
+        "host": current_app.config['DB_HOST'],
+        "user": current_app.config['DB_USER'],
+        "password": current_app.config['DB_PASSWORD'],
+        "database": current_app.config['DB_NAME']
+    }
+
     # 建立資料庫（若不存在）
     conn = mysql.connector.connect(
-        host=DB_CONFIG["host"],
-        user=DB_CONFIG["user"],
-        password=DB_CONFIG["password"]
+        host=db_config["host"],
+        user=db_config["user"],
+        password=db_config["password"]
     )
     cursor = conn.cursor()
-    cursor.execute("CREATE DATABASE IF NOT EXISTS user_platform")
+    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_config['database']}")
     cursor.close()
     conn.close()
 
     # 連線至目標資料庫
-    conn = mysql.connector.connect(**DB_CONFIG)
+    conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
 
     # workflow_runs：紀錄請求生命週期
@@ -137,7 +136,13 @@ def init_db():
     cursor.close()
     conn.close()
 
-
 def get_db_connection():
     """Create and return a new database connection using DB_CONFIG."""
-    return mysql.connector.connect(**DB_CONFIG)
+    # 修正: 將 DB_CONFIG 的定義移入函式內部
+    db_config = {
+        "host": current_app.config['DB_HOST'],
+        "user": current_app.config['DB_USER'],
+        "password": current_app.config['DB_PASSWORD'],
+        "database": current_app.config['DB_NAME']
+    }
+    return mysql.connector.connect(**db_config)

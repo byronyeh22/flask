@@ -1,4 +1,5 @@
 import requests
+from flask import current_app  # 導入 current_app
 
 def get_pipeline_status_from_gitlab(pipeline_id):
     """
@@ -10,13 +11,10 @@ def get_pipeline_status_from_gitlab(pipeline_id):
     Returns:
         dict: Pipeline 狀態資訊
     """
-    gitlab_url = "http://172.26.1.176:8080"
-    project_id = "15"
-
-    # 這裡需要 GitLab access token，而不是 trigger token
-    # 你可能需要提供一個有讀取權限的 access token
+    gitlab_url = current_app.config['GITLAB_URL']
+    project_id = current_app.config['GITLAB_PROJECT_ID']
     headers = {
-        "PRIVATE-TOKEN": "glpat-L8_6TMifNGL6uby92h_f"
+        "PRIVATE-TOKEN": current_app.config['GITLAB_PRIVATE_TOKEN']
     }
 
     try:
@@ -58,11 +56,10 @@ def get_pipeline_jobs(pipeline_id):
     Returns:
         dict: Jobs 資訊
     """
-    gitlab_url = "http://172.26.1.176:8080"
-    project_id = "15"
-
+    gitlab_url = current_app.config['GITLAB_URL']
+    project_id = current_app.config['GITLAB_PROJECT_ID']
     headers = {
-        "PRIVATE-TOKEN": "glpat-L8_6TMifNGL6uby92h_f"
+        "PRIVATE-TOKEN": current_app.config['GITLAB_PRIVATE_TOKEN']
     }
 
     try:

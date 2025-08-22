@@ -1,4 +1,4 @@
-from flask import render_template, request, redirect, url_for, session, flash, jsonify
+from flask import render_template, request, redirect, url_for, session, flash, jsonify, current_app
 import traceback
 import json
 import logging
@@ -35,9 +35,9 @@ def vm_index():
     """
     Render the main VM management page.
     """
-    VCENTER_HOST = "172.26.1.60"
-    VCENTER_USER = "administrator@vsphere.local"
-    VCENTER_PASSWORD = "Gict@1688+"
+    VCENTER_HOST = current_app.config['VSPHERE_HOST']
+    VCENTER_USER = current_app.config['VSPHERE_USER']
+    VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
     vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
     db_conn = None
     try:

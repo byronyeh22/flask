@@ -1,5 +1,6 @@
 import requests
 import json
+from flask import current_app # 導入 current_app
 
 # --- 輔助函式，用於產生不同的 Jira 內容 ---
 
@@ -60,11 +61,10 @@ def create_jira_ticket(ticket_data):
     建立 Jira 工單。
     此函式現在可以處理 Create (扁平字典) 和 Update (巢狀字典) 兩種請求。
     """
-    jira_base = "https://sanbox888twuat.atlassian.net"
-    # 提醒：建議將敏感資訊 (如 API Token) 移至環境變數或設定檔中
+    jira_base = current_app.config['JIRA_BASE_URL']
     auth = (
-        "srv.sra@sanbox888.tw",
-        "ATATT3xFfGF0R9x--AYy2vPdYkG25_w52yHTrGG4wGfBwMbnsyxDMoFmSPL54MtfecWNeoLQR2_0hY73MhBh0m1njA057j8b-9qdFX4TPVlngRu9mkYq1p9TVdXei1_a0FcSt_GgaK2Ae7f8fU8v-PiDSfljnMr63Ce1TuiFApMSdxeFih-_WUE=346474B9"
+        current_app.config['JIRA_USER'],
+        current_app.config['JIRA_API_TOKEN']
     )
 
     # 【關鍵修正】

@@ -1,4 +1,5 @@
 import requests
+from flask import current_app  # 導入 current_app
 
 def run_manual_job(pipeline_id):
     """
@@ -10,10 +11,10 @@ def run_manual_job(pipeline_id):
     Returns:
         dict: 執行結果
     """
-    gitlab_url = "http://172.26.1.176:8080"
-    project_id = "15"
+    gitlab_url = current_app.config['GITLAB_URL']
+    project_id = current_app.config['GITLAB_PROJECT_ID']
     headers = {
-        "PRIVATE-TOKEN": "glpat-L8_6TMifNGL6uby92h_f"
+        "PRIVATE-TOKEN": current_app.config['GITLAB_PRIVATE_TOKEN']
     }
 
     try:

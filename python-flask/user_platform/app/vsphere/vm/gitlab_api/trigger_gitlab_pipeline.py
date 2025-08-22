@@ -1,6 +1,7 @@
 import requests
 import json
 import math
+from flask import current_app  # 導入 current_app
 
 # 每個 SCSI 控制器可掛的「額外碟」數量上限（unit 1..15 排除 7 => 14 顆）
 _CAPACITY_PER_CONTROLLER = 14
@@ -116,10 +117,10 @@ def trigger_gitlab_pipeline(jira_key, form_data):
     - VM_SCSI_CONTROLLER_COUNT：新增傳給 Terraform 的控制器數量變數
     - VM_ADDITIONAL_DISKS_JSON：以 DB/後端整理的 additional_disks 為主，並移除 ui_disk_number/scsi_controller
     """
-    gitlab_url = "http://172.26.1.176:8080"
-    project_id = "15"
-    token = "glptt-71bf6f53fecc5a5234ba177ae8bdbb53fe973db3"
-    branch = "main"
+    gitlab_url = current_app.config['GITLAB_URL']
+    project_id = current_app.config['GITLAB_PROJECT_ID']
+    token = current_app.config['GITLAB_TRIGGER_TOKEN']
+    branch = current_app.config['GITLAB_BRANCH']
     trigger_url = f"{gitlab_url}/api/v4/projects/{project_id}/trigger/pipeline"
 
     # 以 DB / 後端整理好的 additional_disks 為主

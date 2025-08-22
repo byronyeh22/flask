@@ -1,10 +1,11 @@
 import requests
+from flask import current_app # 導入 current_app
 
 def get_jira_issue_detail(ticket_id, fields=None):
-    jira_base = "https://sanbox888twuat.atlassian.net"
+    jira_base = current_app.config['JIRA_BASE_URL']
     auth = (
-        "srv.sra@sanbox888.tw",
-        "ATATT3xFfGF0R9x--AYy2vPdYkG25_w52yHTrGG4wGfBwMbnsyxDMoFmSPL54MtfecWNeoLQR2_0hY73MhBh0m1njA057j8b-9qdFX4TPVlngRu9mkYq1p9TVdXei1_a0FcSt_GgaK2Ae7f8fU8v-PiDSfljnMr63Ce1TuiFApMSdxeFih-_WUE=346474B9"
+        current_app.config['JIRA_USER'],
+        current_app.config['JIRA_API_TOKEN']
     )
 
     # 如果有指定 fields，會把欄位用逗號連接起來並加到 URL 查詢字串
