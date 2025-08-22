@@ -19,9 +19,6 @@ from .db.get_gitlab_pipeline_detail_and_stats import get_gitlab_pipeline_detail_
 from .db.insert_jira_info_to_db import insert_jira_info_to_db
 from .db.insert_gitlab_pipeline_info_to_db import insert_gitlab_pipeline_info_to_db
 
-# 可保留 import（若你後續在 workflow_manager 中擴充邏輯可替換成那邊的 Helper）
-# from .db.workflow_manager import record_pending_request, update_request_status, cancel_request, apply_request_to_db
-
 # --- API 函式 ---
 from .vsphere_api.get_vsphere_objects import get_vsphere_objects
 from .jira_api.create_jira_ticket import create_jira_ticket
@@ -33,12 +30,8 @@ from .gitlab_api.run_manual_job import run_manual_job
 # ========== Utilities ==========
 
 def _current_username() -> str:
-    """
-    取得目前登入者識別（只作為身分 / 審計使用；不再用 session 保存表單）。
-    依你的認證機制調整：例如 flask-login 的 current_user.username 或反向代理 header。
-    """
     try:
-        from flask import session  # 僅用於讀取登入者，不用來保存表單資料
+        from flask import session  # 僅讀取登入者，不用來保存表單資料
         if session.get("username"):
             return str(session["username"])
     except Exception:
@@ -47,11 +40,6 @@ def _current_username() -> str:
 
 
 def _flatten_form(form):
-    """
-    將 request.form 轉為「可 JSON 序列化」的扁平 dict：
-      - 單值欄位 -> 字串
-      - 多值欄位（name[]）-> list
-    """
     raw = form.to_dict(flat=False)
     out = {}
     for k, v in raw.items():
@@ -96,10 +84,6 @@ def _ensure_owner_or_404(db_conn, workflow_id: int, username: str):
 
 @vm_bp.route("/vsphere/vm")
 def vm_index():
-    """
-    Render the main VM management page.
-    不再傳遞 session_data；表單送出後會直接寫入 workflow_runs.request_payload。
-    """
     VCENTER_HOST = "172.26.1.60"
     VCENTER_USER = "administrator@vsphere.local"
     VCENTER_PASSWORD = "Gict@1688+"
@@ -127,9 +111,6 @@ def vm_index():
 
 @vm_bp.route("/vsphere/overview")
 def overview_index():
-    """
-    Render the overview page with all requests and their statuses.
-    """
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -184,11 +165,6 @@ def get_vm_config_api(environment, vm_name_prefix):
 
 @vm_bp.route("/vsphere/vm/create/review", methods=["POST"])
 def vsphere_create_vm_review():
-    """
-    [改版] Create 表單的 Review：
-    - 直接將表單內容寫入 workflow_runs.request_payload（status=DRAFT）
-    - 回傳 review 頁面時，從 DB 讀 payload 顯示（不使用 session）
-    """
     username = _current_username()
     form_payload = _flatten_form(request.form)
 
@@ -196,7 +172,6 @@ def vsphere_create_vm_review():
     try:
         db_conn = get_db_connection()
         cur = db_conn.cursor()
-        # 新增 DRAFT workflow
         cur.execute("""
             INSERT INTO workflow_runs (created_by, status, request_payload)
             VALUES (%s, 'DRAFT', %s)
@@ -205,7 +180,6 @@ def vsphere_create_vm_review():
         workflow_id = cur.lastrowid
         cur.close()
 
-        # 供 review.html 使用
         return render_template("create/review.html", data=form_payload, workflow_id=workflow_id)
 
     except Exception as e:
@@ -222,12 +196,6 @@ def vsphere_create_vm_review():
 
 @vm_bp.route("/vsphere/vm/update/review", methods=["POST"])
 def vsphere_update_vm_review():
-    """
-    [改版] Update 表單的 Review：
-    - 讀取原設定（original_config），組合 new_config
-    - 將兩份資訊（尤其 new_config）寫入 workflow_runs.request_payload（status=DRAFT）
-    - review 頁面直接從 payload 顯示
-    """
     username = _current_username()
     new_config = _flatten_form(request.form)
 
@@ -268,10 +236,6 @@ def vsphere_update_vm_review():
 
 @vm_bp.route("/vsphere/vm/request/<int:workflow_id>/draft/edit", methods=["POST"])
 def vsphere_edit_draft(workflow_id: int):
-    """
-    [新增] 編輯既有 DRAFT（前端 Edit modal 提交）
-    body: JSON { payload: {...} }
-    """
     username = _current_username()
     body = request.get_json(silent=True) or {}
     payload = body.get("payload") or {}
@@ -309,10 +273,6 @@ def vsphere_edit_draft(workflow_id: int):
 
 @vm_bp.route("/vsphere/vm/request/<int:workflow_id>", methods=["GET"])
 def get_request(workflow_id: int):
-    """
-    [新增] 取得單一 workflow 的詳細資料（含 payload）。
-    供 Edit / Review modal 預載資料使用。
-    """
     username = _current_username()
     db_conn = None
     try:
@@ -336,11 +296,6 @@ def get_request(workflow_id: int):
 
 @vm_bp.route("/vsphere/vm/submit", methods=["POST"])
 def vsphere_submit_request():
-    """
-    [改版] Submit：DRAFT -> PENDING_APPROVAL
-    前端需送 workflow_id（而非從 session 取資料）
-    然後建立 Jira、觸發 GitLab pipeline（manual job 等待批准），再更新狀態。
-    """
     username = _current_username()
     workflow_id = request.form.get("workflow_id") or (request.get_json(silent=True) or {}).get("workflow_id")
     if not workflow_id:
@@ -415,9 +370,6 @@ def vsphere_submit_request():
 
 @vm_bp.route("/workflow/approve/<int:workflow_id>", methods=["GET"])
 def workflow_approve_page(workflow_id):
-    """
-    顯示審批頁，資料從 workflow_runs.request_payload 讀取（不使用 session）
-    """
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -446,13 +398,6 @@ def workflow_approve_page(workflow_id):
 
 @vm_bp.route('/workflow/execute/<int:workflow_id>', methods=['POST'])
 def workflow_execute(workflow_id):
-    """
-    Approve & Execute：
-    - 僅 PENDING_APPROVAL 可執行
-    - 寫入 approved_by/approved_at，狀態改 IN_PROGRESS
-    - （在此或之後）將 payload 正式落盤到 vm_configurations / vm_disks
-    - 解除 GitLab Pipeline manual job
-    """
     username = _current_username()
     db_conn = None
     try:
@@ -485,15 +430,14 @@ def workflow_execute(workflow_id):
         db_conn.commit()
         cur.close()
 
-        # 2) 正式落盤 payload（依你的 schema 套用）
-        #    你已有 apply_request_to_db，可在此呼叫；這裡示意直接寫：
+        # 2) （可選）正式落盤 payload 到 vm_configurations / vm_disks
         # from .somewhere import apply_payload_to_vm_tables
         # cur = db_conn.cursor()
         # apply_payload_to_vm_tables(cur, payload)
         # db_conn.commit()
         # cur.close()
 
-        # 3) 找到對應 pipeline -> 解鎖 manual job
+        # 3) 找到 pipeline -> 解鎖 manual job
         pipeline = get_pipeline_details_by_workflow_id(db_conn, workflow_id)
         if not pipeline or not pipeline.get('pipeline_id'):
             raise Exception("Could not find the associated pipeline to execute.")
@@ -519,9 +463,6 @@ def workflow_execute(workflow_id):
 
 @vm_bp.route("/workflow/cancel/<int:workflow_id>", methods=["POST"])
 def workflow_cancel(workflow_id: int):
-    """
-    僅 PENDING_APPROVAL 可取消 -> CANCELLED（前端 Action：Cancel）
-    """
     username = _current_username()
     db_conn = None
     try:
@@ -562,10 +503,6 @@ def workflow_cancel(workflow_id: int):
 
 @vm_bp.route("/workflow/return/<int:workflow_id>", methods=["POST"])
 def workflow_return(workflow_id: int):
-    """
-    退回作廢 -> RETURNED（你定義：作廢且不可再次提交）
-    通常由審批者操作；若需權限控管，請在此加入判斷。
-    """
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -595,15 +532,18 @@ def workflow_return(workflow_id: int):
     return redirect(url_for('vm.overview_index'))
 
 
+# ========== 兼容舊版：原本清 session 的 cancel 路由（現在僅導回 overview） ==========
+
+@vm_bp.route("/vsphere/vm/cancel")
+def vsphere_cancel_vm_form():
+    # 舊版是清除 session；現在不使用 session，僅做相容導向
+    return redirect(url_for('vm.overview_index'))
+
+
 # ========== Webhook（可選）：GitLab 回呼更新狀態 ==========
 
 @vm_bp.route("/webhook/gitlab", methods=["POST"])
 def gitlab_webhook():
-    """
-    根據你現有 webhook 設計對應更新：
-    - 當 pipeline 完成：IN_PROGRESS -> SUCCESS / FAILED / CANCELLED
-    - 同步寫入 gitlab_pipelines（若包含 job/pipeline 資訊）
-    """
     body = request.get_json(silent=True) or {}
     workflow_id = body.get("workflow_id")
     pipeline_status = (body.get("status") or "").upper()

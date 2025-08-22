@@ -16,7 +16,7 @@ def monitor_pipelines():
                 SELECT pipeline_id 
                 FROM gitlab_pipelines 
                 WHERE status NOT IN ('success', 'failed', 'canceled') 
-                  AND created_at >= NOW() - INTERVAL 1 DAY
+                  AND started_at >= NOW() - INTERVAL 1 DAY
             """)
             pipelines = cursor.fetchall()
 
