@@ -4,7 +4,7 @@ class Config:
     # --- API Mode Control ---
     # 可用的模式: 'dev' (開發/正式), 'local' (本地模擬)
     # 預設為 'dev'
-    API_MODE = os.environ.get("API_MODE", "dev")
+    API_MODE = os.environ.get("API_MODE", "local")
 
 # --- 動態設定，根據 API_MODE 的值載入不同的連線資訊 ---
 
@@ -36,7 +36,7 @@ if Config.API_MODE == 'dev':
     Config.JIRA_API_TOKEN = os.environ.get("JIRA_API_TOKEN", "ATATT3xFfGF0R9x--AYy2vPdYkG25_w52yHTrGG4wGfBwMbnsyxDMoFmSPL54MtfecWNeoLQR2_0hY73MhBh0m1njA057j8b-9qdFX4TPVlngRu9mkYq1p9TVdXei1_a0FcSt_GgaK2Ae7f8fU8v-PiDSfljnMr63Ce1TuiFApMSdxeFih-_WUE=346474B9")
     Config.JIRA_PROJECT_KEY = os.environ.get("JIRA_PROJECT_KEY", "SJT")
 
-else: # Config.API_MODE == 'local'
+else: #Config.API_MODE == 'local'
     # 本地模擬環境 (Mock API) 連線設定
     # 這裡的設定通常是固定值，不需要從環境變數讀取
 
