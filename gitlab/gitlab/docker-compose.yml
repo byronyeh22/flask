@@ -1,0 +1,33 @@
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    restart: always
+    hostname: 'gitlab.local'
+    container_name: gitlab
+    ports:
+      - '8080:80'
+      - '8443:443'
+      - '2222:22'
+    volumes:
+      - ./config:/etc/gitlab
+      - /var/log/gitlab:/var/log/gitlab
+      - ./data:/var/opt/gitlab
+    shm_size: '1g'
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://172.26.1.176:8080'
+        nginx['listen_port'] = 80
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+        gitlab_rails['allow_local_requests_from_hooks_and_services'] = true
+        gitlab_rails['allow_local_requests_from_web_hooks_and_services'] = true
+
+  gitlab-runner:
+    image: gitlab/gitlab-runner:latest
+    restart: always
+    container_name: gitlab-runner-1
+    depends_on:
+      - gitlab
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runner-config:/etc/gitlab-runner
+    shm_size: '1g'
