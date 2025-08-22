@@ -4,9 +4,6 @@
   </div>
 {% endif %}
 
-<input type="hidden" name="resource" value="vm">
-<input type="hidden" name="action_type" value="create">
-
 <style>
   .card-header .bi {
     margin-right: 0.5rem;
@@ -35,9 +32,35 @@
     background-color: #e9ecef;
     cursor: not-allowed;
   }
+
+  /* 供底部按鈕用的小樣式，不影響既有版面 */
+  .form-actions {
+    margin-top: 16px;
+    display: flex;
+    gap: 8px;
+  }
+  .btn-draft {
+    background-color: #0d6efd;
+    color: #fff;
+    border: 1px solid #0d6efd;
+    padding: .375rem .75rem;
+    border-radius: .25rem;
+  }
+  .btn-cancel-link {
+    background: transparent;
+    color: #6c757d;
+    text-decoration: none;
+    padding: .375rem .75rem;
+  }
 </style>
 
-<div class="row g-4">
+<!-- 將隱藏欄位與所有可輸入欄位放在同一個 root，避免 JS 蒐集不到 -->
+<div class="row g-4" id="create-form-root">
+
+  <!-- 兩個隱藏欄位放進 root，並維持你原本名稱 -->
+  <input type="hidden" name="resource" value="vm">
+  <input type="hidden" name="action_type" value="Create">
+
   <div class="col-lg-6">
     
     <div class="card shadow-sm mb-4">
@@ -231,14 +254,16 @@
       </div>
     </div>
 
+    <!-- 底部按鈕（Save to Draft / Cancel） -->
+    <div class="form-actions">
+      <button type="button" id="btn-save-draft" class="btn-draft">Save to Draft</button>
+      <a href="{{ url_for('vm.overview_index') }}" class="btn-cancel-link">Cancel</a>
+    </div>
+
   </div>
 </div>
 
 <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    // 註解：此處的 Tooltip 初始化邏輯保持不變
-  });
-
   function relabelDisks() {
     const rows = document.querySelectorAll('#disk-container .disk-item');
     rows.forEach((row, i) => {
@@ -292,4 +317,78 @@
     }
     relabelDisks();
   }
+
+  // 簡單必填驗證（沿用 data-required="true"）
+  function validateRequired(root) {
+    const missing = [];
+
+    root.querySelectorAll('[data-required="true"][name]').forEach(el => {
+      const type = (el.type || '').toLowerCase();
+      if (type === 'radio') return;
+      if (!el.value) missing.push(el);
+    });
+
+    const radioNames = new Set();
+    root.querySelectorAll('input[type="radio"][name][data-required="true"]').forEach(r => radioNames.add(r.name));
+    radioNames.forEach(name => {
+      const anyChecked = root.querySelector(`input[type="radio"][name="${name}"]:checked`);
+      if (!anyChecked) missing.push(root.querySelector(`input[type="radio"][name="${name}"]`));
+    });
+
+    if (missing.length > 0) {
+      const first = missing[0];
+      if (first && typeof first.focus === 'function') first.focus();
+      return false;
+    }
+    return true;
+  }
+
+  // Save to Draft → POST /vsphere/vm/create/review → 成功導向 overview
+  document.getElementById('btn-save-draft').addEventListener('click', async function () {
+    const root = document.getElementById('create-form-root');
+
+    if (!validateRequired(root)) {
+      alert('Please complete all required fields.');
+      return;
+    }
+
+    const fields = root.querySelectorAll('input[name], select[name], textarea[name]');
+    const fd = new FormData();
+
+    fields.forEach(el => {
+      const name = el.getAttribute('name');
+      if (!name) return;
+
+      if (el.type === 'radio') {
+        if (el.checked) fd.append(name, el.value);
+      } else if (el.type === 'checkbox') {
+        if (el.checked) fd.append(name, el.value);
+      } else {
+        fd.append(name, el.value);
+      }
+    });
+
+    // 再保險：若未收集到就補上（避免 DOM 調整導致缺漏）
+    if (!fd.has('resource')) fd.append('resource', 'vm');
+    if (!fd.has('action_type')) fd.append('action_type', 'Create');
+
+    try {
+      const resp = await fetch("{{ url_for('vm.vsphere_create_vm_review') }}", {
+        method: "POST",
+        body: fd
+      });
+
+      if (!resp.ok) {
+        const txt = await resp.text();
+        alert("Save to Draft failed: " + txt);
+        return;
+      }
+
+      // 成功後前往 overview
+      window.location.href = "{{ url_for('vm.overview_index') }}";
+    } catch (err) {
+      console.error(err);
+      alert("Network error while saving draft.");
+    }
+  });
 </script>

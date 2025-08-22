@@ -261,11 +261,10 @@
     .custom-table tbody td:nth-child(2), /* Ticket ID 欄位下的內容置中*/
     .custom-table tbody td:nth-child(4), /* Status 欄位下的內容置中*/
     .custom-table tbody td:nth-child(7), /* Duration 欄位下的內容置中*/
-    .custom-table tbody td:nth-child(8)  /* Approve 欄位下的內容置中*/
+    .custom-table tbody td:nth-child(8)  /* Action 欄位下的內容置中 */
     {
         text-align: center;
     }
-
 
     .status-badge {
         padding: 0.4rem 0.8rem;
@@ -305,6 +304,11 @@
         background: rgba(46, 204, 113, 0.2);
         color: #2ecc71;
     }
+    /* [CHG] 新增：Draft 樣式 */
+    .status-draft {
+        background: rgba(149, 165, 166, 0.25);
+        color: #7f8c8d;
+    }
 
     .workflow-id {
         font-family: 'Courier New', monospace;
@@ -334,24 +338,15 @@
         min-width: 120px;
     }
 
-    /* 防止 Summary 換行 */
+    /* [CHG] Summary：取消 hover 展開效果，直接顯示完整字串並自動換行 */
     .summary-cell {
-        white-space: nowrap;
-        max-width: 250px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .summary-cell:hover {
         white-space: normal;
-        overflow: visible;
-        background: rgba(52, 152, 219, 0.05);
-        padding: 0.5rem;
-        border-radius: 4px;
         max-width: none;
+        overflow: visible;
+        text-overflow: unset;
     }
+    /* [CHG] 移除原本的 .summary-cell:hover 規則（不再需要） */
 
-    /* Search 元件 */
     .search-controls {
         margin-top: 1rem;
         display: flex;
@@ -392,20 +387,14 @@
         white-space: nowrap;
         font-size: 0.85rem;
     }
+
+    /* [CHG] Draft 動作按鈕的間距 */
+    .actions-draft .btn {
+        margin: 0 .15rem;
+    }
 </style>
 
 <div class="container-fluid">
-    <!-- Page Header -->
-<!--     <div class="page-header">
-        <div class="container-fluid">
-            <h1>
-                <i class="fas fa-shield-alt"></i>
-                Welcome to SRA Console
-            </h1>
-            <p class="subtitle">Central platform for managing FortiGate Policies and Accounts</p>
-        </div>
-    </div> -->
-
     <!-- Statistics Cards -->
     <div class="row stats-row">
         <div class="col-md-3 col-sm-6 mb-3">
@@ -445,14 +434,7 @@
     <!-- Pipeline Table -->
     <div class="table-container">
         <div class="table-header">
-<!--             <h3>
-                <i class="fas fa-tasks"></i>
-                Pipelines
-            </h3> -->
-
-            <!-- Search and Filter Controls -->
             <div class="search-controls">
-                <!-- 搜尋輸入框 -->
                 <div class="position-relative w-100" style="max-width: 600px;">
                   <i class="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-muted"></i>
                   <input type="text"
@@ -467,7 +449,6 @@
                     <button class="filter-btn" data-status="manual">Approved</button>
                     <button class="filter-btn" data-status="created">Running</button>
                 </div>
-                <!-- 时区选择器 -->
                 <div class="timezone-control d-flex align-items-center gap-2 small">
                     <span class="timezone-label fw-bold">
                         <i class="fas fa-globe me-1"></i> Timezone
@@ -484,7 +465,6 @@
                         <option value="Australia/Sydney">AEDT (Sydney)</option>
                     </select>
                 </div>
-                <!-- auto refresh -->
                 <div id="refreshStatus" class="text-muted small my-2 ms-2"></div>
             </div>
         </div>
@@ -499,24 +479,26 @@
                     <th><i class="fas fa-calendar-plus"></i> Start</th>
                     <th><i class="fas fa-calendar-check"></i> End</th>
                     <th><i class="fas fa-stopwatch"></i> Duration</th>
-                    <th><i class="fas fa-check"></i> Approve</th>
+                    <!-- [CHG] 欄位名稱：Approve -> Action -->
+                    <th><i class="fas fa-bolt"></i> Action</th>
                 </tr>
             </thead>
             <tbody>
-                {% for pipeline in pipeline_data %}
+                <!-- [CHG] 確保最新在最上面：依 created_at DESC 排序 -->
+                {% for pipeline in (pipeline_data | sort(attribute='created_at', reverse=True)) %}
                 {% set jira_ticket = (jira_tickets | selectattr('workflow_id', 'equalto', pipeline.workflow_id) | list | first) %}
-                {% set raw_status = pipeline.status.lower() %}
+                {% set raw_status = (pipeline.status or '') | lower %}
                 {% set normalized_status = raw_status %}
                 <tr data-status="{{ normalized_status }}">
                     <td><span class="workflow-id">{{ pipeline.workflow_id }}</span></td>
                     <td>
-                        {% if jira_ticket %}
+                        {% if jira_ticket and jira_ticket.ticket_id %}
                             <a href="{{ jira_ticket.url }}" target="_blank" class="ticket-link">{{ jira_ticket.ticket_id }}</a>
                         {% else %}
                             -
                         {% endif %}
                     </td>
-                    <td>
+                    <td class="summary-cell">
                         {{ jira_ticket.summary if jira_ticket else '-' }}
                     </td>
                     <td>
@@ -526,10 +508,34 @@
                     <td class="date-cell" data-datetime="{{ pipeline.finished_at }}">{{ pipeline.finished_at or '-' }}</td>
                     <td class="duration-cell" data-seconds="{{ pipeline.duration or 0 }}"></td>
                     <td>
-                        {% if normalized_status == 'manual' %}
-                            <a href="{{ url_for('vm.pipeline_approve', pipeline_id=pipeline.pipeline_id) }}" class="btn btn-sm btn-primary">Approve</a>
+                        <!-- [CHG] Draft 狀態顯示 Edit / Review / Delete -->
+                        {% if normalized_status == 'draft' %}
+                          <div class="actions-draft">
+                            <!-- 這三個按鈕先提供 UI；之後你要我再接後端 API/Modal 我再補上 -->
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-primary"
+                                    data-action="edit" 
+                                    data-workflow-id="{{ pipeline.workflow_id }}"
+                                    title="Edit">
+                              <i class="bi bi-pencil-square"></i>
+                            </button>
+                            <a class="btn btn-sm btn-outline-secondary"
+                               href="{{ url_for('vm.workflow_approve_page', workflow_id=pipeline.workflow_id) }}"
+                               title="Review">
+                              <i class="bi bi-eye"></i>
+                            </a>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-danger"
+                                    data-action="delete" 
+                                    data-workflow-id="{{ pipeline.workflow_id }}"
+                                    title="Delete">
+                              <i class="bi bi-trash"></i>
+                            </button>
+                          </div>
+                        {% elif normalized_status == 'manual' %}
+                          <a href="{{ url_for('vm.pipeline_approve', pipeline_id=pipeline.pipeline_id) }}" class="btn btn-sm btn-primary">Approve</a>
                         {% else %}
-                            <button class="btn btn-sm btn-secondary" disabled>Approve</button>
+                          <button class="btn btn-sm btn-secondary" disabled>Approve</button>
                         {% endif %}
                     </td>
                 </tr>
@@ -853,11 +859,6 @@
     }
 
     // 初始化页面
-    // document.addEventListener('DOMContentLoaded', () => {
-    //     new TablePagination();
-    // });
-
-    // 初始化页面
     document.addEventListener('DOMContentLoaded', () => {
         // 初始化 TimeZone
         const timezoneManager = new TimezoneManager();
@@ -865,12 +866,22 @@
         // 初始化表格分頁
         const tablePagination = new TablePagination();
 
-        // 將 TimeZone 掛載到 Global, 給其他 Module 使用
+        // 掛到 window 供其他模組使用
         window.timezoneManager = timezoneManager;
         window.tablePagination = tablePagination;
 
+        // [CHG] Draft 動作按鈕先放置佔位：之後你要我再接 API/Modal，我再補事件
+        document.querySelectorAll('[data-action="edit"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                alert('Edit Draft：後端/彈窗稍後接上（workflow_id=' + btn.dataset.workflowId + '）');
+            });
+        });
+        document.querySelectorAll('[data-action="delete"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                alert('Delete Draft：後端 API 稍後接上（workflow_id=' + btn.dataset.workflowId + '）');
+            });
+        });
     });
-
 </script>
 
 {% endblock %}
