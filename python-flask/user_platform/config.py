@@ -47,7 +47,7 @@ else: #Config.API_MODE == 'local'
     Config.DB_NAME = "user_platform"
 
     # --- vSphere Configuration ---
-    Config.VSPHERE_HOST = "127.0.0.1"
+    Config.VSPHERE_HOST = "localhost:5001"
     Config.VSPHERE_USER = "mock_user"
     Config.VSPHERE_PASSWORD = "mock_password"
 
