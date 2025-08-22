@@ -144,9 +144,6 @@ def apply_request_to_db(db_conn, workflow_id):
         # 3. 更新 workflow 狀態為 IN_PROGRESS
         update_request_status(db_conn, workflow_id, 'IN_PROGRESS')
         
-        db_conn.commit()
-        logging.info(f"✅ Successfully applied changes for workflow_id: {workflow_id} to DB.")
-
     except Error as e:
         logging.error(f"❌ Database error in apply_request_to_db for workflow_id {workflow_id}: {e}")
         if db_conn and db_conn.is_connected(): db_conn.rollback()

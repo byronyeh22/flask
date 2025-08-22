@@ -16,7 +16,7 @@ from .db.get_jira_tickets_and_stats import get_jira_tickets_and_stats, get_jira_
 from .db.get_gitlab_pipeline_detail_and_stats import get_gitlab_pipeline_detail_and_stats, get_pipeline_details_by_workflow_id
 from .db.insert_jira_info_to_db import insert_jira_info_to_db
 from .db.insert_gitlab_pipeline_info_to_db import insert_gitlab_pipeline_info_to_db
-from .db.workflow_manager import record_pending_request, apply_request_to_db
+from .db.workflow_manager import record_pending_request, update_request_status, cancel_request, apply_request_to_db
 
 # --- API 函式 ---
 from .vsphere_api.get_vsphere_objects import get_vsphere_objects
@@ -33,7 +33,6 @@ def vm_index():
     """
     Render the main VM management page.
     """
-    # 註解: 這部分的邏輯保持不變，用於填充表單的初始選項。
     VCENTER_HOST = "172.26.1.60"
     VCENTER_USER = "administrator@vsphere.local"
     VCENTER_PASSWORD = "Gict@1688+"
@@ -54,7 +53,8 @@ def vm_index():
         datacenters=vsphere_data["datacenters"], clusters=vsphere_data["clusters"],
         templates=vsphere_data["templates"], networks=vsphere_data["networks"],
         datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
-        environment=environment
+        environment=environment,
+        session_data=session.get('create_vm_form_data', {})
     )
 
 @vm_bp.route("/vsphere/overview")
@@ -62,7 +62,6 @@ def overview_index():
     """
     Render the overview page with all requests and their statuses.
     """
-    # 註解: 這部分之後會擴充，以顯示 workflow_runs 的總體狀態。
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -81,7 +80,6 @@ def overview_index():
 @vm_bp.route('/api/get_vms_by_environment/<string:environment>')
 def get_vms_by_environment_api(environment):
     """API endpoint to fetch VMs for a given environment."""
-    # 註解: API 邏輯保持不變，並遵循新的資料庫連線管理模式。
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -97,7 +95,6 @@ def get_vms_by_environment_api(environment):
 @vm_bp.route('/api/get_vm_config/<string:environment>/<string:vm_name_prefix>')
 def get_vm_config_api(environment, vm_name_prefix):
     """API endpoint to fetch a specific VM's configuration."""
-    # 註解: API 邏輯保持不變，並遵循新的資料庫連線管理模式。
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -120,7 +117,6 @@ def vsphere_create_vm_review():
     """
     Handles the review step for VM creation.
     """
-    # 修正：處理表單資料，將單一值的欄位從列表還原成單一字串，以避免顯示和回填錯誤。
     form_data = request.form.to_dict(flat=False)
     processed_form_data = {}
     for key, value in form_data.items():
@@ -140,7 +136,6 @@ def vsphere_update_vm_review():
     """
     Handles the review step for VM updates.
     """
-    # 註解: Review 頁的邏輯不變，一樣使用 session 暫存。
     new_config = request.form.to_dict(flat=False)
     processed_new_config = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in new_config.items()}
     

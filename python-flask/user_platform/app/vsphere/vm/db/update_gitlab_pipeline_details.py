@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+from mysql.connector import Error
+import logging
 
 def parse_gitlab_datetime(dt_str):
     """
@@ -16,8 +18,6 @@ def parse_gitlab_datetime(dt_str):
     # 轉換為 UTC+8
     return dt + timedelta(hours=8)
 
-
-
 def update_gitlab_pipeline_details(db_conn, pipeline_id, pipeline_data):
     """
     更新 GitLab pipeline 的詳細資訊（status、web_url、finished_at、duration）
@@ -27,10 +27,11 @@ def update_gitlab_pipeline_details(db_conn, pipeline_id, pipeline_data):
         pipeline_id (str): Pipeline ID
         pipeline_data (dict): GitLab API 回傳的資料
     """
-    cursor = db_conn.cursor()
-
+    cursor = None
     try:
-        cursor.execute("""
+        cursor = db_conn.cursor()
+        
+        sql = """
             UPDATE gitlab_pipelines
             SET
                 status = %s,
@@ -38,20 +39,25 @@ def update_gitlab_pipeline_details(db_conn, pipeline_id, pipeline_data):
                 finished_at = %s,
                 duration = %s
             WHERE pipeline_id = %s
-        """, (
+        """
+        
+        params = (
             pipeline_data.get("status", "unknown"),
             pipeline_data.get("web_url", "unknown"),
             parse_gitlab_datetime(pipeline_data.get("finished_at")),
             pipeline_data.get("duration", None),
             pipeline_id
-        ))
-
+        )
+        
+        cursor.execute(sql, params)
         db_conn.commit()
-        print(f"✅ Updated pipeline {pipeline_id} details successfully.")
+        
+        logging.info(f"✅ Updated pipeline {pipeline_id} details successfully.")
 
-    except Exception as e:
+    except Error as e:
         db_conn.rollback()
-        print(f"❌ Error updating pipeline details: {str(e)}")
+        logging.error(f"❌ Error updating pipeline details: {str(e)}")
         raise
     finally:
-        cursor.close()
+        if cursor:
+            cursor.close()
