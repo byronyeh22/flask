@@ -382,14 +382,13 @@ def workflow_execute(workflow_id):
 
 @vm_bp.route("/workflow/draft/<int:workflow_id>/edit", methods=["GET"])
 def workflow_draft_edit(workflow_id: int):
-    """
-    打開原本的 create/form.html，並以 workflow_runs.request_payload 回填欄位。
-    """
+    # 1) vSphere 下拉資料（使用你的 config）
     VCENTER_HOST = current_app.config['VSPHERE_HOST']
     VCENTER_USER = current_app.config['VSPHERE_USER']
     VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
     vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
 
+    # 2) 抓 DB
     db_conn = None
     draft_data = {}
     environments = []
@@ -398,7 +397,11 @@ def workflow_draft_edit(workflow_id: int):
         environments = get_environment(db_conn)
 
         cur = db_conn.cursor(dictionary=True)
-        cur.execute("SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s", (workflow_id,))
+        cur.execute("""
+            SELECT status, request_payload
+            FROM workflow_runs
+            WHERE workflow_id=%s
+        """, (workflow_id,))
         row = cur.fetchone()
         cur.close()
 
@@ -420,14 +423,18 @@ def workflow_draft_edit(workflow_id: int):
         if db_conn and db_conn.is_connected():
             db_conn.close()
 
+    # 3) 關鍵：改成渲染 vm_index.html（它 extends base），
+    #    裡面會 include create/form.html（partial），所以不會雙 sidebar。
     return render_template(
-        "create/form.html",
+        "vm_index.html",
         datacenters=vsphere_data["datacenters"], clusters=vsphere_data["clusters"],
         templates=vsphere_data["templates"], networks=vsphere_data["networks"],
         datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
         environment=environments,
         draft_data=draft_data,
-        workflow_id=workflow_id
+        workflow_id=workflow_id,
+        # 若 vm_index.html 有分頁/Tab，這裡可選擇預設到 Create 分頁
+        active_tab="create"
     )
 
 
