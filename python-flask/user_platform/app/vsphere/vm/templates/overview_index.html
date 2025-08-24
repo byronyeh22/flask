@@ -28,7 +28,7 @@
     .stat-card.failed  { border-left-color: #e74c3c; }
     .stat-card.manual  { border-left-color: #f39c12; }
 
-    .table-container { background: white; border-radius: var(--border-radius); box-shadow: var(--card-shadow); overflow: hidden; margin-top: 2rem; }
+    .table-container { background: white; border-radius: var(--border-radius); box-shadow: var(--card-shadow); overflow: visible; margin-top: 2rem; }
     .table-header { background: var(--light-bg); padding: 1.5rem; border-bottom: 1px solid #dee2e6; }
     .table-header h3 { margin: 0; color: var(--primary-color); font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
 
@@ -303,238 +303,603 @@
 </div>
 
 <script>
-    // === 後端路由樣板：以 0 為佔位，前端動態替換為實際 workflow_id ===
-    const REVIEW_URL_TMPL = "{{ url_for('vm.workflow_review_page', workflow_id=0) }}";
-    const EDIT_URL_TMPL   = "{{ url_for('vm.workflow_draft_edit',  workflow_id=0) }}";
-    const DELETE_URL_TMPL = "{{ url_for('vm.workflow_draft_delete',workflow_id=0) }}";
+/* ========================================================================
+ * Router URL templates（後端路由樣板）
+ * - 以 "0" 為佔位，前端在點擊時替換為實際 workflow_id
+ * ====================================================================== */
+const REVIEW_URL_TMPL = "{{ url_for('vm.workflow_review_page', workflow_id=0) }}";
+const EDIT_URL_TMPL   = "{{ url_for('vm.workflow_draft_edit',  workflow_id=0) }}";
+const DELETE_URL_TMPL = "{{ url_for('vm.workflow_draft_delete',workflow_id=0) }}";
 
-    class TimezoneManager {
-        constructor() {
-            this.currentTimezone = 'local';
-            this.timezoneSelect = document.getElementById('timezoneSelect');
-            this.bindEvents();
-            this.detectUserTimezone();
-            this.updateAllDateCells();
-        }
-        bindEvents() { this.timezoneSelect.addEventListener('change', (e) => { this.currentTimezone = e.target.value; this.updateAllDateCells(); }); }
-        detectUserTimezone() {
-            try {
-                const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                const localOption = this.timezoneSelect.querySelector('option[value="local"]');
-                if (localOption) localOption.textContent = `Local time (${userTimezone})`;
-            } catch (e) { console.warn('Cannot detect user timezone:', e); }
-        }
-        formatDateTime(datetimeStr, timezone) {
-            if (!datetimeStr || datetimeStr === '-' || datetimeStr === 'None' ) return '-';
-            try {
-                const date = new Date(datetimeStr);
-                if (isNaN(date.getTime())) return datetimeStr;
-                let options = { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false };
-                if (timezone !== 'local') options.timeZone = timezone;
-                const formatted = date.toLocaleString('en-CA', options);
-                return formatted.replace(',', '');
-            } catch (e) { console.error('Error formatting date:', e); return datetimeStr; }
-        }
-        updateAllDateCells() {
-            document.querySelectorAll('.date-cell[data-datetime]').forEach(cell => {
-                const original = cell.getAttribute('data-datetime');
-                cell.textContent = this.formatDateTime(original, this.currentTimezone);
-            });
-        }
-        formatNewDateTime(datetimeStr) { return this.formatDateTime(datetimeStr, this.currentTimezone); }
-    }
+/* ========================================================================
+ * TimezoneManager：負責把 .date-cell[data-datetime] 依使用者選擇時區顯示
+ * - 只動「顯示文字」，不改原本儲存在 data-datetime 的原始字串
+ * - 預設 currentTimezone = 'local'
+ * ====================================================================== */
+class TimezoneManager {
+  constructor() {
+    this.currentTimezone = 'local';
+    this.timezoneSelect  = document.getElementById('timezoneSelect');
+    this._bindEvents();
+    this._detectUserTimezoneLabel();
+    this.updateAllDateCells();
+  }
 
-    class TablePagination {
-        constructor() {
-            this.currentPage = 1;
-            this.entriesPerPage = 10;
-            this.allRows = Array.from(document.querySelectorAll('#pipelinesTable tbody tr'));
-            this.filteredRows = [...this.allRows];
-            this.currentFilter = 'all';
-            this.initializeElements();
-            this.bindEvents();
-            this.applyFilters();
-            this.updateDisplay();
-            this.startAutoRefresh();
-        }
-        initializeElements() {
-            this.searchInput = document.getElementById('searchInput');
-            this.entriesSelect = document.getElementById('entriesPerPage');
-            this.paginationInfo = document.getElementById('paginationInfo');
-            this.pageNumbers = document.getElementById('pageNumbers');
-            this.firstPageBtn = document.getElementById('firstPage');
-            this.prevPageBtn = document.getElementById('prevPage');
-            this.nextPageBtn = document.getElementById('nextPage');
-            this.lastPageBtn = document.getElementById('lastPage');
-            this.filterButtons = document.querySelectorAll('.filter-btn');
-        }
-        bindEvents() {
-            this.searchInput.addEventListener('input', () => { this.applyFilters(); this.currentPage = 1; this.updateDisplay(); });
-            this.entriesSelect.addEventListener('change', e => { this.entriesPerPage = parseInt(e.target.value); this.currentPage = 1; this.updateDisplay(); });
-            this.filterButtons.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    this.filterButtons.forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    this.currentFilter = btn.dataset.status;
-                    this.applyFilters();
-                    this.currentPage = 1;
-                    this.updateDisplay();
-                });
-            });
-
-            // Draft 行為：Edit / Review / Delete
-            document.addEventListener('click', async (e) => {
-                const reviewBtn = e.target.closest('.btn-draft-review');
-                const editBtn   = e.target.closest('.btn-draft-edit');
-                const deleteBtn = e.target.closest('.btn-draft-delete');
-
-                if (reviewBtn) {
-                    const wfId = reviewBtn.getAttribute('data-workflow-id');
-                    const src = REVIEW_URL_TMPL.replace('0', wfId);
-                    const frame = document.getElementById('reviewFrame');
-                    frame.src = src;
-                    const modal = new bootstrap.Modal(document.getElementById('reviewModal'));
-                    modal.show();
-                    return;
-                }
-
-                if (editBtn) {
-                    const wfId = editBtn.getAttribute('data-workflow-id');
-                    // 直接導向後端提供的 Draft 編輯頁（該路由會回填 request_payload 到 create form）
-                    window.location.href = EDIT_URL_TMPL.replace('0', wfId);
-                    return;
-                }
-
-                if (deleteBtn) {
-                    const wfId = deleteBtn.getAttribute('data-workflow-id');
-                    if (!confirm(`Delete Draft #${wfId}?`)) return;
-
-                    try {
-                        const resp = await fetch(DELETE_URL_TMPL.replace('0', wfId), {
-                            method: 'POST',
-                            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                        });
-                        if (!resp.ok) {
-                            const txt = await resp.text();
-                            alert('Delete failed: ' + txt);
-                            return;
-                        }
-                        const row = e.target.closest('tr');
-                        if (row) row.remove();
-                        this.allRows = Array.from(document.querySelectorAll('#pipelinesTable tbody tr'));
-                        this.applyFilters();
-                        this.updateDisplay();
-                    } catch (err) {
-                        console.error(err);
-                        alert('Network error while deleting draft.');
-                    }
-                    return;
-                }
-            });
-
-            this.firstPageBtn.addEventListener('click', () => this.goToPage(1));
-            this.prevPageBtn.addEventListener('click', () => this.goToPage(this.currentPage - 1));
-            this.nextPageBtn.addEventListener('click', () => this.goToPage(this.currentPage + 1));
-            this.lastPageBtn.addEventListener('click', () => this.goToPage(this.getTotalPages()));
-        }
-        applyFilters() {
-            const searchTerm = this.searchInput.value.toLowerCase();
-            this.filteredRows = this.allRows.filter(row => {
-                if (this.currentFilter !== 'all' && row.dataset.status !== this.currentFilter) return false;
-                return Array.from(row.cells).some(td =>
-                    td.textContent.toLowerCase().includes(searchTerm)
-                );
-            });
-        }
-        updateDisplay() {
-            const totalEntries = this.filteredRows.length;
-            const totalPages = this.getTotalPages();
-            if (this.currentPage > totalPages) this.currentPage = totalPages || 1;
-            const start = (this.currentPage - 1) * this.entriesPerPage;
-            const end = start + this.entriesPerPage;
-            this.allRows.forEach(row => row.style.display = 'none');
-            this.filteredRows.slice(start, end).forEach(row => row.style.display = '');
-            const showingStart = totalEntries === 0 ? 0 : start + 1;
-            const showingEnd = Math.min(end, totalEntries);
-            this.paginationInfo.textContent = `Showing ${showingStart} to ${showingEnd} of ${totalEntries} entries`;
-            this.firstPageBtn.disabled = this.currentPage === 1;
-            this.prevPageBtn.disabled = this.currentPage === 1;
-            this.nextPageBtn.disabled = this.currentPage === totalPages || totalPages === 0;
-            this.lastPageBtn.disabled = this.currentPage === totalPages || totalPages === 0;
-            this.renderPageNumbers(totalPages);
-            this.updateDurationCells();
-        }
-        startAutoRefresh() {
-            const intervalMs = 3000;
-            const intervalSec = intervalMs / 1000;
-            setInterval(() => {
-                const refreshStatusEl = document.getElementById('refreshStatus');
-                const now = new Date().toLocaleTimeString();
-                if (refreshStatusEl) refreshStatusEl.textContent = `Refreshing data every ${intervalSec} seconds... (${now})`;
-                this.refreshData();
-            }, intervalMs);
-        }
-        refreshData() {
-            fetch(window.location.href)
-                .then(response => response.text())
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-                    const newTbody = doc.querySelector('#pipelinesTable tbody');
-                    if (newTbody) {
-                        const tbody = document.querySelector('#pipelinesTable tbody');
-                        tbody.innerHTML = newTbody.innerHTML;
-                        this.allRows = Array.from(document.querySelectorAll('#pipelinesTable tbody tr'));
-                        this.applyFilters();
-                        this.updateDisplay();
-                    }
-                })
-                .catch(error => { console.error('刷新資料失敗:', error); });
-        }
-        getTotalPages() { return Math.ceil(this.filteredRows.length / this.entriesPerPage); }
-        goToPage(page) {
-            const totalPages = this.getTotalPages();
-            if (page < 1) page = 1;
-            if (page > totalPages) page = totalPages;
-            if (page === this.currentPage) return;
-            this.currentPage = page;
-            this.updateDisplay();
-        }
-        renderPageNumbers(totalPages) {
-            this.pageNumbers.innerHTML = '';
-            const maxPagesToShow = 7;
-            let startPage = Math.max(this.currentPage - Math.floor(maxPagesToShow / 2), 1);
-            let endPage = startPage + maxPagesToShow - 1;
-            if (endPage > totalPages) { endPage = totalPages; startPage = Math.max(endPage - maxPagesToShow + 1, 1); }
-            for (let i = startPage; i <= endPage; i++) {
-                const btn = document.createElement('button');
-                btn.textContent = i;
-                btn.classList.add('pagination-btn');
-                if (i === this.currentPage) { btn.classList.add('active'); btn.disabled = true; }
-                btn.addEventListener('click', () => this.goToPage(i));
-                this.pageNumbers.appendChild(btn);
-            }
-        }
-        updateDurationCells() {
-            document.querySelectorAll('.duration-cell').forEach(cell => {
-                const seconds = parseInt(cell.dataset.seconds, 10);
-                if (isNaN(seconds) || seconds <= 0) {
-                    cell.textContent = '-';
-                } else {
-                    const mins = Math.floor(seconds / 60);
-                    const secs = seconds % 60;
-                    cell.textContent = `${mins > 0 ? `${mins}m` : ''}${secs}s`;
-                }
-            });
-        }
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-        const timezoneManager = new TimezoneManager();
-        const tablePagination = new TablePagination();
-        window.timezoneManager = timezoneManager;
-        window.tablePagination = tablePagination;
+  _bindEvents() {
+    if (!this.timezoneSelect) return;
+    this.timezoneSelect.addEventListener('change', (e) => {
+      this.currentTimezone = e.target.value;
+      this.updateAllDateCells();
     });
+  }
+
+  _detectUserTimezoneLabel() {
+    // 將 Local time 選項補上實際時區字樣（純顯示）
+    try {
+      const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const localOption = this.timezoneSelect?.querySelector('option[value="local"]');
+      if (localOption) localOption.textContent = `Local time (${userTz})`;
+    } catch (e) {
+      console.warn('Cannot detect user timezone:', e);
+    }
+  }
+
+  // 將日期字串格式化為選定時區的顯示（不改原值）
+  _formatDateTime(datetimeStr, timezone) {
+    if (!datetimeStr || datetimeStr === '-' || datetimeStr === 'None') return '-';
+    try {
+      const date = new Date(datetimeStr);
+      if (isNaN(date.getTime())) return datetimeStr; // 無效日期就原樣顯示
+      const opts = {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+      };
+      if (timezone !== 'local') opts.timeZone = timezone;
+      // 使用 en-CA 方便得到 YYYY-MM-DD HH:mm:ss 格式
+      return date.toLocaleString('en-CA', opts).replace(',', '');
+    } catch (e) {
+      console.error('Error formatting date:', e);
+      return datetimeStr;
+    }
+  }
+
+  // 針對頁面上所有日期欄位做一次渲染
+  updateAllDateCells() {
+    document.querySelectorAll('.date-cell[data-datetime]').forEach(cell => {
+      const raw = cell.getAttribute('data-datetime');
+      cell.textContent = this._formatDateTime(raw, this.currentTimezone);
+    });
+  }
+
+  // 供外部新進資料時使用
+  formatNewDateTime(datetimeStr) {
+    return this._formatDateTime(datetimeStr, this.currentTimezone);
+  }
+}
+
+/* ========================================================================
+ * TablePagination：表格的搜尋 / 狀態篩選 / 分頁 / 自動刷新 / Draft 操作
+ * - 不動你原本的資料結構與欄位
+ * - 會依據 .filter-btn 的 data-status 做狀態過濾
+ * - 搜尋會掃描該列所有儲存格文字
+ * - 自動刷新：定時重抓當前頁 HTML，覆蓋 <tbody> 後重建索引
+ * ====================================================================== */
+class TablePagination {
+  constructor() {
+    // 狀態與快取
+    this.currentPage     = 1;
+    this.entriesPerPage  = 10;
+    this.currentFilter   = 'all';
+    this.tableBody       = document.querySelector('#pipelinesTable tbody');
+    this.allRows         = Array.from(this.tableBody?.querySelectorAll('tr') || []);
+    this.filteredRows    = [...this.allRows];
+
+    // UI 元素
+    this.searchInput     = document.getElementById('searchInput');
+    this.entriesSelect   = document.getElementById('entriesPerPage');
+    this.paginationInfo  = document.getElementById('paginationInfo');
+    this.pageNumbers     = document.getElementById('pageNumbers');
+    this.firstPageBtn    = document.getElementById('firstPage');
+    this.prevPageBtn     = document.getElementById('prevPage');
+    this.nextPageBtn     = document.getElementById('nextPage');
+    this.lastPageBtn     = document.getElementById('lastPage');
+    this.filterButtons   = document.querySelectorAll('.filter-btn');
+
+    this._bindEvents();
+    this.applyFilters();
+    this.updateDisplay();
+    this._startAutoRefresh();
+  }
+
+  /* ---------------------- 綁定所有互動事件 ---------------------- */
+  _bindEvents() {
+    // 搜尋
+    if (this.searchInput) {
+      this.searchInput.addEventListener('input', () => {
+        this.applyFilters();
+        this.currentPage = 1;
+        this.updateDisplay();
+      });
+    }
+
+    // 每頁筆數
+    if (this.entriesSelect) {
+      this.entriesSelect.addEventListener('change', (e) => {
+        this.entriesPerPage = parseInt(e.target.value, 10);
+        this.currentPage = 1;
+        this.updateDisplay();
+      });
+    }
+
+    // 狀態篩選
+    this.filterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.filterButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.currentFilter = btn.dataset.status;
+        this.applyFilters();
+        this.currentPage = 1;
+        this.updateDisplay();
+      });
+    });
+
+    // Draft：Review / Edit / Delete（事件委派）
+    document.addEventListener('click', async (e) => {
+      const reviewBtn = e.target.closest('.btn-draft-review');
+      const editBtn   = e.target.closest('.btn-draft-edit');
+      const deleteBtn = e.target.closest('.btn-draft-delete');
+
+      // Review：開 modal + 內嵌 iframe 顯示 review 頁
+      if (reviewBtn) {
+        const wfId = reviewBtn.getAttribute('data-workflow-id');
+        const src  = REVIEW_URL_TMPL.replace('0', wfId);
+        const frame = document.getElementById('reviewFrame');
+        if (frame) frame.src = src;
+        const modal = new bootstrap.Modal(document.getElementById('reviewModal'));
+        modal.show();
+        return;
+      }
+
+      // Edit：導向草稿編輯頁（後端會用 request_payload 回填到 create form）
+      if (editBtn) {
+        const wfId = editBtn.getAttribute('data-workflow-id');
+        window.location.href = EDIT_URL_TMPL.replace('0', wfId);
+        return;
+      }
+
+      // Delete：刪除 DB 中的草稿，刪列並重建索引
+      if (deleteBtn) {
+        const wfId = deleteBtn.getAttribute('data-workflow-id');
+        if (!confirm(`Delete Draft #${wfId}?`)) return;
+
+        try {
+          const resp = await fetch(DELETE_URL_TMPL.replace('0', wfId), {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+          });
+          if (!resp.ok) {
+            const txt = await resp.text();
+            alert('Delete failed: ' + txt);
+            return;
+          }
+          const row = e.target.closest('tr');
+          if (row) row.remove();
+          this._reindexRows();
+        } catch (err) {
+          console.error(err);
+          alert('Network error while deleting draft.');
+        }
+        return;
+      }
+    });
+
+    // 分頁按鈕
+    this.firstPageBtn?.addEventListener('click', () => this.goToPage(1));
+    this.prevPageBtn?.addEventListener('click',  () => this.goToPage(this.currentPage - 1));
+    this.nextPageBtn?.addEventListener('click',  () => this.goToPage(this.currentPage + 1));
+    this.lastPageBtn?.addEventListener('click',  () => this.goToPage(this.getTotalPages()));
+  }
+
+  /* ---------------------- 過濾（搜尋 + 狀態） ---------------------- */
+  applyFilters() {
+    const term = (this.searchInput?.value || '').toLowerCase();
+
+    // 基本過濾：狀態 + 關鍵字
+    this.filteredRows = this.allRows.filter(row => {
+      if (this.currentFilter !== 'all' && row.dataset.status !== this.currentFilter) return false;
+      if (!term) return true;
+      return Array.from(row.cells).some(td => td.textContent.toLowerCase().includes(term));
+    });
+
+    // 如果你還有時間區間過濾（window.__timeFilter），可保留以下擴充：
+    // const tf = window.__timeFilter || {};
+    // if (tf.start || tf.end) { ... }
+  }
+
+  /* ---------------------- 顯示（分頁、資訊、頁碼、時長） ---------------------- */
+  updateDisplay() {
+    const totalEntries = this.filteredRows.length;
+    const totalPages   = this.getTotalPages();
+
+    if (this.currentPage > totalPages) this.currentPage = totalPages || 1;
+    const start = (this.currentPage - 1) * this.entriesPerPage;
+    const end   = start + this.entriesPerPage;
+
+    // 顯示/隱藏列
+    this.allRows.forEach(row => row.style.display = 'none');
+    this.filteredRows.slice(start, end).forEach(row => row.style.display = '');
+
+    // 分頁資訊
+    const showingStart = totalEntries === 0 ? 0 : start + 1;
+    const showingEnd   = Math.min(end, totalEntries);
+    if (this.paginationInfo) {
+      this.paginationInfo.textContent = `Showing ${showingStart} to ${showingEnd} of ${totalEntries} entries`;
+    }
+
+    // 分頁按鈕狀態
+    const atFirst = this.currentPage === 1;
+    const atLast  = this.currentPage === totalPages || totalPages === 0;
+    if (this.firstPageBtn) this.firstPageBtn.disabled = atFirst;
+    if (this.prevPageBtn)  this.prevPageBtn.disabled  = atFirst;
+    if (this.nextPageBtn)  this.nextPageBtn.disabled  = atLast;
+    if (this.lastPageBtn)  this.lastPageBtn.disabled  = atLast;
+
+    // 頁碼區
+    this._renderPageNumbers(totalPages);
+
+    // 時長欄位（秒 → XmYs）
+    this._updateDurationCells();
+  }
+
+  /* ---------------------- 自動刷新（每 3 秒） ---------------------- */
+  _startAutoRefresh() {
+    const intervalMs  = 3000;
+    const refreshHint = document.getElementById('refreshStatus');
+
+    setInterval(() => {
+      if (refreshHint) {
+        const now = new Date().toLocaleTimeString();
+        refreshHint.textContent = `Refreshing data every ${intervalMs / 1000} seconds... (${now})`;
+      }
+      this._refreshData();
+    }, intervalMs);
+  }
+
+  // 重新抓整頁 HTML，覆蓋 <tbody>，重建索引與顯示
+  _refreshData() {
+    fetch(window.location.href)
+      .then(res => res.text())
+      .then(html => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const newTbody = doc.querySelector('#pipelinesTable tbody');
+        if (!newTbody || !this.tableBody) return;
+
+        this.tableBody.innerHTML = newTbody.innerHTML;
+        this._reindexRows();
+      })
+      .catch(err => console.error('刷新資料失敗:', err));
+  }
+
+  // 重建列集合並重跑過濾與顯示
+  _reindexRows() {
+    this.allRows = Array.from(this.tableBody.querySelectorAll('tr'));
+    this.applyFilters();
+    this.updateDisplay();
+  }
+
+  /* ---------------------- 工具方法 ---------------------- */
+  getTotalPages() {
+    return Math.ceil(this.filteredRows.length / this.entriesPerPage);
+  }
+
+  goToPage(page) {
+    const totalPages = this.getTotalPages();
+    const p = Math.max(1, Math.min(page, totalPages || 1));
+    if (p === this.currentPage) return;
+    this.currentPage = p;
+    this.updateDisplay();
+  }
+
+  _renderPageNumbers(totalPages) {
+    if (!this.pageNumbers) return;
+    this.pageNumbers.innerHTML = '';
+
+    const max = 7;
+    let start = Math.max(this.currentPage - Math.floor(max / 2), 1);
+    let end   = start + max - 1;
+    if (end > totalPages) {
+      end = totalPages;
+      start = Math.max(end - max + 1, 1);
+    }
+
+    for (let i = start; i <= end; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = i;
+      btn.classList.add('pagination-btn');
+      if (i === this.currentPage) {
+        btn.classList.add('active');
+        btn.disabled = true;
+      }
+      btn.addEventListener('click', () => this.goToPage(i));
+      this.pageNumbers.appendChild(btn);
+    }
+  }
+
+  _updateDurationCells() {
+    document.querySelectorAll('.duration-cell').forEach(cell => {
+      const seconds = parseInt(cell.dataset.seconds, 10);
+      if (isNaN(seconds) || seconds <= 0) {
+        cell.textContent = '-';
+      } else {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        cell.textContent = `${mins > 0 ? `${mins}m` : ''}${secs}s`;
+      }
+    });
+  }
+}
+
+/* ========================================================================
+ * 入口：初始化 Timezone 顯示與表格控制
+ * ====================================================================== */
+document.addEventListener('DOMContentLoaded', () => {
+  const timezoneManager = new TimezoneManager();
+  const tablePagination = new TablePagination();
+
+  // 讓其他模組（若有）可以呼叫
+  window.timezoneManager = timezoneManager;
+  window.tablePagination = tablePagination;
+});
+
+
+/* ==========================================================================
+ * Time Range Filter (single box, 24h sliders)
+ * - 插入到 .search-controls，位置在 Timezone 選單後
+ * - 以 window.__timeFilter = {start:number|null, end:number|null} 與表格整合
+ * - 以「包裝」方式擴充 tablePagination.applyFilters()，不修改原類別程式
+ * ======================================================================== */
+(function addTimeRangeFilterBox() {
+  const sc = document.querySelector('.search-controls');
+  if (!sc) return;
+
+  // ---- 找到 Timezone 控制區塊，插在它後面 ----
+  const tzSelect = document.getElementById('timezoneSelect');
+  const tzBlock  = tzSelect ? tzSelect.closest('.timezone-control') : null;
+
+  // ---- 少量樣式（不影響你的原本 CSS） ----
+  const style = document.createElement('style');
+  style.textContent = `
+    .trf-wrap{position:relative;min-width:280px;}
+    .trf-toggle{cursor:pointer;}
+    .trf-panel{position:absolute;top:calc(100% + 6px);left:0;width:340px;background:#fff;z-index:1051;border:1px solid #e9ecef;box-shadow:0 8px 24px rgba(0,0,0,.12);display:none;border-radius:.5rem;}
+    .trf-panel .hdr{padding:.75rem 1rem;border-bottom:1px solid #f1f3f5;font-weight:600;background:#f8f9fa;border-top-left-radius:.5rem;border-top-right-radius:.5rem;}
+    .trf-panel .body{padding:1rem;}
+    .trf-row{display:grid;grid-template-columns:1fr;gap:.5rem;margin-bottom:1rem;}
+    .trf-row .date{display:flex;gap:.5rem;}
+    .trf-row .date input[type="date"]{flex:1;}
+    .trf-time{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:center;}
+    .trf-time .col{display:flex;flex-direction:column;gap:.25rem;}
+    .trf-time output{font-variant-numeric:tabular-nums;min-width:2ch}
+    .trf-actions{display:flex;justify-content:space-between;gap:.5rem;padding:0 1rem 1rem 1rem;}
+    .trf-actions .btn{min-width:80px}
+    .trf-label{font-size:.875rem;color:#6c757d}
+  `;
+  document.head.appendChild(style);
+
+  // ---- 元件骨架 ----
+  const wrap = document.createElement('div');
+  wrap.className = 'trf-wrap';
+  wrap.innerHTML = `
+    <button type="button" class="trf-toggle form-control ps-3 pe-2 py-1 d-flex align-items-center justify-content-between">
+      <span class="d-inline-flex align-items-center gap-2">
+        <i class="bi bi-clock-history"></i>
+        <span id="trfLabel">Time Filter</span>
+      </span>
+      <i class="bi bi-chevron-down ms-2"></i>
+    </button>
+    <div class="trf-panel" id="trfPanel">
+      <div class="hdr">Time range (24h)</div>
+      <div class="body">
+        <!-- From -->
+        <div class="trf-row">
+          <div class="trf-label">From</div>
+          <div class="date">
+            <input type="date" id="trfFromDate" class="form-control form-control-sm">
+          </div>
+          <div class="trf-time">
+            <div class="col">
+              <label class="small text-muted">Hour (0–23): <output id="trfFromHourOut">00</output></label>
+              <input type="range" id="trfFromHour" min="0" max="23" step="1" value="0" class="form-range">
+            </div>
+            <div class="col">
+              <label class="small text-muted">Minute (0–59): <output id="trfFromMinOut">00</output></label>
+              <input type="range" id="trfFromMin" min="0" max="59" step="1" value="0" class="form-range">
+            </div>
+          </div>
+        </div>
+        <!-- To -->
+        <div class="trf-row">
+          <div class="trf-label">To</div>
+          <div class="date">
+            <input type="date" id="trfToDate" class="form-control form-control-sm">
+          </div>
+          <div class="trf-time">
+            <div class="col">
+              <label class="small text-muted">Hour (0–23): <output id="trfToHourOut">23</output></label>
+              <input type="range" id="trfToHour" min="0" max="23" step="1" value="23" class="form-range">
+            </div>
+            <div class="col">
+              <label class="small text-muted">Minute (0–59): <output id="trfToMinOut">59</output></label>
+              <input type="range" id="trfToMin" min="0" max="59" step="1" value="59" class="form-range">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="trf-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="trfClear">Clear</button>
+        <button type="button" class="btn btn-sm btn-primary" id="trfApply">Apply</button>
+      </div>
+    </div>
+  `;
+
+  // 插入位置：在 Timezone 控件後；若找不到，就加在 .search-controls 末尾
+  if (tzBlock && tzBlock.nextSibling) {
+    sc.insertBefore(wrap, tzBlock.nextSibling);
+  } else {
+    sc.appendChild(wrap);
+  }
+
+  // ---- 狀態與 util ----
+  window.__timeFilter = { start: null, end: null };
+
+  const pad2 = n => String(n).padStart(2,'0');
+  const labelEl = wrap.querySelector('#trfLabel');
+  const panel   = wrap.querySelector('#trfPanel');
+  const toggle  = wrap.querySelector('.trf-toggle');
+
+  const fromDate = wrap.querySelector('#trfFromDate');
+  const fromH    = wrap.querySelector('#trfFromHour');
+  const fromM    = wrap.querySelector('#trfFromMin');
+  const fromHO   = wrap.querySelector('#trfFromHourOut');
+  const fromMO   = wrap.querySelector('#trfFromMinOut');
+
+  const toDate = wrap.querySelector('#trfToDate');
+  const toH    = wrap.querySelector('#trfToHour');
+  const toM    = wrap.querySelector('#trfToMin');
+  const toHO   = wrap.querySelector('#trfToHourOut');
+  const toMO   = wrap.querySelector('#trfToMinOut');
+
+  const btnApply = wrap.querySelector('#trfApply');
+  const btnClear = wrap.querySelector('#trfClear');
+
+  // 初始化預設顯示為今天（在地時區）
+  const todayISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  };
+  fromDate.value = todayISO();
+  toDate.value   = todayISO();
+
+  const updateOutputs = () => {
+    fromHO.textContent = pad2(fromH.value);
+    fromMO.textContent = pad2(fromM.value);
+    toHO.textContent   = pad2(toH.value);
+    toMO.textContent   = pad2(toM.value);
+  };
+  updateOutputs();
+
+  const openPanel  = () => panel.style.display = 'block';
+  const closePanel = () => panel.style.display = 'none';
+
+  toggle.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const visible = panel.style.display !== 'none';
+    visible ? closePanel() : openPanel();
+  });
+  document.addEventListener('click', (e)=>{
+    if (!panel.contains(e.target) && !toggle.contains(e.target)) closePanel();
+  });
+
+  [fromH, fromM, toH, toM].forEach(inp => {
+    inp.addEventListener('input', updateOutputs);
+  });
+
+  const toTsLocal = (dStr, h, m) => {
+    if (!dStr) return null;
+    const d = new Date(`${dStr}T00:00:00`);
+    if (isNaN(d.getTime())) return null;
+    d.setHours(Number(h||0));
+    d.setMinutes(Number(m||0));
+    d.setSeconds(0);
+    d.setMilliseconds(0);
+    return d.getTime();
+  };
+
+  const updateLabel = () => {
+    const tf = window.__timeFilter;
+    if (!tf.start && !tf.end) {
+      labelEl.textContent = 'Time Filter';
+      return;
+    }
+    const fmt = ts => {
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    };
+    const s = tf.start ? fmt(tf.start) : '';
+    const e = tf.end   ? fmt(tf.end)   : '';
+    labelEl.textContent = `${s}${s&&e?' ~ ':''}${e}` || 'Time Filter';
+  };
+
+  btnApply.addEventListener('click', ()=>{
+    const s = toTsLocal(fromDate.value, fromH.value, fromM.value);
+    const e = toTsLocal(toDate.value,   toH.value,   toM.value);
+    window.__timeFilter.start = s;
+    window.__timeFilter.end   = e;
+    updateLabel();
+    closePanel();
+    // 觸發重算
+    if (window.tablePagination) {
+      window.tablePagination.applyFilters();
+      window.tablePagination.currentPage = 1;
+      window.tablePagination.updateDisplay();
+    }
+  });
+
+  btnClear.addEventListener('click', ()=>{
+    window.__timeFilter.start = null;
+    window.__timeFilter.end   = null;
+    // 重設 UI（保留日期，時間歸 00:00~23:59）
+    fromH.value = 0;  fromM.value = 0;
+    toH.value   = 23; toM.value   = 59;
+    updateOutputs();
+    updateLabel();
+    if (window.tablePagination) {
+      window.tablePagination.applyFilters();
+      window.tablePagination.currentPage = 1;
+      window.tablePagination.updateDisplay();
+    }
+  });
+
+  // ---- 包裝 tablePagination.applyFilters：加入時間區間過濾，不改原程式 ----
+  document.addEventListener('DOMContentLoaded', () => {
+    if (!window.tablePagination) return;
+    const tp = window.tablePagination;
+    if (tp.__trf_patched) return; // 避免重複包裝
+
+    const origApply = tp.applyFilters.bind(tp);
+    tp.applyFilters = function () {
+      // 先跑原本的搜尋/狀態過濾
+      origApply();
+      // 再套時間區間
+      const tf = window.__timeFilter || {};
+      if (!tf.start && !tf.end) return;
+
+      const inRange = (ms) => {
+        if (ms == null) return false;
+        if (tf.start && ms < tf.start) return false;
+        if (tf.end   && ms > tf.end)   return false;
+        return true;
+      };
+
+      this.filteredRows = this.filteredRows.filter(row => {
+        // 以「Start」欄位（第一個 .date-cell[data-datetime]）為判斷依據
+        const startCell = row.querySelector('td.date-cell[data-datetime]');
+        if (!startCell) return false;
+        const raw = (startCell.getAttribute('data-datetime') || '').replace(' ', 'T');
+        const dt  = new Date(raw);
+        const ms  = isNaN(dt.getTime()) ? null : dt.getTime();
+        return inRange(ms);
+      });
+    };
+
+    tp.__trf_patched = true;
+  });
+
+})();
+
+
+
 </script>
 
 {% endblock %}
