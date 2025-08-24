@@ -52,13 +52,18 @@
 
     .custom-table { margin: 0; border: none; font-size: 0.85rem; }
     .custom-table thead th { background: var(--primary-color); color: white; border: none; padding: 1rem; font-weight: 500; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; white-space: nowrap; text-align: center; }
+
     .custom-table tbody td { padding: 1rem; vertical-align: middle; border-bottom: 1px solid #f1f3f4; }
     .custom-table tbody tr:hover { background-color: rgba(52, 152, 219, 0.05); }
-    .custom-table tbody td:nth-child(1),
-    .custom-table tbody td:nth-child(2),
-    .custom-table tbody td:nth-child(4),
-    .custom-table tbody td:nth-child(7),
-    .custom-table tbody td:nth-child(8) { text-align: center; }
+
+    /* 置中欄位（插入 Environment 後索引位移）*/
+    .custom-table tbody td:nth-child(1),  /* Workflow ID */
+    .custom-table tbody td:nth-child(2),  /* Ticket ID */
+    .custom-table tbody td:nth-child(3),  /* Environment */
+    .custom-table tbody td:nth-child(5),  /* Status */
+    .custom-table tbody td:nth-child(8),  /* Duration */
+    .custom-table tbody td:nth-child(9)   /* Action */
+    { text-align: center; }
 
     .status-badge { padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block; min-width: 70px; text-align: center; }
     .status-success { background: rgba(39,174,96,0.2); color: #27ae60; }
@@ -79,7 +84,7 @@
 
     .date-cell { white-space: nowrap; min-width: 120px; }
 
-    /* Summary：顯示完整字串（依你原本的風格） */
+    /* Summary：顯示完整字串（維持你原本的風格） */
     .summary-cell { white-space: normal; overflow: visible; max-width: none; word-break: break-word; }
 
     .search-controls { margin-top: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
@@ -169,6 +174,7 @@
                 <tr>
                     <th><i class="fas fa-code"></i> Workflow ID</th>
                     <th><i class="fas fa-ticket-alt"></i> Ticket ID</th>
+                    <th>Environment</th>
                     <th><i class="fas fa-list"></i> Summary</th>
                     <th><i class="fas fa-info-circle"></i> Status</th>
                     <th><i class="fas fa-calendar-plus"></i> Start</th>
@@ -182,6 +188,20 @@
                 {% set jira_ticket = (jira_tickets | selectattr('workflow_id', 'equalto', pipeline.workflow_id) | list | first) %}
                 {% set raw_status = pipeline.status.lower() %}
                 {% set normalized_status = raw_status %}
+
+                {# 解析 Environment：依你 _generate_create_summary 的格式
+                   "[VM Provisioning] {env} - {action} ..." #}
+                {% set summary_txt = (jira_ticket.summary if jira_ticket else '') %}
+                {% set env_val = '-' %}
+                {% if summary_txt %}
+                    {% set parts = summary_txt.split(']') %}
+                    {% if parts|length > 1 %}
+                        {% set after = parts[1].strip() %}
+                        {% set env_val = after.split(' - ')[0].strip() %}
+                    {% endif %}
+                {% endif %}
+                {% set env_upper = env_val.upper() if env_val != '-' else '-' %}
+
                 <tr data-status="{{ normalized_status }}">
                     <td><span class="workflow-id">{{ pipeline.workflow_id }}</span></td>
                     <td>
@@ -191,6 +211,7 @@
                             -
                         {% endif %}
                     </td>
+                    <td>{{ env_upper }}</td>
                     <td class="summary-cell">
                         {{ jira_ticket.summary if jira_ticket else '-' }}
                     </td>
@@ -390,7 +411,7 @@
 
                     try {
                         const resp = await fetch(DELETE_URL_TMPL.replace('0', wfId), {
-                            method: 'POST', // 若你要用 DELETE，等後端 OK 再把這裡改掉
+                            method: 'POST',
                             headers: { 'X-Requested-With': 'XMLHttpRequest' }
                         });
                         if (!resp.ok) {
@@ -398,7 +419,6 @@
                             alert('Delete failed: ' + txt);
                             return;
                         }
-                        // 從表格移除該列，並刷新分頁資訊
                         const row = e.target.closest('tr');
                         if (row) row.remove();
                         this.allRows = Array.from(document.querySelectorAll('#pipelinesTable tbody tr'));
@@ -421,7 +441,9 @@
             const searchTerm = this.searchInput.value.toLowerCase();
             this.filteredRows = this.allRows.filter(row => {
                 if (this.currentFilter !== 'all' && row.dataset.status !== this.currentFilter) return false;
-                return Array.from(row.cells).some(td => td.textContent.toLowerCase().includes(searchTerm));
+                return Array.from(row.cells).some(td =>
+                    td.textContent.toLowerCase().includes(searchTerm)
+                );
             });
         }
         updateDisplay() {
