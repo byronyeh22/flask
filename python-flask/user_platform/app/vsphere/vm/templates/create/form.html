@@ -19,8 +19,7 @@
   .form-actions { margin-top: 16px; display: flex; gap: 8px; }
   .btn-draft { background-color: #0d6efd; color: #fff; border: 1px solid #0d6efd; padding: .375rem .75rem; border-radius: .25rem; }
   .btn-cancel-link { background: transparent; color: #6c757d; text-decoration: none; padding: .375rem .75rem; }
-
-  /* 新增：簡單的錯誤樣式（不改你原有排版） */
+  /* 簡易錯誤樣式（沿用你原本風格） */
   .is-invalid { border-color: #dc3545 !important; box-shadow: 0 0 0 .2rem rgba(220,53,69,.25); }
 </style>
 
@@ -39,11 +38,23 @@
             <option value="uat"     {{ 'selected' if d.get('environment') == 'uat' else '' }}>UAT</option>
           </select>
         </div>
+
+        <!-- VM Name Prefix（新增 placeholder + 查重訊息） -->
         <div class="mb-3">
           <label for="vm_name_prefix" class="form-label">VM Name Prefix</label>
-          <input id="vm_name_prefix" type="text" name="vm_name_prefix" class="form-control" data-required="true" required
+          <input id="vm_name_prefix"
+                 type="text"
+                 name="vm_name_prefix"
+                 class="form-control"
+                 data-required="true"
+                 required
+                 placeholder="Enter a unique VM name for this environment"
                  value="{{ d.get('vm_name_prefix','') }}">
+          <div id="vmPrefixFeedback" class="invalid-feedback" style="display:none;">
+            A VM with this name already exists in the selected environment.
+          </div>
         </div>
+
         <div class="mb-3">
           <label class="form-label d-block">OS Type</label>
           <div class="form-check form-check-inline">
@@ -108,7 +119,7 @@
                 </div>
                 <div class="col-md-3">
                   <label class="form-label mb-0 small fw-bold">Size (GB)</label>
-                  <!-- 依需求：磁碟欄位不做必填檢查，移除 data-required -->
+                  <!-- 磁碟欄位不做必填檢查 -->
                   <input type="number" name="create_vm_disk_size[]" class="form-control form-control-sm" min="1"
                          value="{{ sizes[i] }}">
                 </div>
@@ -197,7 +208,7 @@
         <div>
           <label for="vm_ipv4_gateway" class="form-label">IPv4 Gateway</label>
           <select id="vm_ipv4_gateway" name="vm_ipv4_gateway" class="form-select" data-required="true" required>
-            <option value="" disabled {{ '' if d.get('vm_ipv4_gateway') else 'selected' }}>--- Select ---</option>
+            <option value="" disabled {{ '' if d.get('netbox_prefix') else 'selected' }}>--- Select ---</option>
             <option value="172.26.1.1" {{ 'selected' if d.get('vm_ipv4_gateway') == '172.26.1.1' else '' }}>172.26.1.1</option>
             <option value="192.168.0.1" {{ 'selected' if d.get('vm_ipv4_gateway') == '192.168.0.1' else '' }}>192.168.0.1</option>
           </select>
@@ -241,6 +252,7 @@
 </div>
 
 <script>
+  /* --------------------- 你的原本功能：磁碟列增減 --------------------- */
   function relabelDisks() {
     const rows = document.querySelectorAll('#disk-container .disk-item');
     rows.forEach((row, i) => {
@@ -248,23 +260,14 @@
       if (labelInput) labelInput.value = `New Disk ${i + 1}`;
     });
   }
-
   function addDisk(size, provisioning) {
     const defaultSize = 50;      // 預設 50GB
     const defaultProv  = 'thin'; // 預設 thin
     const diskContainer = document.getElementById('disk-container');
-
     const row = document.createElement('div');
     row.className = 'disk-item mb-2 p-3 border rounded bg-light';
-
-    const finalSize = (typeof size !== 'undefined' && size !== null && String(size).trim() !== '')
-      ? size
-      : defaultSize;
-
-    const finalProv = (typeof provisioning !== 'undefined' && provisioning)
-      ? provisioning
-      : defaultProv;
-
+    const finalSize = (typeof size !== 'undefined' && size !== null && String(size).trim() !== '') ? size : defaultSize;
+    const finalProv = (typeof provisioning !== 'undefined' && provisioning) ? provisioning : defaultProv;
     row.innerHTML = `
       <div class="row align-items-end g-2">
         <div class="col-md-4">
@@ -273,7 +276,6 @@
         </div>
         <div class="col-md-3">
           <label class="form-label mb-0 small fw-bold">Size (GB)</label>
-          <!-- 磁碟欄位不做必填檢查 -->
           <input type="number" name="create_vm_disk_size[]" class="form-control form-control-sm" min="1" value="${finalSize}">
         </div>
         <div class="col-md-5">
@@ -291,57 +293,38 @@
             <i class="bi bi-trash"></i> Remove
           </button>
         </div>
-      </div>
-    `;
+      </div>`;
     diskContainer.appendChild(row);
     relabelDisks();
   }
-
   function removeDisk(button) {
     const diskItem = button.closest('.disk-item');
     if (diskItem) diskItem.remove();
     relabelDisks();
   }
 
-  // 必填檢查（只檢查 data-required="true"；radio 以群組檢查）
+  /* --------------------- 你的原本功能：必填檢查 --------------------- */
   function validateRequiredFields(root) {
-    // 清除舊錯誤
     root.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
-
     let ok = true;
-
-    // 非 radio
     const musts = Array.from(root.querySelectorAll('[data-required="true"]')).filter(el => el.type !== 'radio');
     musts.forEach(el => {
       const v = (el.value || '').trim();
-      if (!v) {
-        el.classList.add('is-invalid');
-        ok = false;
-      }
+      if (!v) { el.classList.add('is-invalid'); ok = false; }
       if (el.type === 'number' && el.hasAttribute('min')) {
         const min = parseFloat(el.getAttribute('min'));
         const num = parseFloat(el.value);
-        if (isNaN(num) || num < min) {
-          el.classList.add('is-invalid');
-          ok = false;
-        }
+        if (isNaN(num) || num < min) { el.classList.add('is-invalid'); ok = false; }
       }
     });
-
-    // radio 群組
     const radioNames = new Set(
-      Array.from(root.querySelectorAll('input[type="radio"][data-required="true"]'))
-        .map(r => r.name)
+      Array.from(root.querySelectorAll('input[type="radio"][data-required="true"]')).map(r => r.name)
     );
     radioNames.forEach(name => {
       const group = root.querySelectorAll(`input[type="radio"][name="${name}"]`);
       const any = Array.from(group).some(r => r.checked);
-      if (!any) {
-        group.forEach(r => r.classList.add('is-invalid'));
-        ok = false;
-      }
+      if (!any) { group.forEach(r => r.classList.add('is-invalid')); ok = false; }
     });
-
     if (!ok) {
       const first = root.querySelector('.is-invalid');
       if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -349,46 +332,103 @@
     return ok;
   }
 
-  // 後備機制：若頁面上有 #workflow_id，將按鈕文字切成 Update to Draft
+  /* --------------------- 新增：同環境 VM Name 防重 --------------------- */
+  const __envVmCache = {}; // { env: Set([...]) } 以小寫儲存
+  async function fetchEnvVms(env) {
+    if (!env) return new Set();
+    if (__envVmCache[env]) return __envVmCache[env];
+    try {
+      const resp = await fetch(`/api/get_vms_by_environment/${encodeURIComponent(env)}`);
+      if (!resp.ok) throw new Error('fetch failed');
+      const data = await resp.json();
+      const names = new Set(
+        (Array.isArray(data) ? data : []).map(v => {
+          if (typeof v === 'string') return v.toLowerCase();
+          if (v && typeof v === 'object') return (v.vm_name_prefix || v.name || v.vm || '').toLowerCase();
+          return '';
+        }).filter(Boolean)
+      );
+      __envVmCache[env] = names;
+      return names;
+    } catch (e) {
+      console.warn('Failed to load env VMs:', e);
+      __envVmCache[env] = new Set();
+      return __envVmCache[env];
+    }
+  }
+  let __vmCheckTimer = null;
+  async function checkVmPrefixDuplicate() {
+    const envSel = document.getElementById('environment');
+    const env    = (envSel?.value || '').trim().toLowerCase();
+    const input  = document.getElementById('vm_name_prefix');
+    const fb     = document.getElementById('vmPrefixFeedback');
+    if (!input) return { duplicate: false };
+    const raw = (input.value || '').trim();
+    if (!env || !raw) {
+      input.classList.remove('is-invalid');
+      if (fb) fb.style.display = 'none';
+      input.dataset.dup = '0';
+      return { duplicate: false };
+    }
+    const envSet = await fetchEnvVms(env);
+    const isDup  = envSet.has(raw.toLowerCase());
+    if (isDup) {
+      input.classList.add('is-invalid');
+      if (fb) fb.style.display = 'block';
+      input.dataset.dup = '1';
+    } else {
+      input.classList.remove('is-invalid');
+      if (fb) fb.style.display = 'none';
+      input.dataset.dup = '0';
+    }
+    return { duplicate: isDup };
+  }
+  async function guardDuplicateBeforeSave() {
+    const result = await checkVmPrefixDuplicate();
+    if (result.duplicate) {
+      const envText = document.getElementById('environment')?.value?.toUpperCase() || '';
+      const val = document.getElementById('vm_name_prefix')?.value || '';
+      alert(`VM "${val}" already exists in ${envText}. Please choose another name.`);
+      return false;
+    }
+    return true;
+  }
+
+  /* --------------------- 初始化與按鈕行為 --------------------- */
   document.addEventListener('DOMContentLoaded', () => {
     relabelDisks();
     const wf = document.getElementById('workflow_id');
     const btn = document.getElementById('btn-save-draft');
-    if (wf && wf.value && btn) {
-      btn.textContent = 'Update to Draft';
-    }
+    if (wf && wf.value && btn) btn.textContent = 'Update to Draft';
+
+    // 綁定查重（環境切換 / 名稱輸入）
+    const envSel = document.getElementById('environment');
+    const input  = document.getElementById('vm_name_prefix');
+    envSel?.addEventListener('change', () => { input?.classList.remove('is-invalid'); document.getElementById('vmPrefixFeedback').style.display='none'; checkVmPrefixDuplicate(); });
+    input?.addEventListener('input', () => { clearTimeout(__vmCheckTimer); __vmCheckTimer = setTimeout(checkVmPrefixDuplicate, 200); });
   });
 
-  // Save / Update to Draft（含必填檢查）
+  // Save / Update to Draft（保留你原本流程，前面先做必填 + 防重）
   document.getElementById('btn-save-draft').addEventListener('click', async function () {
     const root = document.getElementById('create-form-root');
-
     if (!validateRequiredFields(root)) return;
+    if (!(await guardDuplicateBeforeSave())) return;
 
     const fields = root.querySelectorAll('input[name], select[name], textarea[name]');
     const fd = new FormData();
     fields.forEach(el => {
       const name = el.getAttribute('name');
       if (!name) return;
-      if (el.type === 'radio') {
-        if (el.checked) fd.append(name, el.value);
-      } else if (el.type === 'checkbox') {
-        if (el.checked) fd.append(name, el.value);
-      } else {
-        fd.append(name, el.value);
-      }
+      if (el.type === 'radio') { if (el.checked) fd.append(name, el.value); }
+      else if (el.type === 'checkbox') { if (el.checked) fd.append(name, el.value); }
+      else { fd.append(name, el.value); }
     });
-
     const wfInput = document.getElementById('workflow_id');
     if (wfInput && wfInput.value) fd.append('workflow_id', wfInput.value);
 
     try {
       const resp = await fetch("{{ url_for('vm.vsphere_create_vm_review') }}", { method: "POST", body: fd });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        alert("Save to Draft failed: " + txt);
-        return;
-      }
+      if (!resp.ok) { const txt = await resp.text(); alert("Save to Draft failed: " + txt); return; }
       window.location.href = "{{ url_for('vm.overview_index') }}";
     } catch (err) {
       console.error(err);

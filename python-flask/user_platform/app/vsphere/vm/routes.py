@@ -1,6 +1,4 @@
-# app/vsphere/vm/routes.py
-
-from flask import render_template, request, redirect, url_for, session, flash, jsonify
+from flask import render_template, request, redirect, url_for, session, flash, jsonify, current_app
 import traceback
 import json
 import logging
@@ -26,7 +24,7 @@ from .jira_api.get_jira_issue_detail import get_jira_issue_detail
 from .gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
 from .gitlab_api.run_manual_job import run_manual_job
 
-# === [新增] 匯入 summary 產生器：用於 DRAFT 顯示 ===
+# === 匯入 summary 產生器：用於 DRAFT 顯示 ===
 from .jira_api.create_jira_ticket import _generate_create_summary
 
 
@@ -37,10 +35,11 @@ def vm_index():
     """
     Render the main VM management page.
     """
-    VCENTER_HOST = "172.26.1.60"
-    VCENTER_USER = "administrator@vsphere.local"
-    VCENTER_PASSWORD = "Gict@1688+"
+    VCENTER_HOST = current_app.config['VSPHERE_HOST']
+    VCENTER_USER = current_app.config['VSPHERE_USER']
+    VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
     vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
+
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -61,12 +60,11 @@ def vm_index():
         session_data=session.get('create_vm_form_data', {})
     )
 
+
 @vm_bp.route("/vsphere/overview")
 def overview_index():
     """
     Render the overview page with all requests and their statuses.
-
-    [已改]
     - 合併 workflow_runs 的 DRAFT 到同一張表。
     """
     db_conn = None
@@ -77,7 +75,7 @@ def overview_index():
         jira_tickets = get_jira_tickets_and_stats(db_conn)
         pipeline_data = get_gitlab_pipeline_detail_and_stats(db_conn)
 
-        # === 新增：抓取 DRAFT 工作流 ===
+        # 取 DRAFT
         cur = db_conn.cursor(dictionary=True)
         cur.execute("""
             SELECT workflow_id, created_at, request_payload
@@ -88,7 +86,7 @@ def overview_index():
         drafts = cur.fetchall()
         cur.close()
 
-        # 轉為 pipeline-like
+        # 轉為 pipeline-like 並補 Summary
         for d in drafts:
             draft_row = {
                 "workflow_id": d["workflow_id"],
@@ -128,6 +126,7 @@ def overview_index():
 
     return render_template("overview_index.html", jira_tickets=jira_tickets, pipeline_data=pipeline_data)
 
+
 @vm_bp.route('/api/get_vms_by_environment/<string:environment>')
 def get_vms_by_environment_api(environment):
     """API endpoint to fetch VMs for a given environment."""
@@ -142,6 +141,7 @@ def get_vms_by_environment_api(environment):
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
+
 
 @vm_bp.route('/api/get_vm_config/<string:environment>/<string:vm_name_prefix>')
 def get_vm_config_api(environment, vm_name_prefix):
@@ -167,7 +167,9 @@ def get_vm_config_api(environment, vm_name_prefix):
 def vsphere_create_vm_review():
     """
     Handles the review step for VM creation.
-    [修改] Save to Draft 也會走這個：若有 workflow_id 且狀態為 DRAFT -> UPDATE；否則 INSERT。
+    Save to Draft 會走這裡：
+      - 若有 workflow_id 且狀態為 DRAFT -> UPDATE
+      - 否則 -> INSERT 新 DRAFT
     """
     form_data = request.form.to_dict(flat=False)
     processed_form_data = {}
@@ -177,20 +179,18 @@ def vsphere_create_vm_review():
         else:
             processed_form_data[key] = value[0] if isinstance(value, list) and value else value
 
-    # 保留原本 session 行為（你若已全面改 DB，可以移除此段）
+    # 保留 session（你目前 submit 流程還需要）
     session["form_scope"] = "create"
     session["create_vm_form_data"] = processed_form_data
     session.pop("vm_update_form_data", None)
 
-    # === 新增：INSERT 或 UPDATE DRAFT ===
     db_conn = None
     try:
         db_conn = get_db_connection()
         created_by = session.get("user", "webform_user")
 
-        wf_id = processed_form_data.get("workflow_id")  # 可能不存在
+        wf_id = processed_form_data.get("workflow_id")
         if wf_id:
-            # 嘗試更新既有 DRAFT
             cur = db_conn.cursor()
             cur.execute("SELECT status FROM workflow_runs WHERE workflow_id=%s", (wf_id,))
             row = cur.fetchone()
@@ -203,7 +203,7 @@ def vsphere_create_vm_review():
                 cur.close()
                 return redirect(url_for('vm.overview_index'))
 
-        # 否則新增一筆 DRAFT
+        # 新增 DRAFT
         cur = db_conn.cursor()
         cur.execute(
             "INSERT INTO workflow_runs (created_by, status, request_payload) VALUES (%s, 'DRAFT', %s)",
@@ -251,6 +251,7 @@ def vsphere_update_vm_review():
     session.pop('create_vm_form_data', None)
     return render_template("update/review.html", data=session["vm_update_form_data"])
 
+
 @vm_bp.route("/vsphere/vm/cancel")
 def vsphere_cancel_vm_form():
     """Clears form data from session."""
@@ -271,6 +272,7 @@ def _get_form_data_from_session():
         return session.pop("vm_update_form_data", {}).get("new_config")
     return None
 
+
 @vm_bp.route("/vsphere/vm/submit", methods=["POST"])
 def vsphere_submit_request():
     """
@@ -287,16 +289,16 @@ def vsphere_submit_request():
     try:
         db_conn = get_db_connection()
         
-        # 1. 建立 PENDING_APPROVAL 工作流
+        # 1) 建立 PENDING_APPROVAL 工作流
         workflow_id = record_pending_request(db_conn, triggered_by="webform_submit", form_data=form_data)
 
-        # 2. Jira
+        # 2) Jira
         jira_key = create_jira_ticket(form_data)
         ticket_data = get_jira_issue_detail(jira_key)
         insert_jira_info_to_db(db_conn, workflow_id, ticket_data)
         flash(f"Jira ticket {jira_key} created successfully.", "success")
 
-        # 3. GitLab Pipeline（等待人工批准）
+        # 3) GitLab Pipeline（等待手動批准）
         pipeline_result = trigger_gitlab_pipeline(jira_key, form_data)
         if pipeline_result.get("success"):
             insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_result, form_data)
@@ -376,17 +378,16 @@ def workflow_execute(workflow_id):
     return redirect(url_for('vm.overview_index'))
 
 
-# === [新增] Draft: Edit / Delete / Review ===
+# === Draft: Edit / Delete / Review ===
 
 @vm_bp.route("/workflow/draft/<int:workflow_id>/edit", methods=["GET"])
 def workflow_draft_edit(workflow_id: int):
     """
     打開原本的 create/form.html，並以 workflow_runs.request_payload 回填欄位。
     """
-    # 取得 vSphere 下拉資料
-    VCENTER_HOST = "172.26.1.60"
-    VCENTER_USER = "administrator@vsphere.local"
-    VCENTER_PASSWORD = "Gict@1688+"
+    VCENTER_HOST = current_app.config['VSPHERE_HOST']
+    VCENTER_USER = current_app.config['VSPHERE_USER']
+    VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
     vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
 
     db_conn = None
@@ -419,15 +420,14 @@ def workflow_draft_edit(workflow_id: int):
         if db_conn and db_conn.is_connected():
             db_conn.close()
 
-    # 渲染你原來的表單頁（維持版面），用 draft_data 回填，並帶 workflow_id
     return render_template(
         "create/form.html",
         datacenters=vsphere_data["datacenters"], clusters=vsphere_data["clusters"],
         templates=vsphere_data["templates"], networks=vsphere_data["networks"],
         datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
         environment=environments,
-        draft_data=draft_data,           # 新增：用它回填表單
-        workflow_id=workflow_id          # 新增：隱藏欄位會帶回來，Save to Draft 時做 UPDATE
+        draft_data=draft_data,
+        workflow_id=workflow_id
     )
 
 
@@ -455,27 +455,35 @@ def workflow_draft_delete(workflow_id: int):
             db_conn.close()
 
 
-@vm_bp.route("/workflow/review/<int:workflow_id>", methods=["GET"])
+@vm_bp.route('/workflow/review/<int:workflow_id>', methods=['GET'])
 def workflow_review_page(workflow_id: int):
     """
-    載入 review.html（提供給 overview 的 Modal 亦可）。
+    以現有 create/review.html 呈現草稿或待審資料（供 Modal iframe 使用）
     """
     db_conn = None
     try:
         db_conn = get_db_connection()
         cur = db_conn.cursor(dictionary=True)
-        cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id=%s", (workflow_id,))
-        row = cur.fetchone()
+        cur.execute("SELECT * FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+        wf = cur.fetchone()
         cur.close()
-        if not row:
-            return "Workflow not found", 404
 
-        request_details = json.loads(row["request_payload"] or "{}")
-        # 直接渲染你原本的 review.html（我不移除你的 Confirm & Submit）
-        return render_template("create/review.html", data=request_details, workflow_id=workflow_id)
+        if not wf:
+            flash(f"Workflow ID {workflow_id} not found.", "danger")
+            return redirect(url_for('vm.overview_index'))
+
+        payload = {}
+        try:
+            payload = json.loads(wf.get('request_payload') or "{}")
+        except Exception:
+            payload = {}
+
+        return render_template("create/review.html", data=payload, workflow=wf)
+
     except Exception as e:
-        logging.error(f"[workflow_review_page] {e}")
-        return f"Error: {e}", 500
+        logging.error(f"Error in workflow_review_page: {e}")
+        flash("Failed to load review page.", "danger")
+        return redirect(url_for('vm.overview_index'))
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
