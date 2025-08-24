@@ -3,8 +3,9 @@
 {% block content %}
 <h1 class="fs-4 fw-bold mb-4 ">Manage Virtual Machine</h1>
 
-<form method="post" id="vm-management-form" class="mb-4">
-  <input type="hidden" name="action_type" id="hidden-action-type" value="Create">
+<!-- 外層表單保留，但不再設定 action，也不再放送出按鈕 -->
+<form id="vm-management-form" class="mb-4">
+  <!-- 不再需要 hidden action_type（已移除） -->
 
   <ul class="nav nav-tabs mb-4" id="actionTypeTabs" role="tablist">
     <li class="nav-item" role="presentation">
@@ -23,6 +24,7 @@
 
   <div class="tab-content" id="vm-tab-content">
 
+    <!-- Create -->
     <div class="tab-pane fade show active" id="create-fields" role="tabpanel">
       <div class="card mb-3 border">
         <div class="card-body text-dark">
@@ -30,11 +32,10 @@
             In this step, you can configure the environment settings for creating a new Virtual Machine (VM).
           </p>
           <p>
-            After selecting the appropriate options, click <strong>Review</strong> to verify your configuration.
+            After selecting the appropriate options, click <strong>Save to Draft</strong> to store your configuration as a draft.
           </p>
           <p>
-            Once confirmed, click <strong>Submit</strong> to automatically create a Jira ticket and trigger the VM provisioning process,
-            including software installation based on the selected instance type.
+            Once submitted from overview, the system will automatically create a Jira ticket and trigger the VM provisioning pipeline.
           </p>
         </div>
       </div>
@@ -42,12 +43,14 @@
       {% include "create/form.html" %}
     </div>
 
+    <!-- Update -->
     <div class="tab-pane fade" id="update-fields" role="tabpanel">
       <div class="alert alert-warning">（請依需求填入更新欄位）</div>
       {% set action_type = 'Update' %}
       {% include "update/form.html" %}
     </div>
 
+    <!-- Delete -->
     <div class="tab-pane fade" id="delete-fields" role="tabpanel">
       <div class="alert alert-danger">（請選擇要刪除的 VM 名稱）</div>
       <div class="row g-3">
@@ -64,20 +67,15 @@
     </div>
 
   </div>
-
-  <div class="d-flex justify-content-end mt-4">
-    <a href="{{ url_for('vm.vsphere_cancel_vm_form') }}" class="btn btn-outline-danger me-2">Cancel</a>
-    <button type="submit" id="review-btn" class="btn btn-outline-secondary me-2">Review</button>
-    </div>
 </form>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const actionTabs = document.querySelectorAll('#actionTypeTabs button[data-bs-toggle="tab"]');
-    const actionTypeInput = document.getElementById('hidden-action-type');
-    const mainForm = document.getElementById('vm-management-form');
 
-    function updateFormState(activeTabId) {
+    // 只負責分頁切換時，啟用/停用欄位，與 required 標記
+    function updateFormState(activePaneSelector) {
+        // 先停用所有 pane 的所有 fields，並移除 required
         document.querySelectorAll('#vm-tab-content .tab-pane [name]').forEach(el => {
             el.disabled = true;
         });
@@ -85,7 +83,8 @@ document.addEventListener('DOMContentLoaded', function () {
             el.removeAttribute('required');
         });
 
-        const activePane = document.querySelector(activeTabId);
+        // 啟用目前 pane 的欄位，並加回 required
+        const activePane = document.querySelector(activePaneSelector);
         if (activePane) {
             activePane.querySelectorAll('[name]').forEach(el => {
                 el.disabled = false;
@@ -96,50 +95,22 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    function updateFormAction(action) {
-        if (action === 'Create') {
-            mainForm.action = "{{ url_for('vm.vsphere_create_vm_review') }}";
-        } else if (action === 'Update') {
-            mainForm.action = "{{ url_for('vm.vsphere_update_vm_review') }}";
-        } else if (action === 'Delete') {
-            mainForm.action = "/vsphere_delete_vm_review"; 
-        } else {
-            mainForm.action = "{{ url_for('vm.vsphere_create_vm_review') }}";
-        }
-    }
-
+    // 監聽分頁切換
     actionTabs.forEach(tab => {
-        tab.addEventListener('shown.bs.tab', event => { 
-            const action = event.target.textContent.trim();
-            const targetPaneId = event.target.getAttribute('data-bs-target');
-            
-            actionTypeInput.value = action;
-            updateFormState(targetPaneId);
-            updateFormAction(action);
+        tab.addEventListener('shown.bs.tab', event => {
+            const targetPaneSelector = event.target.getAttribute('data-bs-target');
+            updateFormState(targetPaneSelector);
         });
     });
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const activeTabName = urlParams.get('active_tab');
-
-    let initialTab = document.getElementById('create-tab'); 
-
-    if (activeTabName === 'update') {
-        const updateTab = document.getElementById('update-tab');
-        if (updateTab) {
-            initialTab = updateTab;
-        }
-    }
-    
+    // 初始狀態：顯示 Create pane 並套用 required
+    const initialTab = document.getElementById('create-tab');
     if (initialTab) {
         const tab = new bootstrap.Tab(initialTab);
         tab.show();
-        
-        const initialAction = initialTab.textContent.trim();
-        const initialPaneId = initialTab.getAttribute('data-bs-target');
-        actionTypeInput.value = initialAction;
-        updateFormState(initialPaneId);
-        updateFormAction(initialAction);
+
+        const initialPaneSelector = initialTab.getAttribute('data-bs-target');
+        updateFormState(initialPaneSelector);
     }
 });
 </script>
