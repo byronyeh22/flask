@@ -1,101 +1,134 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Review Request</title>
+  <!-- 保留原本 CSS 體感：載入 Bootstrap 與 Icons（不再 extends base.html，因此自行引入） -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
-{% block content %}
+  <style>
+    .kv { display: grid; grid-template-columns: 220px 1fr; gap: .5rem 1rem; }
+    .kv .k { color: #6c757d; font-weight: 600; }
+    .kv .v { word-break: break-word; }
+    .table-disks th, .table-disks td { vertical-align: middle; }
+  </style>
+</head>
+<body>
+<div class="container-fluid py-3">
 
-<form method="post" action="{{ url_for('vm.vsphere_submit_request') }}" onsubmit="return confirmSubmit();">
-  <h2 class="fw-bold fs-3 mb-4">Review Request</h2>
-  <p class="text-primary fw-bold">
-    Current Action: {{ data.action_type | capitalize }} {{ data.resource | default('VM') | capitalize }}
-  </p>
+  <h4 class="mb-3">Review Request</h4>
 
-  <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-light text-dark fw-bold">vSphere Configuration</div>
+  {# 後端以 render_template("create/review.html", data=...) 傳入 data #}
+  {% set d = data or {} %}
+
+  {# 磁碟欄位陣列處理：兩者皆可能為單值或陣列 #}
+  {% set sizes = d.get('create_vm_disk_size[]', []) %}
+  {% set provs = d.get('create_vm_disk_provisioning[]', []) %}
+  {% if sizes is string %}{% set sizes = [sizes] %}{% endif %}
+  {% if provs is string %}{% set provs = [provs] %}{% endif %}
+
+  <!-- Summary -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Summary</div>
     <div class="card-body">
-      <ul class="list-group list-group-flush">
-        <li class="list-group-item"><strong>Environment:</strong> <span>{{ data.environment }}</span></li>
-        <li class="list-group-item"><strong>Datacenter:</strong> <span>{{ data.vsphere_datacenter }}</span></li>
-        <li class="list-group-item"><strong>Cluster:</strong> <span>{{ data.vsphere_cluster }}</span></li>
-        <li class="list-group-item"><strong>VM Template:</strong> <span>{{ data.vsphere_template }}</span></li>
-        <li class="list-group-item"><strong>Datastore:</strong> <span>{{ data.vsphere_datastore }}</span></li>
-        <li class="list-group-item"><strong>Network:</strong> <span>{{ data.vsphere_network }}</span></li>
-        <li class="list-group-item"><strong>IPv4 Gateway:</strong> <span>{{ data.vm_ipv4_gateway }}</span></li>
-      </ul>
+      <div class="kv">
+        <div class="k">Action</div><div class="v">{{ d.get('action_type', 'Create') }}</div>
+        <div class="k">Resource</div><div class="v">{{ d.get('resource', 'vm') }}</div>
+        <div class="k">Environment</div><div class="v">{{ d.get('environment','-') }}</div>
+        <div class="k">VM Name Prefix</div><div class="v">{{ d.get('vm_name_prefix','-') }}</div>
+      </div>
     </div>
   </div>
 
-  <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-light text-dark fw-bold">VM Configuration</div>
-    <div class="card-body">
-      <ul class="list-group list-group-flush">
-        <li class="list-group-item"><strong>VM Name Prefix:</strong> <span>{{ data.vm_name_prefix }}</span></li>
-        <li class="list-group-item"><strong>OS Type:</strong> <span>{{ data.os_type }}</span></li>
-        <li class="list-group-item"><strong>VM Instance Type:</strong> <span>{{ data.vm_instance_type }}</span></li>
-        <li class="list-group-item"><strong>vCPU:</strong> <span>{{ data.vm_num_cpus }}</span></li>
-        <li class="list-group-item"><strong>Memory (MB):</strong> <span>{{ data.vm_memory }}</span></li>
+  <div class="row g-3">
+    <!-- Core -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-light fw-bold">Core</div>
+        <div class="card-body">
+          <div class="kv">
+            <div class="k">OS Type</div><div class="v">{{ d.get('os_type','-') }}</div>
+            <div class="k">Instance Type</div><div class="v">{{ d.get('vm_instance_type','-') }}</div>
+            <div class="k">vCPU</div><div class="v">{{ d.get('vm_num_cpus','-') }}</div>
+            <div class="k">Memory (MB)</div><div class="v">{{ d.get('vm_memory','-') }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-        <li class="list-group-item">
-          <strong>Additional Hard Disks:</strong>
-          {# 註解: 確保從 session/form_data 傳來的陣列可以被正確處理 #}
-          {% set sizes = data['create_vm_disk_size[]'] if data['create_vm_disk_size[]'] is sequence else [data['create_vm_disk_size[]']] if data['create_vm_disk_size[]'] else [] %}
-          {% set provs = data['create_vm_disk_provisioning[]'] if data['create_vm_disk_provisioning[]'] is sequence else [data['create_vm_disk_provisioning[]']] if data['create_vm_disk_provisioning[]'] else [] %}
-
-          {% if sizes and sizes|length > 0 %}
-            <div class="table-responsive mt-2">
-              <table class="table table-sm table-bordered align-middle">
-                <thead class="table-light">
-                  <tr>
-                    <th style="width: 33%;">Disk Label</th>
-                    <th style="width: 20%;">Size (GB)</th>
-                    <th style="width: 47%;">Provisioning</th>
-                  </tr>
-                </thead>
-                <tbody>
-                {% for i in range(sizes|length) %}
-                  {% set sz = sizes[i] %}
-                  {% set prov = (provs[i] if i < provs|length else 'thin') %}
-                  {% set prov_display = 'Thin Provision' if prov == 'thin'
-                                        else 'Thick Provision Lazy Zeroed' if prov == 'thick_lazy'
-                                        else 'Thick Provision Eager Zeroed' %}
-                  <tr>
-                    <td>
-                      <span class="badge bg-secondary">New Disk {{ i + 1 }}</span>
-                    </td>
-                    <td>{{ sz }}</td>
-                    <td>{{ prov_display }}</td>
-                  </tr>
-                {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          {% else %}
-            <p class="text-muted mt-2 mb-0">No additional disks requested.</p>
-          {% endif %}
-        </li>
-      </ul>
+    <!-- vSphere Placement -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-light fw-bold">vSphere Placement</div>
+        <div class="card-body">
+          <div class="kv">
+            <div class="k">Datacenter</div><div class="v">{{ d.get('vsphere_datacenter','-') }}</div>
+            <div class="k">Cluster</div><div class="v">{{ d.get('vsphere_cluster','-') }}</div>
+            <div class="k">Template</div><div class="v">{{ d.get('vsphere_template','-') }}</div>
+            <div class="k">Datastore</div><div class="v">{{ d.get('vsphere_datastore','-') }}</div>
+            <div class="k">Network</div><div class="v">{{ d.get('vsphere_network','-') }}</div>
+            <div class="k">IPv4 Gateway</div><div class="v">{{ d.get('vm_ipv4_gateway','-') }}</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-light text-dark fw-bold">NetBox Configuration</div>
+  <!-- NetBox -->
+  <div class="card shadow-sm mt-3">
+    <div class="card-header bg-light fw-bold">NetBox</div>
     <div class="card-body">
-      <ul class="list-group list-group-flush">
-        <li class="list-group-item"><strong>NetBox Prefix:</strong> <span>{{ data.netbox_prefix }}</span></li>
-        <li class="list-group-item"><strong>NetBox Tenant:</strong> <span>{{ data.netbox_tenant }}</span></li>
-      </ul>
+      <div class="kv">
+        <div class="k">Prefix</div><div class="v">{{ d.get('netbox_prefix','-') }}</div>
+        <div class="k">Tenant</div><div class="v">{{ d.get('netbox_tenant','-') }}</div>
+      </div>
     </div>
   </div>
 
-  <div class="d-flex justify-content-end mt-4">
-    <a href="{{ url_for('vm.vsphere_cancel_vm_form') }}" class="btn btn-outline-danger me-2">Cancel</a>
-    <a href="{{ url_for('vm.vm_index') }}" class="btn btn-outline-secondary me-2">Previous</a>
-    <button type="submit" class="btn btn-primary px-5">Confirm & Submit Request</button>
+  <!-- Additional Disks -->
+  <div class="card shadow-sm mt-3">
+    <div class="card-header bg-light fw-bold">Additional Disks</div>
+    <div class="card-body">
+      {% if sizes and sizes|length > 0 %}
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered table-disks mb-0">
+            <thead class="table-light">
+              <tr><th>#</th><th>Size (GB)</th><th>Provisioning</th></tr>
+            </thead>
+            <tbody>
+              {% for i in range(sizes|length) %}
+                <tr>
+                  <td>{{ i + 1 }}</td>
+                  <td>{{ sizes[i] }}</td>
+                  <td>{{ (provs[i] if i < provs|length else 'thin') }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <span>-</span>
+      {% endif %}
+    </div>
   </div>
-</form>
 
-<script>
-  function confirmSubmit() {
-    return confirm("Are you sure you want to submit this VM request for approval?");
-  }
-</script>
+  <!-- 還原：Confirm & Submit 按鈕 -->
+  <!-- 現階段沿用你原本的 /vsphere/vm/submit。若你改為從 DRAFT 送審的後端路由，之後再把 action 改掉即可。 -->
+  <div class="mt-4 d-flex justify-content-end gap-2">
+    <form method="post" action="{{ url_for('vm.vsphere_submit_request') }}">
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-check2-circle me-1"></i> Confirm &amp; Submit
+      </button>
+    </form>
+  </div>
 
-{% endblock %}
+</div>
+
+<!-- Bootstrap 5 JS (for modal behaviors etc. if needed inside iframe) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
