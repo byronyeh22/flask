@@ -225,11 +225,6 @@ def vsphere_create_vm_review():
         else:
             processed_form_data[key] = value[0] if isinstance(value, list) and value else value
 
-    # 保留 session（你目前 submit 流程還需要）
-    session["form_scope"] = "create"
-    session["create_vm_form_data"] = processed_form_data
-    session.pop("vm_update_form_data", None)
-
     db_conn = None
     try:
         db_conn = get_db_connection()
@@ -247,6 +242,7 @@ def vsphere_create_vm_review():
                 )
                 db_conn.commit()
                 cur.close()
+                flash(f"Draft #{wf_id} updated successfully.", "success")
                 return redirect(url_for('vm.overview_index'))
 
         # 新增 DRAFT
@@ -255,8 +251,10 @@ def vsphere_create_vm_review():
             "INSERT INTO workflow_runs (created_by, status, request_payload) VALUES (%s, 'DRAFT', %s)",
             (created_by, json.dumps(processed_form_data))
         )
+        new_workflow_id = cur.lastrowid
         db_conn.commit()
         cur.close()
+        flash(f"New draft #{new_workflow_id} created successfully.", "success")
 
     except Exception as e:
         logging.error(f"Failed to save draft: {e}")
@@ -272,7 +270,7 @@ def vsphere_create_vm_review():
 @vm_bp.route("/vsphere/vm/update/review", methods=["POST"])
 def vsphere_update_vm_review():
     """
-    Handles the review step for VM updates.
+    Handles saving an update request as a draft.
     """
     new_config = request.form.to_dict(flat=False)
     processed_new_config = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in new_config.items()}
@@ -281,43 +279,46 @@ def vsphere_update_vm_review():
     prefix = processed_new_config.get('vm_name_prefix')
     
     db_conn = None
-    original_config = {}
     try:
         db_conn = get_db_connection()
         original_config = get_vm_config(db_conn, env, prefix) or {}
+        
+        # Create a payload that includes both original and new configurations
+        payload = {
+            'original_config': original_config,
+            'new_config': processed_new_config,
+            # Explicitly add action_type to the top-level for easier parsing in review page
+            'action_type': 'update' 
+        }
+        
+        created_by = _current_username()
+        cur = db_conn.cursor()
+        cur.execute(
+            "INSERT INTO workflow_runs (created_by, status, request_payload) VALUES (%s, 'DRAFT', %s)",
+            (created_by, json.dumps(payload))
+        )
+        new_workflow_id = cur.lastrowid
+        db_conn.commit()
+        cur.close()
+        flash(f"New update draft #{new_workflow_id} for {prefix} has been created.", "success")
+        
+    except Exception as e:
+        logging.error(f"Failed to save update draft: {e}")
+        flash(f"Failed to save update draft: {e}", "danger")
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
     
-    session['form_scope'] = 'update'
-    session['vm_update_form_data'] = {
-        'original_config': original_config,
-        'new_config': processed_new_config
-    }
-    session.pop('create_vm_form_data', None)
-    return render_template("update/review.html", data=session["vm_update_form_data"])
+    return redirect(url_for('vm.overview_index'))
 
 
 @vm_bp.route("/vsphere/vm/cancel")
 def vsphere_cancel_vm_form():
-    """Clears form data from session."""
-    session.pop("create_vm_form_data", None)
-    session.pop("vm_update_form_data", None)
-    session.pop("form_scope", None)
+    """Redirects to the overview page, as session is no longer used for forms."""
     return redirect(url_for('vm.overview_index'))
 
 
 # --- Submit & Approval Workflow（原樣保留＋增強） ---
-
-def _get_form_data_from_session():
-    """輔助函式：從 session 中獲取對應的表單資料並清理 session。"""
-    form_scope = session.pop("form_scope", None)
-    if form_scope == "create":
-        return session.pop("create_vm_form_data", None)
-    elif form_scope == "update":
-        return session.pop("vm_update_form_data", {}).get("new_config")
-    return None
-
 
 @vm_bp.route("/vsphere/vm/submit", methods=["POST"])
 def vsphere_submit_request():
@@ -332,41 +333,43 @@ def vsphere_submit_request():
     # 是否由 modal/iframe 內發起（query 或 form 皆可）
     from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
 
-    # 先嘗試取 workflow_id（表單優先，否則從 session 暫存）
-    workflow_id = request.form.get("workflow_id") or session.pop("review_workflow_id", None)
+    # 先嘗試取 workflow_id（表單優先）
+    workflow_id = request.form.get("workflow_id")
+    if not workflow_id:
+        flash("Workflow ID is missing. Cannot submit request.", "danger")
+        return redirect(url_for('vm.overview_index'))
 
     db_conn = None
     try:
         db_conn = get_db_connection()
 
-        form_data = None
-        if workflow_id:
-            # 由 workflow 草稿取得 payload
-            cur = db_conn.cursor(dictionary=True)
-            cur.execute(
-                "SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s LIMIT 1",
-                (workflow_id,)
-            )
-            wf = cur.fetchone()
-            cur.close()
-            if not wf:
-                flash("找不到對應的草稿資料。", "danger")
-                return redirect(url_for('vm.vm_index'))
-            try:
-                form_data = json.loads(wf.get('request_payload') or "{}")
-            except Exception:
-                form_data = None
-            if not form_data:
-                flash("草稿內容為空，請回到表單檢查。", "danger")
-                return redirect(url_for('vm.vm_index'))
-        else:
-            # 沒有 workflow_id：維持原本用 session 的流程
-            form_data = _get_form_data_from_session()
-            if not form_data:
-                flash("Your session has expired or the form is empty. Please fill out the form again.", "warning")
-                return redirect(url_for('vm.vm_index'))
-            # 建立 PENDING_APPROVAL 工作流（原有行為）
-            workflow_id = record_pending_request(db_conn, triggered_by="webform_submit", form_data=form_data)
+        # 由 workflow 草稿取得 payload
+        cur = db_conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s LIMIT 1",
+            (workflow_id,)
+        )
+        wf = cur.fetchone()
+        cur.close()
+        if not wf:
+            flash(f"Workflow #{workflow_id} not found.", "danger")
+            return redirect(url_for('vm.overview_index'))
+            
+        form_data = {}
+        try:
+            # The payload might be nested for update requests
+            payload = json.loads(wf.get('request_payload') or "{}")
+            if 'new_config' in payload:
+                form_data = payload['new_config']
+            else:
+                form_data = payload
+        except (json.JSONDecodeError, TypeError):
+            flash("Draft content is invalid. Please check the form again.", "danger")
+            return redirect(url_for('vm.overview_index'))
+
+        if not form_data:
+            flash("Draft content is empty. Please check the form again.", "danger")
+            return redirect(url_for('vm.overview_index'))
 
         # === Jira ===
         jira_key = create_jira_ticket(form_data)
@@ -389,7 +392,7 @@ def vsphere_submit_request():
         logging.error(f"An error occurred during the submit process for workflow_id {workflow_id}: {e}")
         traceback.print_exc()
         flash(f"Failed to submit request: {e}", "danger")
-        return redirect(url_for('vm.vm_index'))
+        return redirect(url_for('vm.overview_index'))
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
@@ -570,11 +573,15 @@ def workflow_review_page(workflow_id: int):
         except Exception:
             payload = {}
 
-        # [CHANGED] 把 workflow_id 暫存在 session，讓 review.html 不改也可提交成功
-        session['review_workflow_id'] = workflow_id
+        # Determine if this is an update request by checking for 'new_config' key
+        is_update_action = 'new_config' in payload
 
-        # 仍然把 workflow_id 傳給模板（你若想在 review.html 放 hidden input 也可用）
-        return render_template("create/review.html", data=payload, workflow=wf, workflow_id=workflow_id)
+        if is_update_action:
+            # For update actions, render the update review template
+            return render_template("update/review.html", data=payload, workflow=wf)
+        else:
+            # For create actions, render the create review template
+            return render_template("create/review.html", data=payload, workflow=wf)
 
     except Exception as e:
         logging.error(f"Error in workflow_review_page: {e}")

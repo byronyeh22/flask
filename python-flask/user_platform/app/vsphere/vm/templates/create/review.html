@@ -119,7 +119,8 @@
   <!-- 還原：Confirm & Submit 按鈕 -->
   <!-- 現階段沿用你原本的 /vsphere/vm/submit。若你改為從 DRAFT 送審的後端路由，之後再把 action 改掉即可。 -->
   <div class="mt-4 d-flex justify-content-end gap-2">
-    <form method="post" action="{{ url_for('vm.vsphere_submit_request') }}?from_modal=1">
+    <form method="post" action="{{ url_for('vm.vsphere_submit_request') }}?from_modal=1" onsubmit="return confirm('Are you sure you want to submit this VM creation request?');">
+      <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
       <button type="submit" class="btn btn-primary">
         <i class="bi bi-check2-circle me-1"></i> Confirm &amp; Submit
       </button>
