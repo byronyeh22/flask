@@ -55,7 +55,7 @@ else: #Config.API_MODE == 'local'
     Config.GITLAB_URL = "http://127.0.0.1:5001/mock/gitlab"
     Config.GITLAB_PRIVATE_TOKEN = "mock-token"
     Config.GITLAB_TRIGGER_TOKEN = "mock-token"
-    Config.GITLAB_PROJECT_ID = "mock-project-id"
+    Config.GITLAB_PROJECT_ID = "15"
     Config.GITLAB_BRANCH = "main"
 
     # --- Jira Configuration ---

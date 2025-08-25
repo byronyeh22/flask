@@ -66,16 +66,33 @@ def overview_index():
     """
     Render the overview page with all requests and their statuses.
     - 合併 workflow_runs 的 DRAFT 到同一張表。
+    - 規範化 pipeline_data 的 created_at，避免模板排序報錯。
     """
+    def _to_iso(val):
+        try:
+            return val.isoformat()
+        except Exception:
+            return str(val) if val else "1970-01-01T00:00:00Z"
+
+    def _ensure_created_at(item: dict):
+        # 若沒有 created_at，改用 started_at；最後保底一個時間字串
+        if not item.get("created_at"):
+            item["created_at"] = item.get("started_at") or "1970-01-01T00:00:00Z"
+        item["created_at"] = _to_iso(item["created_at"])
+        return item
+
     db_conn = None
     try:
         db_conn = get_db_connection()
 
         # 既有資料
-        jira_tickets = get_jira_tickets_and_stats(db_conn)
-        pipeline_data = get_gitlab_pipeline_detail_and_stats(db_conn)
+        jira_tickets = get_jira_tickets_and_stats(db_conn) or []
+        pipeline_data = get_gitlab_pipeline_detail_and_stats(db_conn) or []
 
-        # 取 DRAFT
+        # 規範化：確保每筆都有 created_at（GitLab 那邊多半叫 started_at）
+        pipeline_data = [_ensure_created_at(dict(p)) for p in pipeline_data]
+
+        # 把 DRAFT 併進來
         cur = db_conn.cursor(dictionary=True)
         cur.execute("""
             SELECT workflow_id, created_at, request_payload
@@ -86,13 +103,12 @@ def overview_index():
         drafts = cur.fetchall()
         cur.close()
 
-        # 轉為 pipeline-like 並補 Summary
         for d in drafts:
             draft_row = {
                 "workflow_id": d["workflow_id"],
                 "pipeline_id": None,
                 "status": "draft",
-                "created_at": d["created_at"],
+                "created_at": _to_iso(d.get("created_at")),  # 要用 created_at，與模板排序一致
                 "finished_at": None,
                 "duration": None,
             }
@@ -113,7 +129,7 @@ def overview_index():
                 "description": None,
                 "status": None,
                 "url": None,
-                "created_at": d["created_at"],
+                "created_at": _to_iso(d.get("created_at")),
             })
 
     except Exception as e:
@@ -261,7 +277,7 @@ def vsphere_cancel_vm_form():
     return redirect(url_for('vm.overview_index'))
 
 
-# --- Submit & Approval Workflow（原樣保留） ---
+# --- Submit & Approval Workflow（原樣保留＋增強） ---
 
 def _get_form_data_from_session():
     """輔助函式：從 session 中獲取對應的表單資料並清理 session。"""
@@ -277,34 +293,59 @@ def _get_form_data_from_session():
 def vsphere_submit_request():
     """
     統一 Submit 路由。
+    - [CHANGED] 支援 workflow_id（從 request.form 或 session['review_workflow_id'] 取得）：
+      若有 workflow_id → 從 workflow_runs 讀取 request_payload 作為送單內容；
+      若無 → 回退使用 session 內的 create/update 表單資料。
     """
-    form_data = _get_form_data_from_session()
-
-    if not form_data:
-        flash("Your session has expired or the form is empty. Please fill out the form again.", "warning")
-        return redirect(url_for('vm.vm_index'))
+    # [CHANGED] 先嘗試取 workflow_id（表單優先，否則從 session 暫存）
+    workflow_id = request.form.get("workflow_id") or session.pop("review_workflow_id", None)
 
     db_conn = None
-    workflow_id = None
     try:
         db_conn = get_db_connection()
-        
-        # 1) 建立 PENDING_APPROVAL 工作流
-        workflow_id = record_pending_request(db_conn, triggered_by="webform_submit", form_data=form_data)
 
-        # 2) Jira
+        form_data = None
+        if workflow_id:
+            # [CHANGED] 由 workflow 草稿取得 payload
+            cur = db_conn.cursor(dictionary=True)
+            cur.execute("SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s LIMIT 1", (workflow_id,))
+            wf = cur.fetchone()
+            cur.close()
+            if not wf:
+                flash("找不到對應的草稿資料。", "danger")
+                return redirect(url_for('vm.vm_index'))
+            try:
+                form_data = json.loads(wf.get('request_payload') or "{}")
+            except Exception:
+                form_data = None
+            if not form_data:
+                flash("草稿內容為空，請回到表單檢查。", "danger")
+                return redirect(url_for('vm.vm_index'))
+        else:
+            # 沒有 workflow_id：維持原本用 session 的流程
+            form_data = _get_form_data_from_session()
+            if not form_data:
+                flash("Your session has expired or the form is empty. Please fill out the form again.", "warning")
+                return redirect(url_for('vm.vm_index'))
+            # 建立 PENDING_APPROVAL 工作流（原有行為）
+            workflow_id = record_pending_request(db_conn, triggered_by="webform_submit", form_data=form_data)
+
+        # === Jira ===
         jira_key = create_jira_ticket(form_data)
         ticket_data = get_jira_issue_detail(jira_key)
         insert_jira_info_to_db(db_conn, workflow_id, ticket_data)
         flash(f"Jira ticket {jira_key} created successfully.", "success")
 
-        # 3) GitLab Pipeline（等待手動批准）
+        # === GitLab Pipeline（等待手動批准） ===
         pipeline_result = trigger_gitlab_pipeline(jira_key, form_data)
         if pipeline_result.get("success"):
-            insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_result, form_data)
+            insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_result)
             flash(f"Pipeline {pipeline_result['pipeline_id']} has been triggered and is now awaiting approval.", "info")
         else:
             raise Exception(f"Failed to trigger GitLab Pipeline: {pipeline_result.get('error', 'Unknown error')}")
+
+        # [CHANGED] 既有/新建 workflow 都統一更新為 IN_PROGRESS
+        update_request_status(db_conn, workflow_id, "IN_PROGRESS")
 
     except Exception as e:
         logging.error(f"An error occurred during the submit process for workflow_id {workflow_id}: {e}")
@@ -485,7 +526,11 @@ def workflow_review_page(workflow_id: int):
         except Exception:
             payload = {}
 
-        return render_template("create/review.html", data=payload, workflow=wf)
+        # [CHANGED] 把 workflow_id 暫存在 session，讓 review.html 不改也可提交成功
+        session['review_workflow_id'] = workflow_id
+
+        # 仍然把 workflow_id 傳給模板（你若想在 review.html 放 hidden input 也可用）
+        return render_template("create/review.html", data=payload, workflow=wf, workflow_id=workflow_id)
 
     except Exception as e:
         logging.error(f"Error in workflow_review_page: {e}")

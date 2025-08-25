@@ -56,13 +56,12 @@
     .custom-table tbody td { padding: 1rem; vertical-align: middle; border-bottom: 1px solid #f1f3f4; }
     .custom-table tbody tr:hover { background-color: rgba(52, 152, 219, 0.05); }
 
-    /* 置中欄位（插入 Environment 後索引位移）*/
-    .custom-table tbody td:nth-child(1),  /* Workflow ID */
-    .custom-table tbody td:nth-child(2),  /* Ticket ID */
-    .custom-table tbody td:nth-child(3),  /* Environment */
-    .custom-table tbody td:nth-child(5),  /* Status */
-    .custom-table tbody td:nth-child(8),  /* Duration */
-    .custom-table tbody td:nth-child(9)   /* Action */
+    .custom-table tbody td:nth-child(1),
+    .custom-table tbody td:nth-child(2),
+    .custom-table tbody td:nth-child(3),
+    .custom-table tbody td:nth-child(5),
+    .custom-table tbody td:nth-child(8),
+    .custom-table tbody td:nth-child(9)
     { text-align: center; }
 
     .status-badge { padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block; min-width: 70px; text-align: center; }
@@ -83,8 +82,6 @@
     .ticket-link:hover { color: var(--primary-color); text-decoration: underline; }
 
     .date-cell { white-space: nowrap; min-width: 120px; }
-
-    /* Summary：顯示完整字串（維持你原本的風格） */
     .summary-cell { white-space: normal; overflow: visible; max-width: none; word-break: break-word; }
 
     .search-controls { margin-top: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
@@ -93,7 +90,6 @@
     .filter-section { display: flex; align-items: center; gap: 0.5rem; flex-wrap: nowrap; }
     .filter-btn { padding: 0.5rem 1rem; border: 2px solid #e9ecef; background: white; color: #6c757d; border-radius: var(--border-radius); transition: all 0.2s ease; cursor: pointer; white-space: nowrap; font-size: 0.85rem; }
 
-    /* Review Modal iframe 尺寸（沿用你原本設定） */
     .modal-xl { max-width: 95vw; }
     .review-iframe { width: 100%; height: 80vh; border: none; }
 </style>
@@ -189,8 +185,7 @@
                 {% set raw_status = pipeline.status.lower() %}
                 {% set normalized_status = raw_status %}
 
-                {# 解析 Environment：依你 _generate_create_summary 的格式
-                   "[VM Provisioning] {env} - {action} ..." #}
+                {# 解析 Environment #}
                 {% set summary_txt = (jira_ticket.summary if jira_ticket else '') %}
                 {% set env_val = '-' %}
                 {% if summary_txt %}
@@ -202,7 +197,7 @@
                 {% endif %}
                 {% set env_upper = env_val.upper() if env_val != '-' else '-' %}
 
-                <tr data-status="{{ normalized_status }}">
+                <tr data-status="{{ normalized_status }}" data-workflow-id="{{ pipeline.workflow_id }}">
                     <td><span class="workflow-id">{{ pipeline.workflow_id }}</span></td>
                     <td>
                         {% if jira_ticket and jira_ticket.ticket_id %}
@@ -218,37 +213,46 @@
                     <td>
                         <span class="status-badge status-{{ normalized_status }}">{{ pipeline.status }}</span>
                     </td>
-                    <td class="date-cell" data-datetime="{{ pipeline.created_at }}">{{ pipeline.created_at }}</td>
-                    <td class="date-cell" data-datetime="{{ pipeline.finished_at }}">{{ pipeline.finished_at or '-' }}</td>
+
+                    {# 顯示層去掉 'T'；data-datetime 維持原值 #}
+                    <td class="date-cell" data-datetime="{{ pipeline.created_at }}">{{ (pipeline.created_at or '')|replace('T',' ') or '-' }}</td>
+                    <td class="date-cell" data-datetime="{{ pipeline.finished_at }}">{{ (pipeline.finished_at or '')|replace('T',' ') or '-' }}</td>
+
                     <td class="duration-cell" data-seconds="{{ pipeline.duration or 0 }}"></td>
                     <td>
-                        {% if normalized_status == 'draft' %}
-                              <div class="actions-draft">
-                                <button type="button"
-                                        class="btn btn-sm btn-outline-primary btn-draft-edit"
-                                        data-action="edit"
-                                        data-workflow-id="{{ pipeline.workflow_id }}"
-                                        title="Edit">
-                                  <i class="bi bi-pencil-square"></i>
-                                </button>
-                                <a class="btn btn-sm btn-outline-secondary btn-draft-review"
-                                   data-workflow-id="{{ pipeline.workflow_id }}"
-                                   title="Review">
-                                  <i class="bi bi-eye"></i>
-                                </a>
-                                <button type="button"
-                                        class="btn btn-sm btn-outline-danger btn-draft-delete"
-                                        data-action="delete"
-                                        data-workflow-id="{{ pipeline.workflow_id }}"
-                                        title="Delete">
-                                  <i class="bi bi-trash"></i>
-                                </button>
-                              </div>
-                        {% elif normalized_status == 'manual' %}
-                            <a href="{{ url_for('vm.pipeline_approve', pipeline_id=pipeline.pipeline_id) }}" class="btn btn-sm btn-primary">Approve</a>
-                        {% else %}
-                            <button class="btn btn-sm btn-secondary" disabled>Approve</button>
-                        {% endif %}
+                        <div class="d-flex gap-1">
+                          {# Review：所有狀態都顯示；非 DRAFT → readonly=1 #}
+                          <a class="btn btn-sm btn-outline-secondary btn-row-review"
+                             data-workflow-id="{{ pipeline.workflow_id }}"
+                             data-readonly="{{ 1 if normalized_status != 'draft' else 0 }}"
+                             title="Review">
+                            <i class="bi bi-eye"></i>
+                          </a>
+
+                          {% if normalized_status == 'draft' %}
+                              <button type="button"
+                                      class="btn btn-sm btn-outline-primary btn-draft-edit"
+                                      data-action="edit"
+                                      data-workflow-id="{{ pipeline.workflow_id }}"
+                                      title="Edit">
+                                <i class="bi bi-pencil-square"></i>
+                              </button>
+                              <button type="button"
+                                      class="btn btn-sm btn-outline-danger btn-draft-delete"
+                                      data-action="delete"
+                                      data-workflow-id="{{ pipeline.workflow_id }}"
+                                      title="Delete">
+                                <i class="bi bi-trash"></i>
+                              </button>
+                          {% elif normalized_status == 'manual' %}
+                              <a href="{{ url_for('vm.pipeline_approve', pipeline_id=pipeline.pipeline_id) }}"
+                                 class="btn btn-sm btn-primary">
+                                Approve
+                              </a>
+                          {% else %}
+                              <button class="btn btn-sm btn-secondary" disabled>Approve</button>
+                          {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -283,7 +287,7 @@
     </div>
 </div>
 
-<!-- Review Modal（iframe 載入既有 review.html） -->
+<!-- Review Modal -->
 <div class="modal fade" id="reviewModal" tabindex="-1" aria-labelledby="reviewModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -295,7 +299,7 @@
         <iframe id="reviewFrame" class="review-iframe"></iframe>
       </div>
       <div class="modal-footer">
-        <!-- 這裡暫不放 Approve/Submit；待後端路由完成後再掛 -->
+        <!-- 不改 review.html，本頁以 JS 隱藏提交鈕 -->
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
@@ -304,17 +308,14 @@
 
 <script>
 /* ========================================================================
- * Router URL templates（後端路由樣板）
- * - 以 "0" 為佔位，前端在點擊時替換為實際 workflow_id
+ * Router URL templates
  * ====================================================================== */
 const REVIEW_URL_TMPL = "{{ url_for('vm.workflow_review_page', workflow_id=0) }}";
 const EDIT_URL_TMPL   = "{{ url_for('vm.workflow_draft_edit',  workflow_id=0) }}";
 const DELETE_URL_TMPL = "{{ url_for('vm.workflow_draft_delete',workflow_id=0) }}";
 
 /* ========================================================================
- * TimezoneManager：負責把 .date-cell[data-datetime] 依使用者選擇時區顯示
- * - 只動「顯示文字」，不改原本儲存在 data-datetime 的原始字串
- * - 預設 currentTimezone = 'local'
+ * TimezoneManager：維持原邏輯；顯示上移除 'T'
  * ====================================================================== */
 class TimezoneManager {
   constructor() {
@@ -324,7 +325,6 @@ class TimezoneManager {
     this._detectUserTimezoneLabel();
     this.updateAllDateCells();
   }
-
   _bindEvents() {
     if (!this.timezoneSelect) return;
     this.timezoneSelect.addEventListener('change', (e) => {
@@ -332,62 +332,42 @@ class TimezoneManager {
       this.updateAllDateCells();
     });
   }
-
   _detectUserTimezoneLabel() {
-    // 將 Local time 選項補上實際時區字樣（純顯示）
     try {
       const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const localOption = this.timezoneSelect?.querySelector('option[value="local"]');
       if (localOption) localOption.textContent = `Local time (${userTz})`;
-    } catch (e) {
-      console.warn('Cannot detect user timezone:', e);
-    }
+    } catch (e) { console.warn(e); }
   }
-
-  // 將日期字串格式化為選定時區的顯示（不改原值）
   _formatDateTime(datetimeStr, timezone) {
     if (!datetimeStr || datetimeStr === '-' || datetimeStr === 'None') return '-';
     try {
       const date = new Date(datetimeStr);
-      if (isNaN(date.getTime())) return datetimeStr; // 無效日期就原樣顯示
+      if (isNaN(date.getTime())) return (datetimeStr || '').replace('T',' ');
       const opts = {
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
         hour12: false
       };
       if (timezone !== 'local') opts.timeZone = timezone;
-      // 使用 en-CA 方便得到 YYYY-MM-DD HH:mm:ss 格式
       return date.toLocaleString('en-CA', opts).replace(',', '');
     } catch (e) {
-      console.error('Error formatting date:', e);
-      return datetimeStr;
+      return (datetimeStr || '').replace('T',' ');
     }
   }
-
-  // 針對頁面上所有日期欄位做一次渲染
   updateAllDateCells() {
     document.querySelectorAll('.date-cell[data-datetime]').forEach(cell => {
       const raw = cell.getAttribute('data-datetime');
       cell.textContent = this._formatDateTime(raw, this.currentTimezone);
     });
   }
-
-  // 供外部新進資料時使用
-  formatNewDateTime(datetimeStr) {
-    return this._formatDateTime(datetimeStr, this.currentTimezone);
-  }
 }
 
 /* ========================================================================
- * TablePagination：表格的搜尋 / 狀態篩選 / 分頁 / 自動刷新 / Draft 操作
- * - 不動你原本的資料結構與欄位
- * - 會依據 .filter-btn 的 data-status 做狀態過濾
- * - 搜尋會掃描該列所有儲存格文字
- * - 自動刷新：定時重抓當前頁 HTML，覆蓋 <tbody> 後重建索引
+ * TablePagination：只調整 Review 事件為單一路徑
  * ====================================================================== */
 class TablePagination {
   constructor() {
-    // 狀態與快取
     this.currentPage     = 1;
     this.entriesPerPage  = 10;
     this.currentFilter   = 'all';
@@ -395,7 +375,6 @@ class TablePagination {
     this.allRows         = Array.from(this.tableBody?.querySelectorAll('tr') || []);
     this.filteredRows    = [...this.allRows];
 
-    // UI 元素
     this.searchInput     = document.getElementById('searchInput');
     this.entriesSelect   = document.getElementById('entriesPerPage');
     this.paginationInfo  = document.getElementById('paginationInfo');
@@ -412,67 +391,48 @@ class TablePagination {
     this._startAutoRefresh();
   }
 
-  /* ---------------------- 綁定所有互動事件 ---------------------- */
   _bindEvents() {
-    // 搜尋
     if (this.searchInput) {
       this.searchInput.addEventListener('input', () => {
-        this.applyFilters();
-        this.currentPage = 1;
-        this.updateDisplay();
+        this.applyFilters(); this.currentPage = 1; this.updateDisplay();
       });
     }
-
-    // 每頁筆數
     if (this.entriesSelect) {
       this.entriesSelect.addEventListener('change', (e) => {
         this.entriesPerPage = parseInt(e.target.value, 10);
-        this.currentPage = 1;
-        this.updateDisplay();
+        this.currentPage = 1; this.updateDisplay();
       });
     }
-
-    // 狀態篩選
     this.filterButtons.forEach(btn => {
       btn.addEventListener('click', () => {
         this.filterButtons.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this.currentFilter = btn.dataset.status;
-        this.applyFilters();
-        this.currentPage = 1;
-        this.updateDisplay();
+        this.applyFilters(); this.currentPage = 1; this.updateDisplay();
       });
     });
 
-    // Draft：Review / Edit / Delete（事件委派）
     document.addEventListener('click', async (e) => {
-      const reviewBtn = e.target.closest('.btn-draft-review');
+      const reviewBtn = e.target.closest('.btn-row-review');
       const editBtn   = e.target.closest('.btn-draft-edit');
       const deleteBtn = e.target.closest('.btn-draft-delete');
 
-      // Review：開 modal + 內嵌 iframe 顯示 review 頁
       if (reviewBtn) {
         const wfId = reviewBtn.getAttribute('data-workflow-id');
-        const src  = REVIEW_URL_TMPL.replace('0', wfId);
-        const frame = document.getElementById('reviewFrame');
-        if (frame) frame.src = src;
-        const modal = new bootstrap.Modal(document.getElementById('reviewModal'));
-        modal.show();
+        const readonly = reviewBtn.getAttribute('data-readonly') === '1';
+        openReviewModal(wfId, readonly);
         return;
       }
 
-      // Edit：導向草稿編輯頁（後端會用 request_payload 回填到 create form）
       if (editBtn) {
         const wfId = editBtn.getAttribute('data-workflow-id');
         window.location.href = EDIT_URL_TMPL.replace('0', wfId);
         return;
       }
 
-      // Delete：刪除 DB 中的草稿，刪列並重建索引
       if (deleteBtn) {
         const wfId = deleteBtn.getAttribute('data-workflow-id');
         if (!confirm(`Delete Draft #${wfId}?`)) return;
-
         try {
           const resp = await fetch(DELETE_URL_TMPL.replace('0', wfId), {
             method: 'POST',
@@ -494,30 +454,21 @@ class TablePagination {
       }
     });
 
-    // 分頁按鈕
     this.firstPageBtn?.addEventListener('click', () => this.goToPage(1));
     this.prevPageBtn?.addEventListener('click',  () => this.goToPage(this.currentPage - 1));
     this.nextPageBtn?.addEventListener('click',  () => this.goToPage(this.currentPage + 1));
     this.lastPageBtn?.addEventListener('click',  () => this.goToPage(this.getTotalPages()));
   }
 
-  /* ---------------------- 過濾（搜尋 + 狀態） ---------------------- */
   applyFilters() {
     const term = (this.searchInput?.value || '').toLowerCase();
-
-    // 基本過濾：狀態 + 關鍵字
     this.filteredRows = this.allRows.filter(row => {
       if (this.currentFilter !== 'all' && row.dataset.status !== this.currentFilter) return false;
       if (!term) return true;
       return Array.from(row.cells).some(td => td.textContent.toLowerCase().includes(term));
     });
-
-    // 如果你還有時間區間過濾（window.__timeFilter），可保留以下擴充：
-    // const tf = window.__timeFilter || {};
-    // if (tf.start || tf.end) { ... }
   }
 
-  /* ---------------------- 顯示（分頁、資訊、頁碼、時長） ---------------------- */
   updateDisplay() {
     const totalEntries = this.filteredRows.length;
     const totalPages   = this.getTotalPages();
@@ -526,18 +477,13 @@ class TablePagination {
     const start = (this.currentPage - 1) * this.entriesPerPage;
     const end   = start + this.entriesPerPage;
 
-    // 顯示/隱藏列
     this.allRows.forEach(row => row.style.display = 'none');
     this.filteredRows.slice(start, end).forEach(row => row.style.display = '');
 
-    // 分頁資訊
     const showingStart = totalEntries === 0 ? 0 : start + 1;
     const showingEnd   = Math.min(end, totalEntries);
-    if (this.paginationInfo) {
-      this.paginationInfo.textContent = `Showing ${showingStart} to ${showingEnd} of ${totalEntries} entries`;
-    }
+    if (this.paginationInfo) this.paginationInfo.textContent = `Showing ${showingStart} to ${showingEnd} of ${totalEntries} entries`;
 
-    // 分頁按鈕狀態
     const atFirst = this.currentPage === 1;
     const atLast  = this.currentPage === totalPages || totalPages === 0;
     if (this.firstPageBtn) this.firstPageBtn.disabled = atFirst;
@@ -545,14 +491,10 @@ class TablePagination {
     if (this.nextPageBtn)  this.nextPageBtn.disabled  = atLast;
     if (this.lastPageBtn)  this.lastPageBtn.disabled  = atLast;
 
-    // 頁碼區
     this._renderPageNumbers(totalPages);
-
-    // 時長欄位（秒 → XmYs）
     this._updateDurationCells();
   }
 
-  /* ---------------------- 自動刷新（每 3 秒） ---------------------- */
   _startAutoRefresh() {
     const intervalMs  = 3000;
     const refreshHint = document.getElementById('refreshStatus');
@@ -566,7 +508,6 @@ class TablePagination {
     }, intervalMs);
   }
 
-  // 重新抓整頁 HTML，覆蓋 <tbody>，重建索引與顯示
   _refreshData() {
     fetch(window.location.href)
       .then(res => res.text())
@@ -577,22 +518,19 @@ class TablePagination {
 
         this.tableBody.innerHTML = newTbody.innerHTML;
         this._reindexRows();
+
+        if (window.timezoneManager) window.timezoneManager.updateAllDateCells();
       })
       .catch(err => console.error('刷新資料失敗:', err));
   }
 
-  // 重建列集合並重跑過濾與顯示
   _reindexRows() {
     this.allRows = Array.from(this.tableBody.querySelectorAll('tr'));
     this.applyFilters();
     this.updateDisplay();
   }
 
-  /* ---------------------- 工具方法 ---------------------- */
-  getTotalPages() {
-    return Math.ceil(this.filteredRows.length / this.entriesPerPage);
-  }
-
+  getTotalPages() { return Math.ceil(this.filteredRows.length / this.entriesPerPage); }
   goToPage(page) {
     const totalPages = this.getTotalPages();
     const p = Math.max(1, Math.min(page, totalPages || 1));
@@ -600,11 +538,9 @@ class TablePagination {
     this.currentPage = p;
     this.updateDisplay();
   }
-
   _renderPageNumbers(totalPages) {
     if (!this.pageNumbers) return;
     this.pageNumbers.innerHTML = '';
-
     const max = 7;
     let start = Math.max(this.currentPage - Math.floor(max / 2), 1);
     let end   = start + max - 1;
@@ -612,20 +548,15 @@ class TablePagination {
       end = totalPages;
       start = Math.max(end - max + 1, 1);
     }
-
     for (let i = start; i <= end; i++) {
       const btn = document.createElement('button');
       btn.textContent = i;
       btn.classList.add('pagination-btn');
-      if (i === this.currentPage) {
-        btn.classList.add('active');
-        btn.disabled = true;
-      }
+      if (i === this.currentPage) { btn.classList.add('active'); btn.disabled = true; }
       btn.addEventListener('click', () => this.goToPage(i));
       this.pageNumbers.appendChild(btn);
     }
   }
-
   _updateDurationCells() {
     document.querySelectorAll('.duration-cell').forEach(cell => {
       const seconds = parseInt(cell.dataset.seconds, 10);
@@ -641,265 +572,42 @@ class TablePagination {
 }
 
 /* ========================================================================
- * 入口：初始化 Timezone 顯示與表格控制
+ * Review Modal helper：readonly 時隱藏 iframe 內 submit
+ * ====================================================================== */
+function openReviewModal(workflowId, readonly=false) {
+  const src = REVIEW_URL_TMPL.replace('0', workflowId) + (readonly ? '?readonly=1' : '');
+  const frame = document.getElementById('reviewFrame');
+  if (!frame) return;
+
+  frame.onload = () => {
+    try {
+      if (!readonly) return;
+      const doc = frame.contentDocument || frame.contentWindow?.document;
+      if (!doc) return;
+      const submitElList = doc.querySelectorAll('button[type="submit"], input[type="submit"], .btn-submit, .js-submit');
+      submitElList.forEach(el => {
+        el.style.display = 'none';
+        el.disabled = true;
+      });
+    } catch (e) {
+      console.warn('Cannot hide submit button inside iframe:', e);
+    }
+  };
+
+  frame.src = src;
+  const modal = new bootstrap.Modal(document.getElementById('reviewModal'));
+  modal.show();
+}
+
+/* ========================================================================
+ * 入口
  * ====================================================================== */
 document.addEventListener('DOMContentLoaded', () => {
   const timezoneManager = new TimezoneManager();
   const tablePagination = new TablePagination();
-
-  // 讓其他模組（若有）可以呼叫
   window.timezoneManager = timezoneManager;
   window.tablePagination = tablePagination;
 });
-
-
-/* ==========================================================================
- * Time Range Filter (single box, 24h sliders)
- * - 插入到 .search-controls，位置在 Timezone 選單後
- * - 以 window.__timeFilter = {start:number|null, end:number|null} 與表格整合
- * - 以「包裝」方式擴充 tablePagination.applyFilters()，不修改原類別程式
- * ======================================================================== */
-(function addTimeRangeFilterBox() {
-  const sc = document.querySelector('.search-controls');
-  if (!sc) return;
-
-  // ---- 找到 Timezone 控制區塊，插在它後面 ----
-  const tzSelect = document.getElementById('timezoneSelect');
-  const tzBlock  = tzSelect ? tzSelect.closest('.timezone-control') : null;
-
-  // ---- 少量樣式（不影響你的原本 CSS） ----
-  const style = document.createElement('style');
-  style.textContent = `
-    .trf-wrap{position:relative;min-width:280px;}
-    .trf-toggle{cursor:pointer;}
-    .trf-panel{position:absolute;top:calc(100% + 6px);left:0;width:340px;background:#fff;z-index:1051;border:1px solid #e9ecef;box-shadow:0 8px 24px rgba(0,0,0,.12);display:none;border-radius:.5rem;}
-    .trf-panel .hdr{padding:.75rem 1rem;border-bottom:1px solid #f1f3f5;font-weight:600;background:#f8f9fa;border-top-left-radius:.5rem;border-top-right-radius:.5rem;}
-    .trf-panel .body{padding:1rem;}
-    .trf-row{display:grid;grid-template-columns:1fr;gap:.5rem;margin-bottom:1rem;}
-    .trf-row .date{display:flex;gap:.5rem;}
-    .trf-row .date input[type="date"]{flex:1;}
-    .trf-time{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:center;}
-    .trf-time .col{display:flex;flex-direction:column;gap:.25rem;}
-    .trf-time output{font-variant-numeric:tabular-nums;min-width:2ch}
-    .trf-actions{display:flex;justify-content:space-between;gap:.5rem;padding:0 1rem 1rem 1rem;}
-    .trf-actions .btn{min-width:80px}
-    .trf-label{font-size:.875rem;color:#6c757d}
-  `;
-  document.head.appendChild(style);
-
-  // ---- 元件骨架 ----
-  const wrap = document.createElement('div');
-  wrap.className = 'trf-wrap';
-  wrap.innerHTML = `
-    <button type="button" class="trf-toggle form-control ps-3 pe-2 py-1 d-flex align-items-center justify-content-between">
-      <span class="d-inline-flex align-items-center gap-2">
-        <i class="bi bi-clock-history"></i>
-        <span id="trfLabel">Time Filter</span>
-      </span>
-      <i class="bi bi-chevron-down ms-2"></i>
-    </button>
-    <div class="trf-panel" id="trfPanel">
-      <div class="hdr">Time range (24h)</div>
-      <div class="body">
-        <!-- From -->
-        <div class="trf-row">
-          <div class="trf-label">From</div>
-          <div class="date">
-            <input type="date" id="trfFromDate" class="form-control form-control-sm">
-          </div>
-          <div class="trf-time">
-            <div class="col">
-              <label class="small text-muted">Hour (0–23): <output id="trfFromHourOut">00</output></label>
-              <input type="range" id="trfFromHour" min="0" max="23" step="1" value="0" class="form-range">
-            </div>
-            <div class="col">
-              <label class="small text-muted">Minute (0–59): <output id="trfFromMinOut">00</output></label>
-              <input type="range" id="trfFromMin" min="0" max="59" step="1" value="0" class="form-range">
-            </div>
-          </div>
-        </div>
-        <!-- To -->
-        <div class="trf-row">
-          <div class="trf-label">To</div>
-          <div class="date">
-            <input type="date" id="trfToDate" class="form-control form-control-sm">
-          </div>
-          <div class="trf-time">
-            <div class="col">
-              <label class="small text-muted">Hour (0–23): <output id="trfToHourOut">23</output></label>
-              <input type="range" id="trfToHour" min="0" max="23" step="1" value="23" class="form-range">
-            </div>
-            <div class="col">
-              <label class="small text-muted">Minute (0–59): <output id="trfToMinOut">59</output></label>
-              <input type="range" id="trfToMin" min="0" max="59" step="1" value="59" class="form-range">
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="trf-actions">
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="trfClear">Clear</button>
-        <button type="button" class="btn btn-sm btn-primary" id="trfApply">Apply</button>
-      </div>
-    </div>
-  `;
-
-  // 插入位置：在 Timezone 控件後；若找不到，就加在 .search-controls 末尾
-  if (tzBlock && tzBlock.nextSibling) {
-    sc.insertBefore(wrap, tzBlock.nextSibling);
-  } else {
-    sc.appendChild(wrap);
-  }
-
-  // ---- 狀態與 util ----
-  window.__timeFilter = { start: null, end: null };
-
-  const pad2 = n => String(n).padStart(2,'0');
-  const labelEl = wrap.querySelector('#trfLabel');
-  const panel   = wrap.querySelector('#trfPanel');
-  const toggle  = wrap.querySelector('.trf-toggle');
-
-  const fromDate = wrap.querySelector('#trfFromDate');
-  const fromH    = wrap.querySelector('#trfFromHour');
-  const fromM    = wrap.querySelector('#trfFromMin');
-  const fromHO   = wrap.querySelector('#trfFromHourOut');
-  const fromMO   = wrap.querySelector('#trfFromMinOut');
-
-  const toDate = wrap.querySelector('#trfToDate');
-  const toH    = wrap.querySelector('#trfToHour');
-  const toM    = wrap.querySelector('#trfToMin');
-  const toHO   = wrap.querySelector('#trfToHourOut');
-  const toMO   = wrap.querySelector('#trfToMinOut');
-
-  const btnApply = wrap.querySelector('#trfApply');
-  const btnClear = wrap.querySelector('#trfClear');
-
-  // 初始化預設顯示為今天（在地時區）
-  const todayISO = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
-  };
-  fromDate.value = todayISO();
-  toDate.value   = todayISO();
-
-  const updateOutputs = () => {
-    fromHO.textContent = pad2(fromH.value);
-    fromMO.textContent = pad2(fromM.value);
-    toHO.textContent   = pad2(toH.value);
-    toMO.textContent   = pad2(toM.value);
-  };
-  updateOutputs();
-
-  const openPanel  = () => panel.style.display = 'block';
-  const closePanel = () => panel.style.display = 'none';
-
-  toggle.addEventListener('click', (e)=>{
-    e.stopPropagation();
-    const visible = panel.style.display !== 'none';
-    visible ? closePanel() : openPanel();
-  });
-  document.addEventListener('click', (e)=>{
-    if (!panel.contains(e.target) && !toggle.contains(e.target)) closePanel();
-  });
-
-  [fromH, fromM, toH, toM].forEach(inp => {
-    inp.addEventListener('input', updateOutputs);
-  });
-
-  const toTsLocal = (dStr, h, m) => {
-    if (!dStr) return null;
-    const d = new Date(`${dStr}T00:00:00`);
-    if (isNaN(d.getTime())) return null;
-    d.setHours(Number(h||0));
-    d.setMinutes(Number(m||0));
-    d.setSeconds(0);
-    d.setMilliseconds(0);
-    return d.getTime();
-  };
-
-  const updateLabel = () => {
-    const tf = window.__timeFilter;
-    if (!tf.start && !tf.end) {
-      labelEl.textContent = 'Time Filter';
-      return;
-    }
-    const fmt = ts => {
-      const d = new Date(ts);
-      return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-    };
-    const s = tf.start ? fmt(tf.start) : '';
-    const e = tf.end   ? fmt(tf.end)   : '';
-    labelEl.textContent = `${s}${s&&e?' ~ ':''}${e}` || 'Time Filter';
-  };
-
-  btnApply.addEventListener('click', ()=>{
-    const s = toTsLocal(fromDate.value, fromH.value, fromM.value);
-    const e = toTsLocal(toDate.value,   toH.value,   toM.value);
-    window.__timeFilter.start = s;
-    window.__timeFilter.end   = e;
-    updateLabel();
-    closePanel();
-    // 觸發重算
-    if (window.tablePagination) {
-      window.tablePagination.applyFilters();
-      window.tablePagination.currentPage = 1;
-      window.tablePagination.updateDisplay();
-    }
-  });
-
-  btnClear.addEventListener('click', ()=>{
-    window.__timeFilter.start = null;
-    window.__timeFilter.end   = null;
-    // 重設 UI（保留日期，時間歸 00:00~23:59）
-    fromH.value = 0;  fromM.value = 0;
-    toH.value   = 23; toM.value   = 59;
-    updateOutputs();
-    updateLabel();
-    if (window.tablePagination) {
-      window.tablePagination.applyFilters();
-      window.tablePagination.currentPage = 1;
-      window.tablePagination.updateDisplay();
-    }
-  });
-
-  // ---- 包裝 tablePagination.applyFilters：加入時間區間過濾，不改原程式 ----
-  document.addEventListener('DOMContentLoaded', () => {
-    if (!window.tablePagination) return;
-    const tp = window.tablePagination;
-    if (tp.__trf_patched) return; // 避免重複包裝
-
-    const origApply = tp.applyFilters.bind(tp);
-    tp.applyFilters = function () {
-      // 先跑原本的搜尋/狀態過濾
-      origApply();
-      // 再套時間區間
-      const tf = window.__timeFilter || {};
-      if (!tf.start && !tf.end) return;
-
-      const inRange = (ms) => {
-        if (ms == null) return false;
-        if (tf.start && ms < tf.start) return false;
-        if (tf.end   && ms > tf.end)   return false;
-        return true;
-      };
-
-      this.filteredRows = this.filteredRows.filter(row => {
-        // 以「Start」欄位（第一個 .date-cell[data-datetime]）為判斷依據
-        const startCell = row.querySelector('td.date-cell[data-datetime]');
-        if (!startCell) return false;
-        const raw = (startCell.getAttribute('data-datetime') || '').replace(' ', 'T');
-        const dt  = new Date(raw);
-        const ms  = isNaN(dt.getTime()) ? null : dt.getTime();
-        return inRange(ms);
-      });
-    };
-
-    tp.__trf_patched = true;
-  });
-
-})();
-
-
-
 </script>
 
 {% endblock %}
