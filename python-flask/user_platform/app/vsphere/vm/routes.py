@@ -24,8 +24,36 @@ from .jira_api.get_jira_issue_detail import get_jira_issue_detail
 from .gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
 from .gitlab_api.run_manual_job import run_manual_job
 
-# === 匯入 summary 產生器：用於 DRAFT 顯示 ===
+# --- 匯入 summary 產生器：用於 DRAFT 顯示 ---
 from .jira_api.create_jira_ticket import _generate_create_summary
+
+# --- hleper ---
+
+# 抓取目前登入 User
+def _current_username():
+    # 1) Flask-Login（若你有用）
+    try:
+        from flask_login import current_user
+        if current_user and getattr(current_user, "is_authenticated", False):
+            return (
+                getattr(current_user, "username", None)
+                or getattr(current_user, "email", None)
+                or (str(current_user.get_id()) if hasattr(current_user, "get_id") else None)
+            )
+    except Exception:
+        pass
+
+    # 2) 常見的 session key 順序嘗試
+    for k in ("user", "username", "account", "email", "uid"):
+        v = session.get(k)
+        if v:
+            return v
+
+    # 3) 最後退回預設
+    return "webform_user"
+
+
+
 
 
 # --- 主視圖與 API (Views & APIs) ---
@@ -203,7 +231,7 @@ def vsphere_create_vm_review():
     db_conn = None
     try:
         db_conn = get_db_connection()
-        created_by = session.get("user", "webform_user")
+        created_by = _current_username()
 
         wf_id = processed_form_data.get("workflow_id")
         if wf_id:
@@ -296,8 +324,13 @@ def vsphere_submit_request():
     - [CHANGED] 支援 workflow_id（從 request.form 或 session['review_workflow_id'] 取得）：
       若有 workflow_id → 從 workflow_runs 讀取 request_payload 作為送單內容；
       若無 → 回退使用 session 內的 create/update 表單資料。
+    - [NEW] 若偵測到 from_modal=1，成功後回傳一段 JS 讓「父視窗」跳回 overview，
+      避免在 iframe 內 redirect 造成 overview 被載到 modal 裡面。
     """
-    # [CHANGED] 先嘗試取 workflow_id（表單優先，否則從 session 暫存）
+    # 是否由 modal/iframe 內發起（query 或 form 皆可）
+    from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
+
+    # 先嘗試取 workflow_id（表單優先，否則從 session 暫存）
     workflow_id = request.form.get("workflow_id") or session.pop("review_workflow_id", None)
 
     db_conn = None
@@ -306,9 +339,12 @@ def vsphere_submit_request():
 
         form_data = None
         if workflow_id:
-            # [CHANGED] 由 workflow 草稿取得 payload
+            # 由 workflow 草稿取得 payload
             cur = db_conn.cursor(dictionary=True)
-            cur.execute("SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s LIMIT 1", (workflow_id,))
+            cur.execute(
+                "SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s LIMIT 1",
+                (workflow_id,)
+            )
             wf = cur.fetchone()
             cur.close()
             if not wf:
@@ -344,7 +380,7 @@ def vsphere_submit_request():
         else:
             raise Exception(f"Failed to trigger GitLab Pipeline: {pipeline_result.get('error', 'Unknown error')}")
 
-        # [CHANGED] 既有/新建 workflow 都統一更新為 IN_PROGRESS
+        # 既有/新建 workflow 都統一更新為 IN_PROGRESS
         update_request_status(db_conn, workflow_id, "IN_PROGRESS")
 
     except Exception as e:
@@ -356,7 +392,13 @@ def vsphere_submit_request():
         if db_conn and db_conn.is_connected():
             db_conn.close()
 
-    return redirect(url_for('vm.overview_index'))
+    # === 成功之後的導向：若由 modal 而來，用 JS 讓「父頁」跳回 overview，否則一般 redirect ===
+    redirect_url = url_for('vm.overview_index')
+    if from_modal:
+        # 用 top（或 parent 備援）把父視窗導回 overview，這樣 flash 訊息會顯示在父頁
+        return f'<script>try{{window.top.location="{redirect_url}";}}catch(e){{window.parent.location="{redirect_url}";}}</script>'
+
+    return redirect(redirect_url)
 
 
 @vm_bp.route('/workflow/approve/<int:workflow_id>', methods=['GET'])
