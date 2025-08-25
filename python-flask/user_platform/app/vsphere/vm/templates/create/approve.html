@@ -1,292 +1,190 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pipeline Approval</title>
+  <!-- 與 review.html 一致：自載 Bootstrap 與 Icons（不 extends base.html，方便做為 modal iframe） -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
-{% block content %}
-<style>
-    :root {
-        --primary-color: #2c3e50;
-        --accent-color: #3498db;
-        --success-color: #27ae60;
-        --warning-color: #f39c12;
-        --danger-color: #e74c3c;
-        --light-bg: #f8f9fa;
-        --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        --border-radius: 8px;
-    }
+  <style>
+    .kv { display: grid; grid-template-columns: 220px 1fr; gap: .5rem 1rem; }
+    .kv .k { color: #6c757d; font-weight: 600; }
+    .kv .v { word-break: break-word; }
+    .table-disks th, .table-disks td { vertical-align: middle; }
+    .status-badge { padding: 0.25rem 0.6rem; border-radius: 999px; font-size: .78rem; font-weight: 600; text-transform: uppercase; }
+    .status-manual  { background: rgba(241,196,15,.18); color:#b07d00; border: 1px solid rgba(241,196,15,.35); }
+    .status-running { background: rgba(52,152,219,.18); color:#1b6691; border: 1px solid rgba(52,152,219,.35); }
+    .status-success { background: rgba(39,174,96,.18); color:#167a44; border: 1px solid rgba(39,174,96,.35); }
+    .status-failed  { background: rgba(231,76,60,.18); color:#9c2e21; border: 1px solid rgba(231,76,60,.35); }
+    .status-default { background: rgba(108,117,125,.18); color:#495057; border: 1px solid rgba(108,117,125,.35); }
+    .workflow-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  </style>
+</head>
+<body>
+<div class="container-fluid py-3">
 
-    .page-header {
-        background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%);
-        color: white;
-        padding: 2rem 0;
-        margin: -15px -15px 30px -15px;
-        border-radius: var(--border-radius) var(--border-radius) 0 0;
-        position: relative;
-        overflow: hidden;
-    }
+  <h4 class="mb-3 d-flex align-items-center gap-2">
+    <i class="bi bi-check2-circle"></i>
+    Pipeline Approval
+  </h4>
 
-    .page-header h2 {
-        margin: 0;
-        font-weight: 300;
-        font-size: 2rem;
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }
+  {# 後端 route workflow_approve_page() 傳入：
+     workflow, pipeline, jira_ticket, request_details #}
+  {% set d = request_details or {} %}
 
-    .status-badge {
-        padding: 0.4rem 0.8rem;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        display: inline-block;
-        min-width: 70px;
-        text-align: center;
-        background: rgba(241, 196, 15, 0.2);
-        color: #f39c12;
-    }
+  {# 解析 Additional Disks（沿用 review.html 的邏輯） #}
+  {% set sizes = d.get('create_vm_disk_size', d.get('create_vm_disk_size[]', [])) %}
+  {% set provs = d.get('create_vm_disk_provisioning', d.get('create_vm_disk_provisioning[]', [])) %}
+  {% if sizes is string %}{% set sizes = [sizes] %}{% endif %}
+  {% if provs is string %}{% set provs = [provs] %}{% endif %}
 
-    .workflow-id {
-        font-family: 'Courier New', monospace;
-        background: rgba(52, 152, 219, 0.1);
-        padding: 0.2rem 0.5rem;
-        border-radius: 4px;
-        font-size: 1.1rem;
-        color: var(--accent-color);
-        font-weight: 500;
-    }
-</style>
-
-<div class="container-fluid">
-    <!-- Page Header -->
-    <div class="page-header">
-        <div class="container-fluid">
-            <h2>
-                <i class="fas fa-check-circle"></i>
-                Pipeline Approval
-            </h2>
-            <p class="subtitle">Review and approve pipeline execution</p>
+  <!-- Pipeline Information -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Pipeline</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Workflow ID</div><div class="v workflow-id">#{{ workflow.workflow_id }}</div>
+        <div class="k">Pipeline ID</div><div class="v">{{ (pipeline.pipeline_id if pipeline else '-') }}</div>
+        <div class="k">Status</div>
+        <div class="v">
+          {% set st = (pipeline.status if pipeline else '-')|lower %}
+          {% set badge = 'status-default' %}
+          {% if st == 'manual' %}{% set badge = 'status-manual' %}
+          {% elif st in ['created','pending','preparing','running','waiting_for_resource'] %}{% set badge='status-running' %}
+          {% elif st == 'success' %}{% set badge='status-success' %}
+          {% elif st in ['failed','canceled'] %}{% set badge='status-failed' %}{% endif %}
+          <span class="status-badge {{ badge }}">{{ pipeline.status if pipeline else '-' }}</span>
         </div>
+        <div class="k">Web URL</div>
+        <div class="v">
+          {% if pipeline and pipeline.web_url %}
+            <a href="{{ pipeline.web_url }}" target="_blank" class="link-primary">Open in GitLab</a>
+          {% else %}
+            -
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary（比照 review.html） -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Summary</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Action</div><div class="v">{{ d.get('action_type', 'Create') }}</div>
+        <div class="k">Resource</div><div class="v">{{ d.get('resource', 'vm') }}</div>
+        <div class="k">Environment</div><div class="v">{{ d.get('environment','-') }}</div>
+        <div class="k">VM Name Prefix</div><div class="v">{{ d.get('vm_name_prefix','-') }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Core -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-light fw-bold">Core</div>
+        <div class="card-body">
+          <div class="kv">
+            <div class="k">OS Type</div><div class="v">{{ d.get('os_type','-') }}</div>
+            <div class="k">Instance Type</div><div class="v">{{ d.get('vm_instance_type','-') }}</div>
+            <div class="k">vCPU</div><div class="v">{{ d.get('vm_num_cpus','-') }}</div>
+            <div class="k">Memory (MB)</div><div class="v">{{ d.get('vm_memory','-') }}</div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <form method="post" action="{{ url_for('vm.trigger_manual_job', pipeline_id=pipeline.pipeline_id) }}" onsubmit="return confirmSubmit();">
-
-        <!-- Pipeline Information -->
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light text-dark fw-bold">
-                <i class="fas fa-info-circle me-2"></i>Pipeline Information
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Workflow ID：</strong>
-                                <span class="workflow-id">{{ pipeline.workflow_id }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Pipeline ID：</strong>
-                                <span>{{ pipeline.pipeline_id }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Status：</strong>
-                                <span class="status-badge">{{ pipeline.status }}</span>
-                            </li>
-                        </ul>
-                    </div>
-                    <div class="col-md-6">
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Created：</strong>
-                                <span>{{ pipeline.created_at }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Triggered By：</strong>
-                                <span>{{ pipeline.triggered_by or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Web URL：</strong>
-                                {% if pipeline.web_url %}
-                                    <a href="{{ pipeline.web_url }}" target="_blank" class="text-primary">View Pipeline</a>
-                                {% else %}
-                                    <span>-</span>
-                                {% endif %}
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
+    <!-- vSphere Placement -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-light fw-bold">vSphere Placement</div>
+        <div class="card-body">
+          <div class="kv">
+            <div class="k">Datacenter</div><div class="v">{{ d.get('vsphere_datacenter','-') }}</div>
+            <div class="k">Cluster</div><div class="v">{{ d.get('vsphere_cluster','-') }}</div>
+            <div class="k">Template</div><div class="v">{{ d.get('vsphere_template','-') }}</div>
+            <div class="k">Datastore</div><div class="v">{{ d.get('vsphere_datastore','-') }}</div>
+            <div class="k">Network</div><div class="v">{{ d.get('vsphere_network','-') }}</div>
+            <div class="k">IPv4 Gateway</div><div class="v">{{ d.get('vm_ipv4_gateway','-') }}</div>
+          </div>
         </div>
+      </div>
+    </div>
+  </div>
 
-        <!-- Jira Ticket Information -->
-        {% if jira_ticket %}
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light text-dark fw-bold">
-                <i class="fas fa-ticket-alt me-2"></i>Jira Ticket Information
-            </div>
-            <div class="card-body">
-                <ul class="list-group list-group-flush">
-                    <li class="list-group-item d-flex justify-content-between">
-                        <strong>Ticket ID：</strong>
-                        <a href="{{ jira_ticket.url }}" target="_blank" class="text-primary">{{ jira_ticket.ticket_id }}</a>
-                    </li>
-                    <li class="list-group-item">
-                        <strong>Summary：</strong><br>
-                        <span class="mt-2 d-block">{{ jira_ticket.summary or '-' }}</span>
-                    </li>
-                    <li class="list-group-item d-flex justify-content-between">
-                        <strong>Status：</strong>
-                        <span>{{ jira_ticket.status or '-' }}</span>
-                    </li>
-                </ul>
-            </div>
+  <!-- NetBox -->
+  <div class="card shadow-sm mt-3">
+    <div class="card-header bg-light fw-bold">NetBox</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Prefix</div><div class="v">{{ d.get('netbox_prefix','-') }}</div>
+        <div class="k">Tenant</div><div class="v">{{ d.get('netbox_tenant','-') }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Additional Disks -->
+  <div class="card shadow-sm mt-3">
+    <div class="card-header bg-light fw-bold">Additional Disks</div>
+    <div class="card-body">
+      {% if sizes and sizes|length > 0 %}
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered table-disks mb-0">
+            <thead class="table-light">
+              <tr><th>#</th><th>Size (GB)</th><th>Provisioning</th></tr>
+            </thead>
+            <tbody>
+              {% for i in range(sizes|length) %}
+                <tr>
+                  <td>{{ i + 1 }}</td>
+                  <td>{{ sizes[i] }}</td>
+                  <td>{{ (provs[i] if i < provs|length else 'thin') }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
-        {% endif %}
+      {% else %}
+        <span>-</span>
+      {% endif %}
+    </div>
+  </div>
 
-        <!-- vSphere Configuration -->
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light text-dark fw-bold">
-                <i class="fas fa-server me-2"></i>vSphere Configuration
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Environment：</strong>
-                                <span>{{ pipeline.environment or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Datacenter：</strong>
-                                <span>{{ pipeline.vsphere_datacenter or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Cluster：</strong>
-                                <span>{{ pipeline.vsphere_cluster or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Template：</strong>
-                                <span>{{ pipeline.vsphere_template or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Datastore：</strong>
-                                <span>{{ pipeline.vsphere_datastore or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Network：</strong>
-                                <span>{{ pipeline.vsphere_network or '-' }}</span>
-                            </li>
-                        </ul>
-                    </div>
-                    <div class="col-md-6">
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>IPv4 Gateway：</strong>
-                                <span>{{ pipeline.vm_ipv4_gateway or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Action Type：</strong>
-                                <span>{{ pipeline.action_type or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Resource：</strong>
-                                <span>{{ pipeline.resource or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Project：</strong>
-                                <span>{{ pipeline.project_name or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Branch：</strong>
-                                <span>{{ pipeline.branch or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Commit SHA：</strong>
-                                <span style="font-family: monospace; font-size: 0.9em;">{{ (pipeline.commit_sha or '-')[:8] }}</span>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
+  <!-- Actions -->
+  <div class="mt-4 d-flex justify-content-end gap-2">
+    <!-- Returned：先當一般按鈕，之後你要決定送去哪支 API -->
+    <button type="button" class="btn btn-outline-secondary" onclick="onReturnedClick()">
+      <i class="bi bi-arrow-return-left me-1"></i> Returned
+    </button>
 
-        <!-- VM Configuration -->
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light text-dark fw-bold">
-                <i class="fas fa-desktop me-2"></i>VM Configuration
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>VM Name Prefix：</strong>
-                                <span>{{ pipeline.vm_name_prefix or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>OS Type：</strong>
-                                <span>{{ pipeline.os_type or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Instance Type：</strong>
-                                <span>{{ pipeline.vm_instance_type or '-' }}</span>
-                            </li>
-                        </ul>
-                    </div>
-                    <div class="col-md-6">
-                        <ul class="list-group list-group-flush">
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>vCPU：</strong>
-                                <span>{{ pipeline.vm_num_cpus or '-' }}</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between">
-                                <strong>Memory (MB)：</strong>
-                                <span>{{ pipeline.vm_memory or '-' }}</span>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- NetBox Configuration -->
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light text-dark fw-bold">
-                <i class="fas fa-network-wired me-2"></i>NetBox Configuration
-            </div>
-            <div class="card-body">
-                <ul class="list-group list-group-flush">
-                    <li class="list-group-item d-flex justify-content-between">
-                        <strong>NetBox Prefix：</strong>
-                        <span>{{ pipeline.netbox_prefix or '-' }}</span>
-                    </li>
-                    <li class="list-group-item d-flex justify-content-between">
-                        <strong>NetBox Tenant：</strong>
-                        <span>{{ pipeline.netbox_tenant or '-' }}</span>
-                    </li>
-                </ul>
-            </div>
-        </div>
-
-
-
-        <!-- Action Buttons -->
-        <div class="d-flex justify-content-end mt-4 gap-2">
-            <a href="{{ url_for('vm.overview_index') }}" class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left me-2"></i>Cancel
-            </a>
-            <button type="submit" class="btn btn-primary px-4">
-                <i class="fas fa-check me-2"></i>Approve & Execute
-            </button>
-        </div>
+    <!-- Approve：送到已存在的 workflow_execute；帶 from_modal=1 回父頁 -->
+    <form method="post" action="{{ url_for('vm.workflow_execute', workflow_id=workflow.workflow_id) }}?from_modal=1" onsubmit="return confirmApprove();">
+      <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
+      <button type="submit" class="btn btn-success px-4">
+        <i class="bi bi-check2 me-1"></i> Approve
+      </button>
     </form>
+  </div>
+
 </div>
 
-<!-- 確認對話框 -->
 <script>
-    function confirmSubmit() {
-        return confirm("Are you sure you want to approve and execute this pipeline?");
-    }
+  function confirmApprove() {
+    return confirm("Approve and execute this request?");
+  }
+  function onReturnedClick() {
+    // TODO: 這裡留白，等你後續決定 Returned 要呼叫哪支 API / 路由
+    alert("Return action is not implemented yet.");
+  }
 </script>
 
-{% endblock %}
+<!-- Bootstrap 5 JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

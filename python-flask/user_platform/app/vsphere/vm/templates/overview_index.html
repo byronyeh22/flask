@@ -65,15 +65,11 @@
     { text-align: center; }
 
     .status-badge { padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block; min-width: 70px; text-align: center; }
+    .status-in_progress { background: rgba(52,152,219,0.2); color: #3498db; }      /* IN_PROGRESS */
+    .status-pending_approval { background: rgba(241,196,15,0.2); color: #f39c12; } /* PENDING_APPROVAL */
     .status-success { background: rgba(39,174,96,0.2); color: #27ae60; }
     .status-failed  { background: rgba(231,76,60,0.2); color: #e74c3c; }
-    .status-created,
-    .status-running,
-    .status-pending,
-    .status-preparing,
     .status-canceled,
-    .status-waiting_for_resource { background: rgba(52,152,219,0.2); color: #3498db; }
-    .status-manual  { background: rgba(241,196,15,0.2); color: #f39c12; }
     .status-approved{ background: rgba(46,204,113,0.2); color: #2ecc71; }
     .status-draft   { background: rgba(108,117,125,0.2); color: #6c757d; }
 
@@ -100,9 +96,9 @@
         <div class="col-md-3 col-sm-6 mb-3">
             <div class="stat-card running">
                 <div class="stat-number">
-                    {{ pipeline_data | selectattr('status', 'in', ['created', 'waiting_for_resource', 'preparing', 'pending', 'running']) | list | length }}
+                    {{ pipeline_data | selectattr('status', 'equalto', 'IN_PROGRESS') | list | length }}
                 </div>
-                <div class="stat-label">Running</div>
+                <div class="stat-label">In Progress</div>
             </div>
         </div>
         <div class="col-md-3 col-sm-6 mb-3">
@@ -144,7 +140,8 @@
                     <button class="filter-btn" data-status="success">Success</button>
                     <button class="filter-btn" data-status="failed">Failed</button>
                     <button class="filter-btn" data-status="manual">Approved</button>
-                    <button class="filter-btn" data-status="created">Running</button>
+                    <button class="filter-btn" data-status="in_progress">In Progress</button>
+                     <button class="filter-btn" data-status="pending_approval">Pending Approval</button>
                     <button class="filter-btn" data-status="draft">Draft</button>
                 </div>
                 <div class="timezone-control d-flex align-items-center gap-2 small">
@@ -244,14 +241,25 @@
                                       title="Delete">
                                 <i class="bi bi-trash"></i>
                               </button>
-                          {% elif normalized_status == 'manual' %}
-                              <a href="{{ url_for('vm.pipeline_approve', pipeline_id=pipeline.pipeline_id) }}"
-                                 class="btn btn-sm btn-primary">
-                                Approve
-                              </a>
+
+                          {% elif normalized_status == 'pending_approval' %}
+                            <!-- 待核可：顯示綠色 Approve（用 modal） -->
+                            <button type="button"
+                                    class="btn btn-sm btn-primary btn-row-approve"
+                                    data-pipeline-id="{{ pipeline.workflow_id }}"
+                                    title="Approve">
+                              Approve
+                            </button>
+
+                          {% elif normalized_status == 'success' %}
+                            <!-- 已核可/完成 -->
+                            <button class="btn btn-sm btn-outline-success" disabled>Approved</button>
+
                           {% else %}
-                              <button class="btn btn-sm btn-secondary" disabled>Approve</button>
+                            <!-- 其他狀態不允許核可 -->
+                            <button class="btn btn-sm btn-secondary" disabled>Approve</button>
                           {% endif %}
+
                         </div>
                     </td>
                 </tr>
@@ -306,11 +314,31 @@
   </div>
 </div>
 
+<!-- Approve Modal -->
+<div class="modal fade" id="approveModal" tabindex="-1" aria-labelledby="approveModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="approveModalLabel">Approve Pipeline</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0">
+        <iframe id="approveFrame" class="review-iframe"></iframe>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 <script>
 /* ========================================================================
  * Router URL templates
  * ====================================================================== */
 const REVIEW_URL_TMPL = "{{ url_for('vm.workflow_review_page', workflow_id=0) }}";
+const APPROVE_URL_TMPL = "{{ url_for('vm.workflow_approve_page', workflow_id=0) }}";
 const EDIT_URL_TMPL   = "{{ url_for('vm.workflow_draft_edit',  workflow_id=0) }}";
 const DELETE_URL_TMPL = "{{ url_for('vm.workflow_draft_delete',workflow_id=0) }}";
 
@@ -414,6 +442,7 @@ class TablePagination {
 
     document.addEventListener('click', async (e) => {
       const reviewBtn = e.target.closest('.btn-row-review');
+      const approveBtn = e.target.closest('.btn-row-approve');
       const editBtn   = e.target.closest('.btn-draft-edit');
       const deleteBtn = e.target.closest('.btn-draft-delete');
 
@@ -429,6 +458,12 @@ class TablePagination {
         window.location.href = EDIT_URL_TMPL.replace('0', wfId);
         return;
       }
+
+     if (approveBtn) {
+       const pid = approveBtn.getAttribute('data-workflow-id');
+       openApproveModal(pid);
+       return;
+     }
 
       if (deleteBtn) {
         const wfId = deleteBtn.getAttribute('data-workflow-id');
@@ -596,6 +631,28 @@ function openReviewModal(workflowId, readonly=false) {
 
   frame.src = src;
   const modal = new bootstrap.Modal(document.getElementById('reviewModal'));
+  modal.show();
+}
+
+
+/* ========================================================================
+ * Approve Modal helper
+ * ====================================================================== */
+function openApproveModal(workflowId) {
+  const frame = document.getElementById('approveFrame');
+  if (!frame) return;
+  const src = APPROVE_URL_TMPL.replace('0', workflowId) + "?from_modal=1"; // 建議帶參數給後端
+
+  frame.src = src;
+
+  const modalEl = document.getElementById('approveModal');
+  const modal = new bootstrap.Modal(modalEl);
+
+  // 關閉後刷新（若後端已核可完成，按鈕會變 Approved）
+  modalEl.addEventListener('hidden.bs.modal', () => {
+    try { window.tablePagination?._refreshData(); } catch(e) { console.warn(e); }
+  }, { once: true });
+
   modal.show();
 }
 

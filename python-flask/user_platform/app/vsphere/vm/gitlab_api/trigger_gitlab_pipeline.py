@@ -170,6 +170,7 @@ def trigger_gitlab_pipeline(jira_key, form_data):
         return {
             "success": True,
             "pipeline_id": str(pipeline_data.get("id", "")),
+            "id": str(pipeline_data.get("id", "")),
             "web_url": pipeline_data.get("web_url", ""),
             "sha": pipeline_data.get("sha", ""),
             "ref": pipeline_data.get("ref", branch),

@@ -85,16 +85,14 @@ def vm_index():
         templates=vsphere_data["templates"], networks=vsphere_data["networks"],
         datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
         environment=environment,
-        session_data=session.get('create_vm_form_data', {})
+
     )
 
 
 @vm_bp.route("/vsphere/overview")
 def overview_index():
     """
-    Render the overview page with all requests and their statuses.
-    - 合併 workflow_runs 的 DRAFT 到同一張表。
-    - 規範化 pipeline_data 的 created_at，避免模板排序報錯。
+    Overview：合併 pipeline 與 workflow（含 DRAFT），狀態以 workflow_runs.status 為主。
     """
     def _to_iso(val):
         try:
@@ -103,7 +101,6 @@ def overview_index():
             return str(val) if val else "1970-01-01T00:00:00Z"
 
     def _ensure_created_at(item: dict):
-        # 若沒有 created_at，改用 started_at；最後保底一個時間字串
         if not item.get("created_at"):
             item["created_at"] = item.get("started_at") or "1970-01-01T00:00:00Z"
         item["created_at"] = _to_iso(item["created_at"])
@@ -113,52 +110,58 @@ def overview_index():
     try:
         db_conn = get_db_connection()
 
-        # 既有資料
         jira_tickets = get_jira_tickets_and_stats(db_conn) or []
         pipeline_data = get_gitlab_pipeline_detail_and_stats(db_conn) or []
-
-        # 規範化：確保每筆都有 created_at（GitLab 那邊多半叫 started_at）
         pipeline_data = [_ensure_created_at(dict(p)) for p in pipeline_data]
 
-        # 把 DRAFT 併進來
+        # 取全部 workflow（包含 DRAFT）
         cur = db_conn.cursor(dictionary=True)
         cur.execute("""
-            SELECT workflow_id, created_at, request_payload
+            SELECT workflow_id, status, created_at, request_payload
             FROM workflow_runs
-            WHERE status = 'DRAFT'
             ORDER BY created_at DESC
         """)
-        drafts = cur.fetchall()
+        workflows = cur.fetchall()
         cur.close()
 
-        for d in drafts:
-            draft_row = {
-                "workflow_id": d["workflow_id"],
-                "pipeline_id": None,
-                "status": "draft",
-                "created_at": _to_iso(d.get("created_at")),  # 要用 created_at，與模板排序一致
-                "finished_at": None,
-                "duration": None,
-            }
-            pipeline_data.insert(0, draft_row)
+        wf_status_map = {w["workflow_id"]: w["status"] for w in workflows}
 
-            summary = "-"
-            try:
-                payload = json.loads(d["request_payload"] or "{}")
-                summary = _generate_create_summary(payload) if payload else "-"
-            except Exception:
-                pass
+        # 把 DRAFT 以「類 pipeline 列」補到最上方 & 產 summary
+        for w in workflows:
+            if w["status"] == "DRAFT":
+                draft_row = {
+                    "workflow_id": w["workflow_id"],
+                    "pipeline_id": None,
+                    "status": "draft",
+                    "created_at": _to_iso(w.get("created_at")),
+                    "finished_at": None,
+                    "duration": None,
+                }
+                pipeline_data.insert(0, draft_row)
 
-            jira_tickets.append({
-                "workflow_id": d["workflow_id"],
-                "ticket_id": None,
-                "project_key": None,
-                "summary": summary,
-                "description": None,
-                "status": None,
-                "url": None,
-                "created_at": _to_iso(d.get("created_at")),
-            })
+                summary = "-"
+                try:
+                    payload = json.loads(w["request_payload"] or "{}")
+                    summary = _generate_create_summary(payload) if payload else "-"
+                except Exception:
+                    pass
+
+                jira_tickets.append({
+                    "workflow_id": w["workflow_id"],
+                    "ticket_id": None,
+                    "project_key": None,
+                    "summary": summary,
+                    "description": None,
+                    "status": None,
+                    "url": None,
+                    "created_at": _to_iso(w.get("created_at")),
+                })
+
+        # 用 workflow 狀態覆蓋 pipeline 列的顯示狀態
+        for row in pipeline_data:
+            wid = row.get("workflow_id")
+            if wid in wf_status_map:
+                row["status"] = wf_status_map[wid]
 
     except Exception as e:
         logging.error(f"Database error in overview_index: {e}")
@@ -169,7 +172,6 @@ def overview_index():
             db_conn.close()
 
     return render_template("overview_index.html", jira_tickets=jira_tickets, pipeline_data=pipeline_data)
-
 
 @vm_bp.route('/api/get_vms_by_environment/<string:environment>')
 def get_vms_by_environment_api(environment):
@@ -373,12 +375,12 @@ def vsphere_submit_request():
         flash(f"Jira ticket {jira_key} created successfully.", "success")
 
         # === GitLab Pipeline（等待手動批准） ===
-        pipeline_result = trigger_gitlab_pipeline(jira_key, form_data)
-        if pipeline_result.get("success"):
-            insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_result)
-            flash(f"Pipeline {pipeline_result['pipeline_id']} has been triggered and is now awaiting approval.", "info")
+        pipeline_data = trigger_gitlab_pipeline(jira_key, form_data)
+        if pipeline_data.get("success"):
+            insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data)
+            flash(f"Pipeline {pipeline_data['pipeline_id']} has been triggered and is now awaiting approval.", "info")
         else:
-            raise Exception(f"Failed to trigger GitLab Pipeline: {pipeline_result.get('error', 'Unknown error')}")
+            raise Exception(f"Failed to trigger GitLab Pipeline: {pipeline_data.get('error', 'Unknown error')}")
 
         # 既有/新建 workflow 都統一更新為 IN_PROGRESS
         update_request_status(db_conn, workflow_id, "IN_PROGRESS")
