@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+from datetime import datetime, timezone  # 👈 新增
 
 mock_app = Flask(__name__)
 
@@ -26,6 +27,7 @@ def trigger_gitlab_pipeline(project_id):
         "ref": "main",
         "status": "pending",
         "project_id": project_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),  # 👈 模擬當下時間
         "variables": dict(request.form)
     })
 
@@ -98,5 +100,4 @@ def get_jira_issue(issue_id):
     })
 
 if __name__ == "__main__":
-    # mock_app.run(host="0.0.0.0", port=5001, debug=True, ssl_context=('cert.pem', 'key.pem'))
     mock_app.run(host="0.0.0.0", port=5001, debug=True)
