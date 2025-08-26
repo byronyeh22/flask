@@ -84,7 +84,7 @@ def create_jira_ticket(ticket_data):
     payload = {
         "fields": {
             "project": {"key": "SJT"},
-            "issuetype": {"name": "vsphere_vm"},
+            "issuetype": {"name": "Task"},
             "summary": summary,
             "description": description,
         }

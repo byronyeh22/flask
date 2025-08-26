@@ -354,7 +354,7 @@ def vsphere_submit_request():
         if not wf:
             flash(f"Workflow #{workflow_id} not found.", "danger")
             return redirect(url_for('vm.overview_index'))
-            
+
         form_data = {}
         try:
             # The payload might be nested for update requests
@@ -392,6 +392,11 @@ def vsphere_submit_request():
         logging.error(f"An error occurred during the submit process for workflow_id {workflow_id}: {e}")
         traceback.print_exc()
         flash(f"Failed to submit request: {e}", "danger")
+
+        redirect_url = url_for('vm.overview_index')
+        if from_modal:
+            return f'<script>try{{window.top.location="{redirect_url}";}}catch(e){{window.parent.location="{redirect_url}";}}</script>'
+
         return redirect(url_for('vm.overview_index'))
     finally:
         if db_conn and db_conn.is_connected():
@@ -470,13 +475,11 @@ def workflow_execute(workflow_id):
 
 @vm_bp.route("/workflow/draft/<int:workflow_id>/edit", methods=["GET"])
 def workflow_draft_edit(workflow_id: int):
-    # 1) vSphere 下拉資料（使用你的 config）
     VCENTER_HOST = current_app.config['VSPHERE_HOST']
     VCENTER_USER = current_app.config['VSPHERE_USER']
     VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
     vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
 
-    # 2) 抓 DB
     db_conn = None
     draft_data = {}
     environments = []
@@ -503,6 +506,50 @@ def workflow_draft_edit(workflow_id: int):
 
         draft_data = json.loads(row["request_payload"] or "{}")
 
+        # === 關鍵：看 action_type / resource 來決定顯示哪個表單 ===
+        action_type = (draft_data.get("action_type") or "Create").strip().lower()
+        resource    = (draft_data.get("resource") or "vm").strip().lower()
+
+        # 你也可以依 resource 再細分；這裡先只看 action_type
+        if action_type == "create":
+            # 原本 create 表單就在 vm_index.html 裡（含 create/form.html）
+            return render_template(
+                "vm_index.html",
+                datacenters=vsphere_data["datacenters"], clusters=vsphere_data["clusters"],
+                templates=vsphere_data["templates"], networks=vsphere_data["networks"],
+                datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
+                environment=environments,
+                draft_data=draft_data,
+                workflow_id=workflow_id,
+                active_tab="create"
+            )
+
+        elif action_type == "update":
+            # 導去更新表單頁（你現有的 update 表單頁/模板）
+            # 兩種方式：
+            # A) 直接渲染更新版的 index（若你有 update 區塊）
+            # B) 單獨的更新頁模板，例如：update/form.html
+            return render_template(
+                "update/index.html",          # ← 用你實際的更新入口模板
+                environment=environments,
+                draft_data=draft_data,
+                workflow_id=workflow_id
+            )
+
+        elif action_type == "delete":
+            # 導去刪除表單頁
+            return render_template(
+                "delete/index.html",          # ← 用你實際的刪除入口模板
+                environment=environments,
+                draft_data=draft_data,
+                workflow_id=workflow_id
+            )
+
+        else:
+            # 無法識別就回到 overview，避免開錯頁
+            flash(f"Unknown action_type '{action_type}' for workflow #{workflow_id}.", "warning")
+            return redirect(url_for('vm.overview_index'))
+
     except Exception as e:
         logging.error(f"[workflow_draft_edit] {e}")
         flash(f"Failed to open draft: {e}", "danger")
@@ -510,20 +557,6 @@ def workflow_draft_edit(workflow_id: int):
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
-
-    # 3) 關鍵：改成渲染 vm_index.html（它 extends base），
-    #    裡面會 include create/form.html（partial），所以不會雙 sidebar。
-    return render_template(
-        "vm_index.html",
-        datacenters=vsphere_data["datacenters"], clusters=vsphere_data["clusters"],
-        templates=vsphere_data["templates"], networks=vsphere_data["networks"],
-        datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
-        environment=environments,
-        draft_data=draft_data,
-        workflow_id=workflow_id,
-        # 若 vm_index.html 有分頁/Tab，這裡可選擇預設到 Create 分頁
-        active_tab="create"
-    )
 
 
 @vm_bp.route("/workflow/draft/<int:workflow_id>/delete", methods=["POST"])

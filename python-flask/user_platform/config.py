@@ -59,7 +59,12 @@ else: #Config.API_MODE == 'local'
     Config.GITLAB_BRANCH = "main"
 
     # --- Jira Configuration ---
-    Config.JIRA_BASE_URL = "http://127.0.0.1:5001/mock/jira"
-    Config.JIRA_USER = "mock_user"
-    Config.JIRA_API_TOKEN = "mock_token"
-    Config.JIRA_PROJECT_KEY = "MOCK"
+    # Config.JIRA_BASE_URL = "http://127.0.0.1:5001/mock/jira"
+    # Config.JIRA_USER = "mock_user"
+    # Config.JIRA_API_TOKEN = "mock_token"
+    # Config.JIRA_PROJECT_KEY = "MOCK"
+
+    Config.JIRA_BASE_URL = "https://byronyeh22.atlassian.net"
+    Config.JIRA_USER = "byron.yeh22@gmail.com"
+    Config.JIRA_API_TOKEN = "ATATT3xFfGF0XRAim2XRhPlUc7WJCq5GTRuPTk3vjhANMQFm3NgxuD04GHA17ddMNCTuWGH0mpTT7rAzqvzQjcwYL-WI5pzFPhmPQ3DYR0k18ns01dbL0yGLkViV2I9sm9ernwcxNzXvOr8ZMXJCJzbsLshx6UBEwDzk-ZNKLz_bKeij9t1S6WQ=B7935256"
+    Config.JIRA_PROJECT_KEY = "SJT"
