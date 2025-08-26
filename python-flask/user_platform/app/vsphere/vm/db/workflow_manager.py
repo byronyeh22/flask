@@ -233,7 +233,7 @@ def _apply_update_action(db_conn, form_data):
     cursor.close()
 
 
-def return_request(db_conn, workflow_id: int, reason: str):
+def return_request(db_conn, workflow_id: int, reason: str, returned_by: str):
     """
     將 workflow_runs 設為 RETURNED，並紀錄 returned_reason。
     """
@@ -243,10 +243,11 @@ def return_request(db_conn, workflow_id: int, reason: str):
         cursor.execute("""
             UPDATE workflow_runs
             SET status = 'RETURNED',
+                returned_by = %s,
                 returned_reason = %s,
                 updated_at = NOW()
             WHERE workflow_id = %s
-        """, (reason, workflow_id))
+        """, (returned_by, reason, workflow_id))
         db_conn.commit()
     except Error as e:
         if db_conn and db_conn.is_connected():

@@ -23,10 +23,11 @@
     .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); }
     .stat-card .stat-number { font-size: 2rem; font-weight: bold; color: var(--primary-color); margin: 0; }
     .stat-card .stat-label { color: #6c757d; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 0.5rem; }
-    .stat-card.running { border-left-color: #3498db; }
     .stat-card.success { border-left-color: #27ae60; }
     .stat-card.failed  { border-left-color: #e74c3c; }
-    .stat-card.manual  { border-left-color: #f39c12; }
+    .stat-card.returned { border-left-color: #9b59b6; }
+    .stat-card.draft { border-left-color: #6c757d; }
+
 
     .table-container { background: white; border-radius: var(--border-radius); box-shadow: var(--card-shadow); overflow: visible; margin-top: 2rem; }
     .table-header { background: var(--light-bg); padding: 1.5rem; border-bottom: 1px solid #dee2e6; }
@@ -69,9 +70,10 @@
     .status-pending_approval { background: rgba(241,196,15,0.2); color: #f39c12; } /* PENDING_APPROVAL */
     .status-success { background: rgba(39,174,96,0.2); color: #27ae60; }
     .status-failed  { background: rgba(231,76,60,0.2); color: #e74c3c; }
-    .status-canceled,
+    .status-returned { background: rgba(155, 89, 182, 0.2); color: #9b59b6; } /* RETURNED */
     .status-approved{ background: rgba(46,204,113,0.2); color: #2ecc71; }
     .status-draft   { background: rgba(108,117,125,0.2); color: #6c757d; }
+    .status-draft { background: rgba(108,117,125,0.2); color: #6c757d; } /* DRAFT */
 
     .workflow-id { font-family: 'Courier New', monospace; background: rgba(52, 152, 219, 0.1); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.9rem; color: var(--accent-color); font-weight: 500; }
     .ticket-link { color: var(--accent-color); text-decoration: none; font-weight: 500; transition: color 0.2s ease; }
@@ -92,38 +94,42 @@
 
 <div class="container-fluid">
     <!-- Statistics Cards -->
-    <div class="row stats-row">
-        <div class="col-md-3 col-sm-6 mb-3">
-            <div class="stat-card running">
-                <div class="stat-number">
-                    {{ pipeline_data | selectattr('status', 'equalto', 'IN_PROGRESS') | list | length }}
-                </div>
-                <div class="stat-label">In Progress</div>
+    <div class="row stats-row text-center">
+        <div class="col stat-card running">
+            <div class="stat-number">
+                {{ pipeline_data | selectattr('status', 'equalto', 'IN_PROGRESS') | list | length }}
             </div>
+            <div class="stat-label">In Progress</div>
         </div>
-        <div class="col-md-3 col-sm-6 mb-3">
-            <div class="stat-card success">
-                <div class="stat-number">
-                    {{ pipeline_data | selectattr('status', 'equalto', 'success') | list | length }}
-                </div>
-                <div class="stat-label">Success</div>
+        <div class="col stat-card success">
+            <div class="stat-number">
+                {{ pipeline_data | selectattr('status', 'equalto', 'SUCCESS') | list | length }}
             </div>
+            <div class="stat-label">Success</div>
         </div>
-        <div class="col-md-3 col-sm-6 mb-3">
-            <div class="stat-card failed">
-                <div class="stat-number">
-                    {{ pipeline_data | selectattr('status', 'equalto', 'failed') | list | length }}
-                </div>
-                <div class="stat-label">Failed</div>
+        <div class="col stat-card failed">
+            <div class="stat-number">
+                {{ pipeline_data | selectattr('status', 'equalto', 'FAILED') | list | length }}
             </div>
+            <div class="stat-label">Failed</div>
         </div>
-        <div class="col-md-3 col-sm-6 mb-3">
-            <div class="stat-card manual">
-                <div class="stat-number">
-                    {{ pipeline_data | selectattr('status', 'equalto', 'manual') | list | length }}
-                </div>
-                <div class="stat-label">Approved</div>
+        <div class="col stat-card draft">
+            <div class="stat-number">
+                {{ pipeline_data | selectattr('status', 'equalto', 'DRAFT') | list | length }}
             </div>
+            <div class="stat-label">Draft</div>
+        </div>
+        <div class="col stat-card manual">
+            <div class="stat-number">
+                {{ pipeline_data | selectattr('status', 'equalto', 'PENDING_APPROVAL') | list | length }}
+            </div>
+            <div class="stat-label">Pending_Approval</div>
+        </div>
+        <div class="col stat-card returned">
+            <div class="stat-number">
+                {{ pipeline_data | selectattr('status', 'equalto', 'RETURNED') | list | length }}
+            </div>
+            <div class="stat-label">Returned</div>
         </div>
     </div>
 
@@ -137,12 +143,13 @@
                 </div>
                 <div class="filter-section">
                     <button class="filter-btn active" data-status="all">All</button>
+                    <button class="filter-btn" data-status="draft">Draft</button>
                     <button class="filter-btn" data-status="success">Success</button>
                     <button class="filter-btn" data-status="failed">Failed</button>
                     <button class="filter-btn" data-status="manual">Approved</button>
                     <button class="filter-btn" data-status="in_progress">In Progress</button>
-                     <button class="filter-btn" data-status="pending_approval">Pending Approval</button>
-                    <button class="filter-btn" data-status="draft">Draft</button>
+                    <button class="filter-btn" data-status="pending_approval">Pending Approval</button>
+                    <button class="filter-btn" data-status="returned">Returned</button>
                 </div>
                 <div class="timezone-control d-flex align-items-center gap-2 small">
                     <span class="timezone-label fw-bold"><i class="fas fa-globe me-1"></i> Timezone</span>
@@ -250,10 +257,6 @@
                                     title="Approve">
                               Approve
                             </button>
-
-                          {% elif normalized_status == 'success' %}
-                            <!-- 已核可/完成 -->
-                            <button class="btn btn-sm btn-outline-success" disabled>Approved</button>
 
                           {% else %}
                             <!-- 其他狀態不允許核可 -->

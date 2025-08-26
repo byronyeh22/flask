@@ -71,12 +71,13 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
 # ---------- Check Jira status ----------
 def monitor_jira_for_workflow(db_conn, workflow_id: int) -> bool:
     """
-    Return True if jira_tickets has this workflow_id and status is 'To Do' (normalized).
-    Otherwise return False, and record the reason in workflow_runs.failed_message.
+    Return True if jira_tickets has this workflow_id 且狀態不是 Done。
+    否則 return False：
+      - 沒有 ticket → 記錄 failed_message
+      - 狀態=Done → 正常結束，不記錄錯誤
     """
     cur = db_conn.cursor(dictionary=True)
     try:
-        # Use id DESC to avoid NULL created_at picking an older row
         cur.execute(
             """
             SELECT status
@@ -93,16 +94,16 @@ def monitor_jira_for_workflow(db_conn, workflow_id: int) -> bool:
             set_failed_message(db_conn, workflow_id, "JIRA", "Jira ticket not created or not found")
             return False
 
-        raw = (row.get("status") or "")
-        norm = _normalize_status(raw)
-        if norm != "to do":
-            set_failed_message(db_conn, workflow_id, "JIRA", f"Unexpected Jira status: {raw}")
+        status = (row.get("status") or "").strip().lower()
+        if status == "done":
+            # 已完成 → 不當作失敗，只是跳過後續檢查
             return False
 
+        # 其他狀態 → OK
         return True
+
     finally:
         cur.close()
-
 
 # ---------- Check if GitLab pipeline is manual ----------
 def is_pipeline_manual_for_workflow(db_conn, workflow_id: int) -> bool:

@@ -680,7 +680,7 @@ def workflow_return(workflow_id):
         if jira_ticket and jira_ticket.get("ticket_id"):
             try:
                 # 轉到 Done，避免排程又把它打回 Pending_Approval
-                jira_return_issue(jira_ticket["ticket_id"], reason, transition_name='Done')
+                jira_return_issue(jira_ticket["ticket_id"], reason, transition_name='RETURNED')
             except Exception as e:
                 current_app.logger.warning(f"[WORKFLOW_RETURN] jira_return_issue failed: {e}")
 
