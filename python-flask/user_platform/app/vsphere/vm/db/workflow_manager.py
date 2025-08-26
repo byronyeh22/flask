@@ -96,25 +96,6 @@ def update_request_status(db_conn, workflow_id, new_status, approver=None, faile
     finally:
         if cursor: cursor.close()
 
-def cancel_request(db_conn, workflow_id):
-    """
-    執行取消操作，將 cancelled_by 與 cancelled_at 欄位填入。
-    """
-    cursor = None
-    try:
-        cancelled_by = session.get("username", "system")
-        cursor = db_conn.cursor()
-        sql = "UPDATE workflow_runs SET status = 'CANCELLED', cancelled_by = %s, cancelled_at = %s WHERE workflow_id = %s"
-        cursor.execute(sql, (cancelled_by, datetime.now(), workflow_id))
-        db_conn.commit()
-        logging.info(f"✅ Successfully cancelled workflow_id: {workflow_id}.")
-    except Error as e:
-        logging.error(f"❌ Database error in cancel_request for workflow_id {workflow_id}: {e}")
-        if db_conn and db_conn.is_connected(): db_conn.rollback()
-        raise
-    finally:
-        if cursor: cursor.close()
-
 def apply_request_to_db(db_conn, workflow_id):
     """
     第二階段：在請求被批准後呼叫。
@@ -250,3 +231,27 @@ def _apply_update_action(db_conn, form_data):
     # ... (此處省略比對硬碟並標記 PENDING_UPDATE / PENDING_DELETION 的邏輯)
 
     cursor.close()
+
+
+def return_request(db_conn, workflow_id: int, reason: str):
+    """
+    將 workflow_runs 設為 RETURNED，並紀錄 returned_reason。
+    """
+    cursor = None
+    try:
+        cursor = db_conn.cursor()
+        cursor.execute("""
+            UPDATE workflow_runs
+            SET status = 'RETURNED',
+                returned_reason = %s,
+                updated_at = NOW()
+            WHERE workflow_id = %s
+        """, (reason, workflow_id))
+        db_conn.commit()
+    except Error as e:
+        if db_conn and db_conn.is_connected():
+            db_conn.rollback()
+        raise
+    finally:
+        if cursor:
+            cursor.close()

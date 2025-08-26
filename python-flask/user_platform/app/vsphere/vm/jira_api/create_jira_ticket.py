@@ -54,12 +54,118 @@ def _generate_update_description(data):
     return "\n".join(desc_parts)
 
 
-# --- 主要函式 ---
+# --- [NEW] Create 動作的 Jira 描述（使用 Jira Wiki Markup） ---
 
+def _as_list(v):
+    """把單值或 list 都轉成 list，None -> []"""
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return [v]
+
+def _render_table(headers, rows):
+    """
+    Jira Wiki Markup 表格產生器
+    headers: ["Col1", "Col2"]
+    rows:    [["a","b"], ["c","d"]]
+    """
+    out = []
+    out.append("|| " + " || ".join(str(h) for h in headers) + " ||")
+    for r in rows:
+        out.append("| " + " | ".join("" if (x is None) else str(x) for x in r) + " |")
+    return "\n".join(out)
+
+def _generate_create_description(data: dict) -> str:
+    """
+    將 Create VM 表單轉成多段 Panel + Table 的 Jira Wiki Markup。
+    會處理你表單的常見欄位，以及 additional disks（create_vm_disk_size[] / create_vm_disk_provisioning[]）。
+    """
+    # 先把磁碟欄位標準化（你的表單 key 可能是 'create_vm_disk_size[]' 與 'create_vm_disk_provisioning[]'）
+    sizes = _as_list(data.get('create_vm_disk_size[]', data.get('vm_disk_size', [])))
+    provs = _as_list(data.get('create_vm_disk_provisioning[]', data.get('vm_disk_provisioning', [])))
+
+    # === Summary 區塊 ===
+    summary_tbl = _render_table(
+        ["Field", "Value"],
+        [
+            ("Action",         data.get('action_type', 'Create')),
+            ("Resource",       data.get('resource', 'vm')),
+            ("Environment",    data.get('environment', '-')),
+            ("VM Name Prefix", data.get('vm_name_prefix', '-')),
+        ]
+    )
+
+    # === Core 區塊 ===
+    core_tbl = _render_table(
+        ["Field", "Value"],
+        [
+            ("OS Type",         (data.get('os_type') or data.get('vm_os_type') or '-')),
+            ("Instance Type",   data.get('vm_instance_type', '-')),
+            ("vCPU",            data.get('vm_num_cpus', '-')),
+            ("Memory (MB)",     data.get('vm_memory', '-')),
+        ]
+    )
+
+    # === vSphere 區塊 ===
+    vsphere_tbl = _render_table(
+        ["Field", "Value"],
+        [
+            ("Datacenter",  data.get('vsphere_datacenter','-')),
+            ("Cluster",     data.get('vsphere_cluster','-')),
+            ("Template",    data.get('vsphere_template','-')),
+            ("Datastore",   data.get('vsphere_datastore','-')),
+            ("Network",     data.get('vsphere_network','-')),
+            ("IPv4 Gateway",data.get('vm_ipv4_gateway','-')),
+        ]
+    )
+
+    # === NetBox 區塊 ===
+    netbox_tbl = _render_table(
+        ["Field", "Value"],
+        [
+            ("Prefix", data.get('netbox_prefix','-')),
+            ("Tenant", data.get('netbox_tenant','-')),
+        ]
+    )
+
+    # === Additional Disks 區塊 ===
+    disk_rows = []
+    for i, size in enumerate(sizes):
+        prov = provs[i] if i < len(provs) else "thin"
+        disk_rows.append([i+1, size, prov])
+    disks_tbl = _render_table(["Num", "Size (GB)", "Provisioning"], disk_rows) if disk_rows else "_No additional disks_"
+
+    # === 組描述（用 Panel 包住每個區塊，比較清楚） ===
+    parts = []
+    parts.append("{panel:title=Summary|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(summary_tbl)
+    parts.append("{panel}")
+
+    parts.append("{panel:title=Core|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(core_tbl)
+    parts.append("{panel}")
+
+    parts.append("{panel:title=vSphere|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(vsphere_tbl)
+    parts.append("{panel}")
+
+    parts.append("{panel:title=NetBox|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(netbox_tbl)
+    parts.append("{panel}")
+
+    parts.append("{panel:title=Additional Disks|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(disks_tbl)
+    parts.append("{panel}")
+
+    return "\n".join(parts)
+
+
+# --- 主要函式 ---
 def create_jira_ticket(ticket_data):
     """
     建立 Jira 工單。
-    此函式現在可以處理 Create (扁平字典) 和 Update (巢狀字典) 兩種請求。
+    可處理 Create(扁平) / Update(巢狀 new_config) / Delete(可選)。
     """
     jira_base = current_app.config['JIRA_BASE_URL']
     auth = (
@@ -67,20 +173,33 @@ def create_jira_ticket(ticket_data):
         current_app.config['JIRA_API_TOKEN']
     )
 
-    # 【關鍵修正】
-    # 透過檢查 'new_config' 鍵是否存在，來判斷是 Create 還是 Update
-    is_update = 'new_config' in ticket_data
+    # 判斷 action_type（update/delete/create）
+    action_type = (ticket_data.get("action_type")
+                   or ticket_data.get("new_config", {}).get("action_type")
+                   or "").lower()
 
-    if is_update:
-        # --- 處理 Update 請求 ---
+    if action_type == 'create' or 'new_config' not in ticket_data:
+        # --- Create ---
+        summary = _generate_create_summary(ticket_data)
+        description = _generate_create_description(ticket_data)
+
+    elif ('new_config' in ticket_data) or (action_type == 'update'):
+        # --- Update ---
         summary = _generate_update_summary(ticket_data)
         description = _generate_update_description(ticket_data)
-    else:
-        # --- 處理 Create 請求 (沿用您原本的邏輯) ---
-        summary = _generate_create_summary(ticket_data)
-        description = "Auto-generated VM creation request."
 
-    # --- 準備並發送 Jira API 請求 (共通邏輯) ---
+    elif action_type == 'delete':
+        # --- Delete ---
+        try:
+            summary = _generate_delete_summary(ticket_data)
+            description = _generate_delete_description(ticket_data)
+        except NameError:
+            summary = f"[VM Provisioning] {ticket_data.get('environment','N/A')} - Delete {ticket_data.get('vm_name_prefix','N/A')}"
+            description = "Delete request (details TODO)."
+
+    else:
+        raise ValueError(f"Unsupported action_type: {action_type}")
+
     payload = {
         "fields": {
             "project": {"key": "SJT"},
@@ -91,27 +210,31 @@ def create_jira_ticket(ticket_data):
     }
 
     try:
-        response = requests.post(
+        resp = requests.post(
             f"{jira_base}/rest/api/2/issue/",
             json=payload,
             auth=auth,
             headers={"Content-Type": "application/json"},
             timeout=10
         )
-        response.raise_for_status()  # 如果請求失敗 (e.g., 400, 401, 404), 會拋出異常
-
-        data = response.json()
-        ticket_id = data["key"]
-        print(f"Successfully created Jira ticket: {ticket_id}")
-        return ticket_id
+        resp.raise_for_status()
+        data = resp.json()
+        return data["key"]
 
     except requests.exceptions.HTTPError as http_err:
-        print(f"HTTP error occurred while creating Jira ticket: {http_err} - {response.text}")
-        # 重新拋出異常，讓外層的 try...except 可以捕捉到並顯示 flash message
+        # 確保不會引用未定義的 response 物件
+        text = getattr(http_err.response, "text", "")
+        print(f"HTTP error occurred while creating Jira ticket: {http_err} - {text}")
         raise
     except requests.exceptions.RequestException as req_err:
         print(f"Request error occurred while creating Jira ticket: {req_err}")
         raise
     except KeyError as key_err:
-        print(f"Key error after creating ticket (likely parsing response): {key_err} - Response: {response.text}")
+        # 防呆：resp 可能不存在
+        body = ""
+        try:
+            body = resp.text  # 若前面有成功拿到 resp
+        except Exception:
+            pass
+        print(f"Key error after creating ticket (likely parsing response): {key_err} - Response: {body}")
         raise

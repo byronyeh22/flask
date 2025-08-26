@@ -32,8 +32,7 @@
     Pipeline Approval
   </h4>
 
-  {# 後端 route workflow_approve_page() 傳入：
-     workflow, pipeline, jira_ticket, request_details #}
+  {# 後端 route workflow_approve_page() 傳入：workflow, pipeline, jira_ticket, request_details #}
   {% set d = request_details or {} %}
 
   {# 解析 Additional Disks（沿用 review.html 的邏輯） #}
@@ -71,7 +70,7 @@
     </div>
   </div>
 
-  <!-- Summary（比照 review.html） -->
+  <!-- Summary -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-light fw-bold">Summary</div>
     <div class="card-body">
@@ -158,8 +157,8 @@
 
   <!-- Actions -->
   <div class="mt-4 d-flex justify-content-end gap-2">
-    <!-- Returned：先當一般按鈕，之後你要決定送去哪支 API -->
-    <button type="button" class="btn btn-outline-secondary" onclick="onReturnedClick()">
+    <!-- Returned：點後開啟輸入原因的 modal -->
+    <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#returnModal">
       <i class="bi bi-arrow-return-left me-1"></i> Returned
     </button>
 
@@ -174,14 +173,71 @@
 
 </div>
 
+<!-- Returned Reason Modal（新增） -->
+<div class="modal fade" id="returnModal" tabindex="-1" aria-labelledby="returnModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="returnModalLabel">Return – Provide a reason</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <label for="returnReason" class="form-label">Comment</label>
+        <textarea id="returnReason" class="form-control" rows="4" placeholder="e.g. Please adjust CPU to 4 and add a 50GB disk."></textarea>
+        <div class="form-text">This reason will be saved to <code>workflow_runs.returned_reason</code> and propagated to GitLab/Jira flows as you實作後端時所定義。</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" id="btnReturnConfirm">
+          <i class="bi bi-reply"></i> Confirm Return
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   function confirmApprove() {
     return confirm("Approve and execute this request?");
   }
-  function onReturnedClick() {
-    // TODO: 這裡留白，等你後續決定 Returned 要呼叫哪支 API / 路由
-    alert("Return action is not implemented yet.");
-  }
+
+  // Returned → 二次確認 + 呼叫 /workflow/return/<workflow_id>?from_modal=1
+  document.addEventListener('DOMContentLoaded', function () {
+    const btn = document.getElementById('btnReturnConfirm');
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+      const reason = (document.getElementById('returnReason')?.value || '').trim();
+      if (!reason) {
+        alert('Please provide a reason.');
+        return;
+      }
+      if (!confirm('Are you sure you want to RETURN this request?')) {
+        return;
+      }
+
+      const wfId = {{ workflow.workflow_id }};
+      const url = `{{ url_for('vm.workflow_return', workflow_id=0) }}`.replace('0', wfId) + '?from_modal=1';
+
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+          body: JSON.stringify({ returned_reason: reason })
+        });
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error(txt || 'Return failed.');
+        }
+        // 成功：關 modal 並讓父頁刷新 / 導回 overview
+        try { window.top.location = "{{ url_for('vm.overview_index') }}"; }
+        catch (e) { window.parent.location = "{{ url_for('vm.overview_index') }}"; }
+      } catch (err) {
+        console.error(err);
+        alert('Return failed: ' + err.message);
+      }
+    });
+  });
 </script>
 
 <!-- Bootstrap 5 JS -->

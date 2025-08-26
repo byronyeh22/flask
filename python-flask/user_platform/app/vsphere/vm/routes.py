@@ -15,14 +15,17 @@ from .db.get_jira_tickets_and_stats import get_jira_tickets_and_stats, get_jira_
 from .db.get_gitlab_pipeline_detail_and_stats import get_gitlab_pipeline_detail_and_stats, get_pipeline_details_by_workflow_id
 from .db.insert_jira_info_to_db import insert_jira_info_to_db
 from .db.insert_gitlab_pipeline_info_to_db import insert_gitlab_pipeline_info_to_db
-from .db.workflow_manager import record_pending_request, update_request_status, cancel_request, apply_request_to_db
+from .db.workflow_manager import record_pending_request, update_request_status, apply_request_to_db, return_request
+from .db.update_jira_ticket_status import update_jira_ticket_status
 
 # --- API 函式 ---
 from .vsphere_api.get_vsphere_objects import get_vsphere_objects
 from .jira_api.create_jira_ticket import create_jira_ticket
 from .jira_api.get_jira_issue_detail import get_jira_issue_detail
+from .jira_api.issue_updates import jira_return_issue  # <== 新增：Jira 通用退件
 from .gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
 from .gitlab_api.run_manual_job import run_manual_job
+from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
 
 # --- 匯入 summary 產生器：用於 DRAFT 顯示 ---
 from .jira_api.create_jira_ticket import _generate_create_summary
@@ -623,3 +626,83 @@ def workflow_review_page(workflow_id: int):
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
+
+@vm_bp.route('/workflow/return/<int:workflow_id>', methods=['POST'])
+def workflow_return(workflow_id):
+    """
+    Return (退件) 流程：
+    1) workflow_runs → status='RETURNED', returned_reason=reason（抽到 workflow_manager）
+    2) GitLab → cancel manual jobs（僅在有 manual 工作的 pipeline）
+    3) Jira → 通用函式：加 comment + 轉為 Done（避免被排程打回 Pending_Approval）
+    4) 更新本地 DB：jira_tickets.status = 'Done'
+    5) Audit log
+    + from_modal 支援父頁跳轉：與 vsphere_submit_request() 一致
+    """
+    # 讓 modal 關閉後回父頁顯示 flash
+    from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
+
+    # 同時支援 JSON 與 form 的欄位名稱：returned_reason / reason
+    reason = ""
+    try:
+        if request.is_json:
+            body = request.get_json(silent=True) or {}
+            reason = (body.get("returned_reason") or body.get("reason") or "").strip()
+        else:
+            reason = (request.form.get("returned_reason") or request.form.get("reason") or "").strip()
+    except Exception:
+        pass
+    if not reason:
+        reason = "No reason provided."
+
+    db_conn = None
+    try:
+        db_conn = get_db_connection()
+        returned_by = _current_username()
+
+        # 1) DB：更新 workflow_runs（優先帶 returned_by；若尚未支援此參數則 fallback）
+        try:
+            return_request(db_conn, workflow_id, reason, returned_by=returned_by)
+        except TypeError:
+            return_request(db_conn, workflow_id, reason)
+
+        # 2) GitLab：取消 manual job（若有 pipeline）
+        pipeline = get_pipeline_details_by_workflow_id(db_conn, workflow_id)
+        if pipeline and pipeline.get("pipeline_id"):
+            try:
+                from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
+                cancel_manual_jobs(pipeline["pipeline_id"])
+            except Exception as e:
+                current_app.logger.warning(f"[WORKFLOW_RETURN] cancel_manual_jobs failed: {e}")
+
+        # 3) Jira：加 comment + transition 到 Done（41）
+        # 4) 本地 DB：同步更新 jira_tickets.status = 'Done'
+        jira_ticket = get_jira_ticket_by_workflow_id(db_conn, workflow_id)
+        if jira_ticket and jira_ticket.get("ticket_id"):
+            try:
+                # 轉到 Done，避免排程又把它打回 Pending_Approval
+                jira_return_issue(jira_ticket["ticket_id"], reason, transition_name='Done')
+            except Exception as e:
+                current_app.logger.warning(f"[WORKFLOW_RETURN] jira_return_issue failed: {e}")
+
+            # 無論 Jira API 是否成功，嘗試同步更新本地 DB 的狀態為 Done（你希望是 Done）
+            try:
+                update_jira_ticket_status(db_conn, jira_ticket["ticket_id"], "Done")
+            except Exception as e:
+                current_app.logger.warning(f"[WORKFLOW_RETURN] update_jira_ticket_status failed: {e}")
+
+        # 5) Audit log
+        current_app.logger.info(f"[WORKFLOW_RETURN] workflow_id={workflow_id}, reason={reason}, returned_by={returned_by}")
+
+        flash(f"Workflow {workflow_id} has been returned.", "warning")
+    except Exception as e:
+        current_app.logger.exception(f"[WORKFLOW_RETURN] failed for workflow_id={workflow_id}")
+        flash(f"Failed to return workflow: {e}", "danger")
+    finally:
+        if db_conn and db_conn.is_connected():
+            db_conn.close()
+
+    redirect_url = url_for('vm.overview_index')
+    if from_modal:
+        # 父頁跳轉：讓 flash 顯示在 overview
+        return f'<script>try{{window.top.location="{redirect_url}";}}catch(e){{window.parent.location="{redirect_url}";}}</script>'
+    return redirect(redirect_url)

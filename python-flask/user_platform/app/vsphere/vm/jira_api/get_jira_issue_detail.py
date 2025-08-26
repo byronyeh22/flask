@@ -36,7 +36,8 @@ def get_jira_issue_detail(ticket_id, fields=None):
             "summary": fields_data.get("summary", ""),
             "description": fields_data.get("description", ""),
             "status": fields_data.get("status", {}).get("name", ""),
-            "url": f"{jira_base}/browse/{ticket_id}"
+            "url": f"{jira_base}/browse/{ticket_id}",
+            "created_at": fields_data.get("created")
         }
 
     # 如果請求出錯，印出錯誤並把例外拋出
@@ -59,3 +60,4 @@ if __name__ == "__main__":
         print("Status:", result.get("status"))
         print("Description:", result.get("description"))
         print("URL:", result.get("url"))
+        print("Created_at:", result.get("created_at"))

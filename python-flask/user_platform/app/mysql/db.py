@@ -36,16 +36,16 @@ def init_db():
             approved_by VARCHAR(100) NULL,
             approved_at TIMESTAMP NULL,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-            cancelled_by  VARCHAR(100) NULL,
-            cancelled_at  TIMESTAMP NULL,
-            status ENUM('DRAFT','PENDING_APPROVAL','RETURNED','IN_PROGRESS','SUCCESS','FAILED','CANCELLED')
+            status ENUM('DRAFT','PENDING_APPROVAL','RETURNED','IN_PROGRESS','SUCCESS','FAILED')
                 DEFAULT 'DRAFT',
-            failed_message TEXT,
+            returned_by VARCHAR(100) NULL,
+            returned_reason TEXT,
+            failed_message JSON NULL,
             request_payload JSON NULL,
             INDEX idx_status (status),
             INDEX idx_created_by (created_by),
             INDEX idx_approved_by (approved_by),
-            INDEX idx_cancelled_by (cancelled_by)
+            INDEX idx_returned_by (returned_by)
         )
     """)
 
@@ -61,6 +61,7 @@ def init_db():
             status VARCHAR(50),
             url TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
             FOREIGN KEY (workflow_id) REFERENCES workflow_runs(workflow_id) ON DELETE CASCADE
         )
     """)
