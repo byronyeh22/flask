@@ -1,5 +1,3 @@
-
-
 {% set d = draft_data or {} %}
 <input type="hidden" name="resource" value="vm">
 <input type="hidden" name="action_type" value="Create">
@@ -37,7 +35,6 @@
           </select>
         </div>
 
-        <!-- VM Name Prefix（新增 placeholder + 查重訊息） -->
         <div class="mb-3">
           <label for="vm_name_prefix" class="form-label">VM Name Prefix</label>
           <input id="vm_name_prefix"
@@ -111,17 +108,16 @@
             {% for i in range(sizes|length) %}
             <div class="disk-item mb-2 p-3 border rounded bg-light">
               <div class="row align-items-end g-2">
-                <div class="col-md-4">
+                <div class="col-md-3">
                   <label class="form-label mb-0 small fw-bold">Label</label>
                   <input type="text" class="form-control form-control-sm disk-label" value="New Disk {{ i + 1 }}" readonly>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                   <label class="form-label mb-0 small fw-bold">Size (GB)</label>
-                  <!-- 磁碟欄位不做必填檢查 -->
                   <input type="number" name="create_vm_disk_size[]" class="form-control form-control-sm" min="1"
                          value="{{ sizes[i] }}">
                 </div>
-                <div class="col-md-5">
+                <div class="col-md">
                   <label class="form-label mb-0 small fw-bold">Provisioning</label>
                   <select name="create_vm_disk_provisioning[]" class="form-select form-select-sm disk-provisioning">
                     <option value="thin" {{ 'selected' if i < provs|length and provs[i] == 'thin' }}>Thin Provision</option>
@@ -129,9 +125,9 @@
                     <option value="thick_eager" {{ 'selected' if i < provs|length and provs[i] == 'thick_eager' }}>Thick Provision Eager Zeroed</option>
                   </select>
                 </div>
-                <div class="col-12 mt-2 text-end">
+                <div class="col-md-auto">
                   <button type="button" class="btn btn-sm btn-remove" onclick="removeDisk(this)">
-                    <i class="bi bi-trash"></i> Remove
+                    <i class="bi bi-trash"></i>
                   </button>
                 </div>
               </div>
@@ -268,15 +264,15 @@
     const finalProv = (typeof provisioning !== 'undefined' && provisioning) ? provisioning : defaultProv;
     row.innerHTML = `
       <div class="row align-items-end g-2">
-        <div class="col-md-4">
+        <div class="col-md-3">
           <label class="form-label mb-0 small fw-bold">Label</label>
           <input type="text" class="form-control form-control-sm disk-label" readonly>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label mb-0 small fw-bold">Size (GB)</label>
           <input type="number" name="create_vm_disk_size[]" class="form-control form-control-sm" min="1" value="${finalSize}">
         </div>
-        <div class="col-md-5">
+        <div class="col-md">
           <label class="form-label mb-0 small fw-bold">Provisioning</label>
           <select name="create_vm_disk_provisioning[]" class="form-select form-select-sm disk-provisioning">
             <option value="thin" ${finalProv === 'thin' ? 'selected' : ''}>Thin Provision</option>
@@ -284,11 +280,9 @@
             <option value="thick_eager" ${finalProv === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
           </select>
         </div>
-      </div>
-      <div class="row mt-2">
-        <div class="col-12 text-end">
+        <div class="col-md-auto">
           <button type="button" class="btn btn-sm btn-remove" onclick="removeDisk(this)">
-            <i class="bi bi-trash"></i> Remove
+            <i class="bi bi-trash"></i>
           </button>
         </div>
       </div>`;
@@ -434,4 +428,3 @@
     }
   });
 </script>
-
