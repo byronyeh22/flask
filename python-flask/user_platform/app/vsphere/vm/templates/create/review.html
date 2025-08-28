@@ -15,12 +15,28 @@
     .kv .k { color: #6c757d; font-weight: 600; }
     .kv .v { word-break: break-word; }
     .table-disks th, .table-disks td { vertical-align: middle; }
+    .bg-returned { background-color: #9b59b6 !important; color: #fff !important; }
   </style>
 </head>
 <body>
 <div class="container-fluid py-3">
 
-  <h4 class="mb-3">Review Request</h4>
+  <h4 class="mb-3 d-flex align-items-center gap-2">
+    Review Request
+    {% if workflow and workflow.status %}
+      <span class="badge
+        {% if workflow.status == 'SUCCESS' %} bg-success
+        {% elif workflow.status == 'PENDING_APPROVAL' %} bg-warning text-dark
+        {% elif workflow.status == 'FAILED' %} bg-danger
+        {% elif workflow.status == 'RETURNED' %} bg-returned
+        {% elif workflow.status == 'DRAFT' %} bg-secondary
+        {% else %} bg-info
+        {% endif %}
+      ">
+        {{ workflow.status }}
+      </span>
+    {% endif %}
+  </h4>
 
   {# 後端以 render_template("create/review.html", data=...) 傳入 data #}
   {% set d = data or {} %}
@@ -30,6 +46,24 @@
   {% set provs = d.get('create_vm_disk_provisioning[]', []) %}
   {% if sizes is string %}{% set sizes = [sizes] %}{% endif %}
   {% if provs is string %}{% set provs = [provs] %}{% endif %}
+
+<!-- Return reason -->
+{% if workflow and workflow.status == 'RETURNED' %}
+  <div class="alert alert-danger d-flex align-items-start gap-3 mt-3" role="alert">
+    <i class="bi bi-x-octagon fs-4"></i>
+    <div>
+      <div class="fw-bold">This request was returned</div>
+      <div class="small text-muted">
+        by <span class="fw-semibold">{{ workflow.returned_by or 'unknown' }}</span>
+        {% if workflow.updated_at %} at <span>{{ workflow.updated_at }}</span>{% endif %}
+      </div>
+      <div class="mt-2">
+        <div class="fw-semibold mb-1">Reason</div>
+        <pre class="mb-0" style="white-space:pre-wrap">{{ workflow.returned_reason or '-' }}</pre>
+      </div>
+    </div>
+  </div>
+{% endif %}
 
   <!-- Summary -->
   <div class="card shadow-sm mb-3">

@@ -120,7 +120,7 @@ def overview_index():
         # 取全部 workflow（包含 DRAFT）
         cur = db_conn.cursor(dictionary=True)
         cur.execute("""
-            SELECT workflow_id, status, created_at, request_payload
+            SELECT workflow_id, status, created_at, request_payload, created_by
             FROM workflow_runs
             ORDER BY created_at DESC
         """)
@@ -128,6 +128,7 @@ def overview_index():
         cur.close()
 
         wf_status_map = {w["workflow_id"]: w["status"] for w in workflows}
+        wf_created_by_map = {w["workflow_id"]: w.get("created_by") for w in workflows}
 
         # 把 DRAFT 以「類 pipeline 列」補到最上方 & 產 summary
         for w in workflows:
@@ -139,6 +140,7 @@ def overview_index():
                     "created_at": _to_iso(w.get("created_at")),
                     "finished_at": None,
                     "duration": None,
+                    "created_by": w.get("created_by"),
                 }
                 pipeline_data.insert(0, draft_row)
 
@@ -160,11 +162,18 @@ def overview_index():
                     "created_at": _to_iso(w.get("created_at")),
                 })
 
-        # 用 workflow 狀態覆蓋 pipeline 列的顯示狀態
+        # 用 workflow 狀態覆蓋 pipeline 區塊列的欄位顯示值
         for row in pipeline_data:
             wid = row.get("workflow_id")
+
+            # 補 status
             if wid in wf_status_map:
                 row["status"] = wf_status_map[wid]
+            # 補 created_by
+            if wid in wf_created_by_map and wf_created_by_map[wid]:
+                row["created_by"] = wf_created_by_map[wid]
+            else:
+                row.setdefault("created_by", None)
 
     except Exception as e:
         logging.error(f"Database error in overview_index: {e}")

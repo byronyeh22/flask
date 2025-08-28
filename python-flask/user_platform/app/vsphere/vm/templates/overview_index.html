@@ -61,11 +61,23 @@
     .custom-table tbody td:nth-child(2),
     .custom-table tbody td:nth-child(3),
     .custom-table tbody td:nth-child(5),
-    .custom-table tbody td:nth-child(8),
-    .custom-table tbody td:nth-child(9)
+    .custom-table tbody td:nth-child(6),
+    .custom-table tbody td:nth-child(9),
+    .custom-table tbody td:nth-child(10)
     { text-align: center; }
 
-    .status-badge { padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block; min-width: 70px; text-align: center; }
+    /* 縮小 Status Badge 外觀 */
+    .status-badge {
+        padding: 0.3rem 0.6rem;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+        min-width: 60px;
+        text-align: center;
+    }
     .status-in_progress { background: rgba(52,152,219,0.2); color: #3498db; }      /* IN_PROGRESS */
     .status-pending_approval { background: rgba(241,196,15,0.2); color: #f39c12; } /* PENDING_APPROVAL */
     .status-success { background: rgba(39,174,96,0.2); color: #27ae60; }
@@ -73,13 +85,13 @@
     .status-returned { background: rgba(155, 89, 182, 0.2); color: #9b59b6; } /* RETURNED */
     .status-approved{ background: rgba(46,204,113,0.2); color: #2ecc71; }
     .status-draft   { background: rgba(108,117,125,0.2); color: #6c757d; }
-    .status-draft { background: rgba(108,117,125,0.2); color: #6c757d; } /* DRAFT */
 
-    .workflow-id { font-family: 'Courier New', monospace; background: rgba(52, 152, 219, 0.1); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.9rem; color: var(--accent-color); font-weight: 500; }
-    .ticket-link { color: var(--accent-color); text-decoration: none; font-weight: 500; transition: color 0.2s ease; }
+    .workflow-id { font-family: 'Courier New', monospace; background: rgba(52, 152, 219, 0.1); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; color: var(--accent-color); font-weight: 500; }
+    .ticket-link { color: var(--accent-color); text-decoration: none; font-weight: 500; font-size: 0.75rem; transition: color 0.2s ease; }
     .ticket-link:hover { color: var(--primary-color); text-decoration: underline; }
 
-    .date-cell { white-space: nowrap; min-width: 120px; }
+    .date-cell { white-space: nowrap; min-width: 120px; font-size: 0.8rem; text-align: center; }
+    .duration-cell { font-size: 0.75rem; text-align: center; }
     .summary-cell { white-space: normal; overflow: visible; max-width: none; word-break: break-word; }
 
     .search-controls { margin-top: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
@@ -177,6 +189,8 @@
                     <th>Environment</th>
                     <th><i class="fas fa-list"></i> Summary</th>
                     <th><i class="fas fa-info-circle"></i> Status</th>
+                    <!-- 新增欄位：Create By -->
+                    <th><i class="fas fa-user"></i> Create By</th>
                     <th><i class="fas fa-calendar-plus"></i> Start</th>
                     <th><i class="fas fa-calendar-check"></i> End</th>
                     <th><i class="fas fa-stopwatch"></i> Duration</th>
@@ -210,13 +224,15 @@
                             -
                         {% endif %}
                     </td>
-                    <td>{{ env_upper }}</td>
+                    <td class="small">{{ env_upper }}</td>
                     <td class="summary-cell">
                         {{ jira_ticket.summary if jira_ticket else '-' }}
                     </td>
                     <td>
                         <span class="status-badge status-{{ normalized_status }}">{{ pipeline.status }}</span>
                     </td>
+                    <!-- 新增資料列：Create By（需要後端把 created_by 併到 pipeline_data） -->
+                    <td>{{ pipeline.created_by or '-' }}</td>
 
                     {# 顯示層去掉 'T'；data-datetime 維持原值 #}
                     <td class="date-cell" data-datetime="{{ pipeline.created_at }}">{{ (pipeline.created_at or '')|replace('T',' ') or '-' }}</td>
