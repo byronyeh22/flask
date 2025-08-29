@@ -3,243 +3,385 @@
 
 {% block content %}
 <style>
-    /* 固定按鈕顏色，移除 hover 效果 */
-    .btn-outline-secondary, .btn-outline-secondary:hover {
-        color: #6c757d !important;
-        border-color: #ced4da !important;
-        background-color: transparent !important;
-    }
-    .btn-outline-secondary:active {
-        background-color: #e2e6ea !important;
-    }
-    .btn-danger, .btn-danger:hover {
-        background-color: #dc3545 !important;
-        border-color: #dc3545 !important;
-    }
-    .btn-outline-primary, .btn-outline-primary:hover {
-        color: #0d6efd !important;
-        border-color: #0d6efd !important;
-        background-color: transparent !important;
-    }
-     .btn-outline-primary:hover {
-        background-color: #e7f1ff !important;
-    }
+  /* ===== Base tweaks ===== */
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    margin-bottom: 1rem;
+  }
+  .page-title {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    margin: 0;
+    font-weight: 800;
+    letter-spacing: .2px;
+  }
+  .page-subtitle {
+    color: #6c757d;
+    font-size: .95rem;
+  }
 
-    /* Inactive 狀態的特定欄位反灰 */
-    .inactive-cell {
-        color: #adb5bd !important;
-        background-color: #f8f9fa !important;
-    }
+  /* ===== Card header ===== */
+  .card-header {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border-bottom: 1px solid #edf2f7;
+  }
 
-    /* 表格對齊 */
-    .table th, .table td {
-        vertical-align: middle;
-    }
-    .table thead th {
-        text-align: center;
-    }
-    .table tbody td {
-        text-align: center;
-    }
-    .table tbody td:nth-child(2) {
-        text-align: left;
-    }
-    
-    /* 狀態顯示徽章 */
-    .state-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.3rem;
-        padding: 0.3rem 0.6rem;
-        border-radius: 20px;
-        font-size: 0.8rem;
-    }
-    .state-badge.bg-success { background-color: #198754 !important; color: white; }
-    .state-badge.bg-danger { background-color: #dc3545 !important; color: white; }
-    
-    /* Retry 圖示 */
-    .retry-icon {
-        cursor: pointer;
-        color: #0d6efd;
-        margin-left: 0.5rem;
-    }
+  /* ===== Table ===== */
+  .table { --bs-table-accent-bg: #fbfcfe; }
+  .table thead th {
+    text-align: center;
+    font-weight: 700;
+    color: #495057;
+    border-bottom: 2px solid #e9ecef;
+  }
+  .table tbody td {
+    vertical-align: middle;
+    text-align: center; /* center all values */
+  }
+  .table-hover tbody tr:hover { background-color: #f8fbff !important; }
+  .table-striped > tbody > tr:nth-of-type(odd) > * { background-color: #fbfdff; }
+
+  /* Truncate long text in cells */
+  .truncate {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+
+  /* Inactive row cells dimmed */
+  .inactive-cell { color: #adb5bd !important; background-color: #f8f9fa !important; }
+
+  /* Badges */
+  .state-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .35rem .65rem;
+    border-radius: 999px;
+    font-size: .8rem;
+    font-weight: 600;
+    box-shadow: 0 1px 0 rgba(16, 24, 40, .05);
+    transition: transform .08s ease-in-out;
+  }
+  .state-badge:hover { transform: translateY(-1px); }
+  .state-badge.bg-success { background-color: #16a34a !important; color: #fff; }
+  .state-badge.bg-danger { background-color: #dc2626 !important; color: #fff; }
+  .state-badge.bg-secondary { background-color: #6c757d !important; color: #fff; }
+
+  /* Buttons */
+  .btn { border-radius: .75rem; box-shadow: 0 1px 0 rgba(16, 24, 40, .04); }
+  .btn.btn-primary.btn-sm { padding: .35rem .65rem; font-weight: 600; }
+  .btn-outline-primary, .btn-outline-primary:hover { color: #0d6efd !important; border-color: #bfdbfe !important; background-color: #f0f7ff !important; }
+  .btn-outline-secondary, .btn-outline-secondary:hover { color: #6c757d !important; border-color: #ced4da !important; background-color: #fff !important; }
+  .btn-outline-secondary:active { background-color: #e9ecef !important; }
+  .btn-danger, .btn-danger:hover { background-color: #dc3545 !important; border-color: #dc3545 !important; }
+
+  /* Spinner in State cell */
+  .state-cell .spinner-border { --bs-spinner-width: 1rem; --bs-spinner-height: 1rem; }
+
+  /* Action cell layout */
+  .action-stack { display: flex; gap: .5rem; align-items: center; justify-content: center; }
+
+  /* Modal details */
+  .modal-content { border-radius: 1rem; border: 1px solid #eef2f7; box-shadow: 0 8px 40px rgba(16,24,40,.08); }
+  .modal-header { background: #f8fafc; border-bottom: 1px solid #edf2f7; }
+  .form-label { font-weight: 600; }
 </style>
 
 <div class="container-fluid">
-    <h1 class="h3 mb-4 text-gray-800">Manage vSphere Connections</h1>
-
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 d-flex justify-content-between align-items-center">
-            <h6 class="m-0 font-weight-bold text-primary">Existing Connections</h6>
-            <!-- 新增 Create Connection 按鈕 -->
-            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addConnectionModal">
-                <i class="bi bi-plus-circle me-1"></i> Create Connection
-            </button>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-bordered" width="100%" cellspacing="0">
-                    <thead>
-                        <tr>
-                            <th>Environment</th>
-                            <th>vSphere Host</th>
-                            <th>Username</th>
-                            <th>Status</th>
-                            <th>State</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for conn in connections %}
-                        <tr>
-                            <td class="{% if not conn.is_active %}inactive-cell{% endif %}">{{ conn.environment }}</td>
-                            <td class="{% if not conn.is_active %}inactive-cell{% endif %}">{{ conn.host }}</td>
-                            <td class="{% if not conn.is_active %}inactive-cell{% endif %}">{{ conn.user }}</td>
-                            <td>
-                                {% if conn.is_active %}
-                                    <span class="badge bg-success">Active</span>
-                                {% else %}
-                                    <span class="badge bg-secondary">Inactive</span>
-                                {% endif %}
-                            </td>
-                            <td class="state-cell" id="state-cell-{{ conn.id }}">
-                                <button type="button" class="btn btn-outline-primary btn-sm check-connection-btn"
-                                        title="Check Connection"
-                                        data-conn-id="{{ conn.id }}">
-                                    Check
-                                </button>
-                            </td>
-                            <td>
-                                <div class="d-flex gap-2 justify-content-center align-items-center">
-                                    <form action="{{ url_for('vm.toggle_vsphere_connection', conn_id=conn.id) }}" method="post" title="{{ 'Click to Disable' if conn.is_active else 'Click to Enable' }}">
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" role="switch" 
-                                                   id="toggle-{{ conn.id }}" 
-                                                   {% if conn.is_active %}checked{% endif %}
-                                                   onchange="this.form.submit()">
-                                        </div>
-                                    </form>
-                                    <button type="button" class="btn btn-outline-secondary btn-sm"
-                                            title="Change Password"
-                                            data-bs-toggle="modal"
-                                            data-bs-target="#changePasswordModal"
-                                            data-conn-id="{{ conn.id }}"
-                                            data-conn-env="{{ conn.environment }}">
-                                        <i class="bi bi-key-fill"></i>
-                                    </button>
-                                    <form action="{{ url_for('vm.delete_vsphere_connection', conn_id=conn.id) }}" method="post" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this connection?');">
-                                        <button type="submit" class="btn btn-danger btn-sm" title="Delete Connection">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </form>
-                                </div>
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="6" class="text-center">No connections found.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title fs-4">
+        Manage vSphere Connections
+      </h1>
+      <div class="page-subtitle">View, test, and manage your vSphere connection settings.</div>
     </div>
+    <div>
+      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addConnectionModal">
+        <i class="bi bi-plus-circle me-1"></i> Create Connection
+      </button>
+    </div>
+  </div>
+
+  <!-- List card -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header py-3 d-flex justify-content-between align-items-center">
+      <h6 class="m-0 fw-bold text-primary">Existing Connections</h6>
+      <div class="small text-muted">
+        <i class="bi bi-info-circle me-1"></i>
+        Click “Check” to test. On failure, hover the red badge to see the error.
+      </div>
+    </div>
+
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-hover table-striped align-middle">
+          <thead>
+            <tr>
+              <th style="width: 12%">Environment</th>
+              <th style="width: 28%">vSphere Host</th>
+              <th style="width: 24%">Username</th>
+              <!-- 1) Swap order: State before Status -->
+              <th style="width: 16%">State</th>
+              <th style="width: 10%">Status</th>
+              <th style="width: 10%">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for conn in connections %}
+            <tr>
+              <td class="{% if not conn.is_active %}inactive-cell{% endif %}">
+                <span class="truncate" title="{{ conn.environment }}">{{ conn.environment }}</span>
+              </td>
+              <td class="{% if not conn.is_active %}inactive-cell{% endif %}">
+                <span class="truncate" title="{{ conn.host }}">{{ conn.host }}</span>
+              </td>
+              <td class="{% if not conn.is_active %}inactive-cell{% endif %}">
+                <span class="truncate" title="{{ conn.user }}">{{ conn.user }}</span>
+              </td>
+
+              <!-- State column -->
+              <td id="state-cell-{{ conn.id }}" class="state-cell">
+                <button type="button"
+                        class="btn btn-outline-primary btn-sm check-connection-btn"
+                        title="Check connection"
+                        data-conn-id="{{ conn.id }}">
+                  <i class="bi bi-activity me-1"></i> Check
+                </button>
+              </td>
+
+              <!-- Status column -->
+              <td>
+                {% if conn.is_active %}
+                  <span class="state-badge bg-success"><i class="bi bi-lightning-charge-fill"></i> Active</span>
+                {% else %}
+                  <span class="state-badge bg-secondary"><i class="bi bi-pause-fill"></i> Inactive</span>
+                {% endif %}
+              </td>
+
+              <td>
+                <div class="action-stack">
+                  <form action="{{ url_for('vm.toggle_vsphere_connection', conn_id=conn.id) }}" method="post"
+                        title="{{ 'Click to disable' if conn.is_active else 'Click to enable' }}">
+                    <div class="form-check form-switch m-0">
+                      <input class="form-check-input" type="checkbox" role="switch"
+                             id="toggle-{{ conn.id }}"
+                             {% if conn.is_active %}checked{% endif %}
+                             onchange="this.form.submit()">
+                    </div>
+                  </form>
+
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          title="Change password"
+                          data-bs-toggle="modal"
+                          data-bs-target="#changePasswordModal"
+                          data-conn-id="{{ conn.id }}"
+                          data-conn-env="{{ conn.environment }}">
+                    <i class="bi bi-key-fill"></i>
+                  </button>
+
+                  <form action="{{ url_for('vm.delete_vsphere_connection', conn_id=conn.id) }}" method="post"
+                        class="d-inline"
+                        onsubmit="return confirm('Are you sure you want to delete this connection?');">
+                    <button type="submit" class="btn btn-danger btn-sm" title="Delete connection">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="6" class="text-center text-muted py-4">
+                <i class="bi bi-inboxes me-2"></i>No connections found.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Add/Update Connection Modal -->
 <div class="modal fade" id="addConnectionModal" tabindex="-1" aria-labelledby="addConnectionModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form action="{{ url_for('vm.manage_vsphere_connections') }}" method="post">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="addConnectionModalLabel">Add/Update Connection</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="environment" class="form-label">Environment Name</label>
-                        <input type="text" class="form-control" id="environment" name="environment" placeholder="e.g., sandbox (Must be unique)" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="host" class="form-label">vSphere Host/IP</label>
-                        <input type="text" class="form-control" id="host" name="host" placeholder="e.g., vcenter.example.com" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="user" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="user" name="user" placeholder="e.g., administrator@vsphere.local" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" name="password" required>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="submit" class="btn btn-primary">Save Connection</button>
-                </div>
-            </form>
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form action="{{ url_for('vm.manage_vsphere_connections') }}" method="post">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="addConnectionModalLabel">
+            <i class="bi bi-node-plus me-2 text-primary"></i>Add/Update Connection
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="environment" class="form-label">Environment name</label>
+            <input type="text" class="form-control" id="environment" name="environment"
+                   placeholder="e.g., sandbox (must be unique)" required>
+          </div>
+          <div class="mb-3">
+            <label for="host" class="form-label">vSphere host/IP</label>
+            <input type="text" class="form-control" id="host" name="host"
+                   placeholder="e.g., vcenter.example.com" required>
+          </div>
+          <div class="mb-3">
+            <label for="user" class="form-label">Username</label>
+            <input type="text" class="form-control" id="user" name="user"
+                   placeholder="e.g., administrator@vsphere.local" required>
+          </div>
+          <div class="mb-3">
+            <label for="password" class="form-label">Password</label>
+            <input type="password" class="form-control" id="password" name="password" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary">Save connection</button>
+        </div>
+      </form>
     </div>
+  </div>
 </div>
 
 <!-- Change Password Modal -->
 <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
-    <!-- ... (Modal 內容維持不變) ... -->
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="changePasswordForm" method="post" action="">
+        <div class="modal-header">
+          <h5 class="modal-title" id="changePasswordModalLabel">Change password</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="new_password" class="form-label">New password</label>
+            <input type="password" class="form-control" id="new_password" name="new_password" required>
+          </div>
+          <div class="form-text">The password will only update the credentials for this connection.</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    // Change Password Modal 的 JavaScript (維持不變)
-    const changePasswordModal = document.getElementById('changePasswordModal');
-    if (changePasswordModal) {
-        changePasswordModal.addEventListener('show.bs.modal', function (event) {
-            // ... (程式碼維持不變)
+  // Change Password Modal: inject action and title
+  const changePasswordModal = document.getElementById('changePasswordModal');
+  if (changePasswordModal) {
+    changePasswordModal.addEventListener('show.bs.modal', function (event) {
+      const button = event.relatedTarget;
+      if (!button) return;
+      const connId  = button.getAttribute('data-conn-id');
+      const connEnv = button.getAttribute('data-conn-env') || '';
+
+      const form = document.getElementById('changePasswordForm');
+      let actionUrl = "{{ url_for('vm.change_vsphere_password', conn_id=0) }}";
+      form.action = actionUrl.replace('0', connId);
+
+      const title = changePasswordModal.querySelector('#changePasswordModalLabel');
+      if (title) title.textContent = `Change password — ${connEnv}`;
+
+      const newPwdInput = document.getElementById('new_password');
+      if (newPwdInput) newPwdInput.value = '';
+    });
+  }
+
+  // Helper: init tooltips within a container (for dynamically inserted elements)
+  function initTooltipsIn(container) {
+    if (!(window.bootstrap && bootstrap.Tooltip)) return;
+    container.querySelectorAll('[title]').forEach(function (el) {
+      const existing = bootstrap.Tooltip.getInstance(el);
+      if (existing) existing.dispose();
+      new bootstrap.Tooltip(el, { trigger: 'hover' });
+    });
+  }
+
+  // Enable initial tooltips (static elements)
+  if (window.bootstrap && bootstrap.Tooltip) {
+    document.querySelectorAll('[title]').forEach(function (el) {
+      new bootstrap.Tooltip(el, { trigger: 'hover' });
+    });
+  }
+
+  // Check / Retry button (event delegation)
+  const tableBody = document.querySelector('table tbody');
+  if (tableBody) {
+    tableBody.addEventListener('click', async function (event) {
+      const button = event.target.closest('.check-connection-btn');
+      if (!button) return;
+
+      // 2) Hide the lingering tooltip on click
+      if (window.bootstrap && bootstrap.Tooltip) {
+        const tip = bootstrap.Tooltip.getInstance(button) || new bootstrap.Tooltip(button, { trigger: 'hover' });
+        tip.hide();
+      }
+
+      const connId = button.getAttribute('data-conn-id');
+      const stateCell = document.getElementById(`state-cell-${connId}`);
+
+      stateCell.innerHTML = `
+        <span class="spinner-border" role="status" aria-hidden="true"></span>
+        <span class="ms-2 text-muted small">Testing...</span>
+      `;
+
+      try {
+        const url = "{{ url_for('vm.test_vsphere_connection_api', conn_id=0) }}".replace('0', connId);
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
-    }
+        const result = await response.json();
 
-    // 使用事件委派來處理 Check/Retry 按鈕的點擊
-    const tableBody = document.querySelector('table tbody');
-    if (tableBody) {
-        tableBody.addEventListener('click', async function (event) {
-            const button = event.target.closest('.check-connection-btn');
-            if (!button) return; // 如果點擊的不是目標按鈕，就什麼都不做
+        if (result.success) {
+          stateCell.innerHTML = `
+            <span class="state-badge bg-success" title="${result.message || 'Connection successful'}">
+              <i class="bi bi-check-circle-fill"></i> Normal
+            </span>
+            <i class="bi bi-arrow-repeat retry-icon check-connection-btn"
+               title="Retry" data-conn-id="${connId}"></i>
+          `;
+        } else {
+          stateCell.innerHTML = `
+            <span class="state-badge bg-danger" title="${result.message}">
+              <i class="bi bi-x-circle-fill"></i> Failed
+            </span>
+            <i class="bi bi-arrow-repeat retry-icon check-connection-btn"
+               title="Retry" data-conn-id="${connId}"></i>
+          `;
+        }
 
-            const connId = button.getAttribute('data-conn-id');
-            const stateCell = document.getElementById(`state-cell-${connId}`);
-            
-            stateCell.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>`;
+        // 5) Re-init tooltips for newly inserted badge (so error text is visible on hover)
+        initTooltipsIn(stateCell);
 
-            try {
-                const url = "{{ url_for('vm.test_vsphere_connection_api', conn_id=0) }}".replace('0', connId);
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                const result = await response.json();
-
-                if (result.success) {
-                    stateCell.innerHTML = '<span class="badge state-badge bg-success"><i class="bi bi-check-circle-fill"></i> Normal</span>';
-                } else {
-                    stateCell.innerHTML = `
-                        <span class="badge state-badge bg-danger" title="${result.message}">
-                            <i class="bi bi-x-circle-fill"></i> Failed
-                        </span>
-                        <i class="bi bi-arrow-repeat retry-icon check-connection-btn" title="Retry" data-conn-id="${connId}"></i>
-                    `;
-                }
-            } catch (error) {
-                stateCell.innerHTML = `
-                    <span class="badge state-badge bg-danger" title="${error}">
-                        <i class="bi bi-exclamation-triangle-fill"></i> Error
-                    </span>
-                    <i class="bi bi-arrow-repeat retry-icon check-connection-btn" title="Retry" data-conn-id="${connId}"></i>
-                `;
-            }
-        });
-    }
+      } catch (error) {
+        stateCell.innerHTML = `
+          <span class="state-badge bg-danger" title="${error}">
+            <i class="bi bi-exclamation-triangle-fill"></i> Error
+          </span>
+          <i class="bi bi-arrow-repeat retry-icon check-connection-btn"
+             title="Retry" data-conn-id="${connId}"></i>
+        `;
+        initTooltipsIn(stateCell);
+      }
+    });
+  }
 });
 </script>
 {% endblock %}

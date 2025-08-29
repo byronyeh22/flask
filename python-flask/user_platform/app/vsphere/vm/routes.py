@@ -799,6 +799,10 @@ def get_vsphere_objects_api(environment):
         conn_info = get_vsphere_connection_by_env(db_conn, environment)
         if not conn_info:
             return jsonify({"error": f"vSphere connection details not found for environment: {environment}"}), 404
+
+        if conn_info.get('password') is None:
+            return jsonify({"success": False, "message": conn_info.get('decrypt_error', 'Password decrypt failed.')}), 400
+
         vsphere_data = get_vsphere_objects(
             host=conn_info['host'],
             user=conn_info['user'],
@@ -821,10 +825,13 @@ def test_vsphere_connection_api(conn_id):
     db_conn = None
     try:
         db_conn = get_db_connection()
-        conn_info = get_vsphere_connection_by_env_id(db_conn, conn_id) # 假設您有一個用ID查詢的函式
+        conn_info = get_vsphere_connection_by_id(db_conn, conn_id) # 假設您有一個用ID查詢的函式
 
         if not conn_info:
             return jsonify({"success": False, "message": "Connection not found or is inactive."}), 404
+
+        if conn_info.get('password') is None:
+            return jsonify({"success": False, "message": conn_info.get('decrypt_error', 'Password decrypt failed.')}), 400
 
         is_ok, message = test_vsphere_connection(
             host=conn_info['host'],

@@ -56,7 +56,12 @@ def get_vsphere_connection_by_env(db_conn, environment):
         )
         conn_info = cursor.fetchone()
         if conn_info:
-            conn_info['password'] = _decrypt_password(conn_info['password'])
+            try:
+                conn_info['password'] = _decrypt_password(conn_info['password'])
+            except Exception as e:
+                # 回傳一個可辨識的狀態給上層
+                conn_info['password'] = None
+                conn_info['decrypt_error'] = f"Password decrypt failed: {type(e).__name__}: {e}"
         return conn_info
     finally:
         cursor.close()
@@ -111,12 +116,17 @@ def get_vsphere_connection_by_id(db_conn, conn_id):
     cursor = db_conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT host, user, password FROM vsphere_connections WHERE id = %s",
+            "SELECT id, environment, host, user, password FROM vsphere_connections WHERE id = %s",
             (conn_id,)
         )
         conn_info = cursor.fetchone()
         if conn_info:
-            conn_info['password'] = _decrypt_password(conn_info['password'])
+            try:
+                conn_info['password'] = _decrypt_password(conn_info['password'])
+            except Exception as e:
+                # 回傳一個可辨識的狀態給上層
+                conn_info['password'] = None
+                conn_info['decrypt_error'] = f"Password decrypt failed: {type(e).__name__}: {e}"
         return conn_info
     finally:
         cursor.close()
