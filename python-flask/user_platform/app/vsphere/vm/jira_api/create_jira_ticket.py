@@ -113,6 +113,7 @@ def _generate_create_description(data: dict) -> str:
         [
             ("Datacenter",  data.get('vsphere_datacenter','-')),
             ("Cluster",     data.get('vsphere_cluster','-')),
+            ("Esxi Host",   data.get('vsphere_esxi_host','-')),
             ("Template",    data.get('vsphere_template','-')),
             ("Datastore",   data.get('vsphere_datastore','-')),
             ("Network",     data.get('vsphere_network','-')),

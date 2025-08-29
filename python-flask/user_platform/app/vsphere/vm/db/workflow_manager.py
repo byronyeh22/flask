@@ -124,7 +124,7 @@ def apply_request_to_db(db_conn, workflow_id):
 
         # 3. 更新 workflow 狀態為 IN_PROGRESS
         update_request_status(db_conn, workflow_id, 'IN_PROGRESS')
-        
+
     except Error as e:
         logging.error(f"❌ Database error in apply_request_to_db for workflow_id {workflow_id}: {e}")
         if db_conn and db_conn.is_connected(): db_conn.rollback()
@@ -145,11 +145,11 @@ def _apply_create_action(db_conn, form_data):
     # 1. 插入主表
     sql_vm_config = """
         INSERT INTO vm_configurations (
-            environment, resource, os_type, vsphere_datacenter, vsphere_cluster,
+            environment, resource, os_type, vsphere_datacenter, vsphere_cluster, vsphere_esxi_host,
             vsphere_network, vsphere_template, vsphere_datastore, vm_name_prefix,
             vm_instance_type, vm_num_cpus, vm_memory, vm_scsi_controller_count,
             vm_ipv4_gateway, netbox_prefix, netbox_tenant
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     params_vm_config = (
         _Helpers._first_scalar(form_data.get('environment')),
@@ -157,6 +157,7 @@ def _apply_create_action(db_conn, form_data):
         _Helpers._first_scalar(form_data.get('os_type')),
         _Helpers._first_scalar(form_data.get('vsphere_datacenter')),
         _Helpers._first_scalar(form_data.get('vsphere_cluster')),
+        _Helpers._first_scalar(form_data.get('vsphere_esxi_host')), # 【修改】
         _Helpers._first_scalar(form_data.get('vsphere_network')),
         _Helpers._first_scalar(form_data.get('vsphere_template')),
         _Helpers._first_scalar(form_data.get('vsphere_datastore')),

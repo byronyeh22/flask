@@ -79,31 +79,39 @@ def vm_index():
     """
     Render the main VM management page.
     """
-    VCENTER_HOST = current_app.config['VSPHERE_HOST']
-    VCENTER_USER = current_app.config['VSPHERE_USER']
-    VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
-    vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
+    # 移除舊的 vSphere 連線資訊讀取
+    # VCENTER_HOST = current_app.config['VSPHERE_HOST']
+    # VCENTER_USER = current_app.config['VSPHERE_USER']
+    # VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
+    # vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
 
     db_conn = None
+    environments = []
     try:
         db_conn = get_db_connection()
-        environment = get_environment(db_conn)
+        # 【修改】從 vsphere_connections 取得所有已啟用的環境
+        active_connections = get_active_vsphere_connections(db_conn)
+        environments = [conn['environment'] for conn in active_connections]
     except Exception as e:
         logging.error(f"Database connection error in vm_index: {e}")
-        environment = []
+        environments = []  # 發生錯誤時 fallback 為空列表
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
 
     return render_template(
         "vm_index.html",
-        datacenters=vsphere_data["datacenters"], clusters=vsphere_data["clusters"],
-        templates=vsphere_data["templates"], networks=vsphere_data["networks"],
-        datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
-        environment=environment,
-
+        # 傳遞 environment 列表到你的模板
+        environment=environments,
+        # 初始載入時，這些可以為空，或提供一個預設值
+        datacenters=[],
+        clusters=[],
+        esxi_hosts=[],
+        templates=[],
+        networks=[],
+        datastores=[],
+        vm_name=[],
     )
-
 
 @vm_bp.route("/vsphere/overview")
 def overview_index():
@@ -485,89 +493,140 @@ def workflow_execute(workflow_id):
 
 @vm_bp.route("/workflow/draft/<int:workflow_id>/edit", methods=["GET"])
 def workflow_draft_edit(workflow_id: int):
-    VCENTER_HOST = current_app.config['VSPHERE_HOST']
-    VCENTER_USER = current_app.config['VSPHERE_USER']
-    VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
-    vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
-
     db_conn = None
-    draft_data = {}
-    environments = []
+    cur = None
     try:
         db_conn = get_db_connection()
-        environments = get_environment(db_conn)
 
+        # 1) Load environments for the dropdown (active connections only)
+        active_connections = get_active_vsphere_connections(db_conn)
+        environments = [c.get("environment") for c in (active_connections or []) if c.get("environment")]
+
+        # 2) Load draft row
         cur = db_conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT status, request_payload
-            FROM workflow_runs
-            WHERE workflow_id=%s
-        """, (workflow_id,))
+        cur.execute(
+            "SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s",
+            (workflow_id,),
+        )
         row = cur.fetchone()
-        cur.close()
 
         if not row:
             flash(f"Draft #{workflow_id} not found.", "warning")
             return redirect(url_for('vm.overview_index'))
 
-        if row["status"] != "DRAFT":
-            flash(f"Workflow #{workflow_id} is not editable (status={row['status']}).", "warning")
+        # Normalize status
+        status = (row.get("status") or "").strip().upper()
+        if status != "DRAFT":
+            flash(f"Workflow #{workflow_id} is not editable (status={status}).", "warning")
             return redirect(url_for('vm.overview_index'))
 
-        draft_data = json.loads(row["request_payload"] or "{}")
+        # 3) Parse payload safely
+        payload_raw = row.get("request_payload") or "{}"
+        try:
+            draft_data = json.loads(payload_raw)
+            if not isinstance(draft_data, dict):
+                # Defensive: if payload is a list or other type, fallback
+                draft_data = {}
+                flash("Draft payload format is invalid; some values may not be prefilled.", "warning")
+        except Exception as parse_err:
+            logging.exception(f"[workflow_draft_edit] JSON parse error for workflow_id={workflow_id}")
+            draft_data = {}
+            flash("Failed to parse draft payload; some values may not be prefilled.", "danger")
 
-        # === 關鍵：看 action_type / resource 來決定顯示哪個表單 ===
+        # 4) Determine action/resource (default: Create/VM)
+        resource = (draft_data.get("resource") or "vm").strip().lower()
         action_type = (draft_data.get("action_type") or "Create").strip().lower()
-        resource    = (draft_data.get("resource") or "vm").strip().lower()
 
-        # 你也可以依 resource 再細分；這裡先只看 action_type
+        # 5) Preload vSphere lists ONLY when:
+        #    - action_type == create
+        #    - draft has environment
+        #    Otherwise, send empty lists (front-end will fetch when env changes).
+        vsphere_data = {
+            "datacenters": [],
+            "clusters": [],
+            "esxi_hosts": [],
+            "templates": [],
+            "networks": [],
+            "datastores": [],
+            "vm_name": [],
+        }
+
         if action_type == "create":
-            # 原本 create 表單就在 vm_index.html 裡（含 create/form.html）
+            draft_env = (draft_data.get("environment") or "").strip()
+            if draft_env:
+                try:
+                    conn_info = get_vsphere_connection_by_env(db_conn, draft_env)
+                    if not conn_info:
+                        flash(f"No active vSphere connection found for environment '{draft_env}'.", "warning")
+                    elif not conn_info.get("password"):
+                        flash(f"Missing credential for environment '{draft_env}'.", "warning")
+                    else:
+                        vsphere_data = get_vsphere_objects(
+                            host=conn_info.get("host"),
+                            user=conn_info.get("user"),
+                            password=conn_info.get("password"),
+                        ) or {}
+                        # Ensure keys exist even if backend returns partial data
+                        for key in ("datacenters", "clusters", "esxi_hosts", "templates", "networks", "datastores", "vm_name"):
+                            vsphere_data.setdefault(key, [])
+                except Exception as vs_err:
+                    logging.exception(f"[workflow_draft_edit] get_vsphere_objects failed: env={draft_env}")
+                    flash(
+                        f"Failed to preload vSphere objects for environment '{draft_env}'. "
+                        f"You can still select environment to load them again.",
+                        "warning",
+                    )
+
+            # Render create page (your existing create tab)
             return render_template(
                 "vm_index.html",
-                datacenters=vsphere_data["datacenters"], clusters=vsphere_data["clusters"],
-                templates=vsphere_data["templates"], networks=vsphere_data["networks"],
-                datastores=vsphere_data["datastores"], vm_name=vsphere_data["vm_name"],
+                datacenters=vsphere_data.get("datacenters", []),
+                clusters=vsphere_data.get("clusters", []),
+                esxi_hosts=vsphere_data.get("esxi_hosts", []),
+                templates=vsphere_data.get("templates", []),
+                networks=vsphere_data.get("networks", []),
+                datastores=vsphere_data.get("datastores", []),
+                vm_name=vsphere_data.get("vm_name", []),
                 environment=environments,
                 draft_data=draft_data,
                 workflow_id=workflow_id,
-                active_tab="create"
+                active_tab="create",
             )
 
         elif action_type == "update":
-            # 導去更新表單頁（你現有的 update 表單頁/模板）
-            # 兩種方式：
-            # A) 直接渲染更新版的 index（若你有 update 區塊）
-            # B) 單獨的更新頁模板，例如：update/form.html
+            # Your existing update entry page/template
             return render_template(
-                "update/index.html",          # ← 用你實際的更新入口模板
+                "update/index.html",
                 environment=environments,
                 draft_data=draft_data,
-                workflow_id=workflow_id
+                workflow_id=workflow_id,
             )
 
         elif action_type == "delete":
-            # 導去刪除表單頁
+            # Your existing delete entry page/template
             return render_template(
-                "delete/index.html",          # ← 用你實際的刪除入口模板
+                "delete/index.html",
                 environment=environments,
                 draft_data=draft_data,
-                workflow_id=workflow_id
+                workflow_id=workflow_id,
             )
 
         else:
-            # 無法識別就回到 overview，避免開錯頁
             flash(f"Unknown action_type '{action_type}' for workflow #{workflow_id}.", "warning")
             return redirect(url_for('vm.overview_index'))
 
     except Exception as e:
-        logging.error(f"[workflow_draft_edit] {e}")
+        logging.exception(f"[workflow_draft_edit] unexpected error: {e}")
         flash(f"Failed to open draft: {e}", "danger")
         return redirect(url_for('vm.overview_index'))
     finally:
-        if db_conn and db_conn.is_connected():
+        try:
+            if cur:
+                cur.close()
+        except Exception:
+            pass
+        if db_conn and getattr(db_conn, "is_connected", lambda: False)():
             db_conn.close()
-
 
 @vm_bp.route("/workflow/draft/<int:workflow_id>/delete", methods=["POST"])
 def workflow_draft_delete(workflow_id: int):
@@ -832,25 +891,35 @@ def toggle_vsphere_connection(conn_id):
 # --- API Routes ---
 @vm_bp.route('/api/vsphere_objects/<string:environment>')
 def get_vsphere_objects_api(environment):
+    """
+    根據指定的 environment 動態取得 vSphere 物件 (Datacenters, Clusters, etc.)
+    """
     db_conn = None
     try:
         db_conn = get_db_connection()
+        # 1. 根據 environment 名稱取得該環境的 vSphere 連線資訊
         conn_info = get_vsphere_connection_by_env(db_conn, environment)
+
         if not conn_info:
             return jsonify({"error": f"vSphere connection details not found for environment: {environment}"}), 404
 
+        # 檢查密碼是否成功解密
         if conn_info.get('password') is None:
-            return jsonify({"success": False, "message": conn_info.get('decrypt_error', 'Password decrypt failed.')}), 400
+            error_msg = conn_info.get('decrypt_error', 'Password decryption failed.')
+            return jsonify({"success": False, "message": error_msg}), 400
 
+        # 2. 使用取得的連線資訊去呼叫 get_vsphere_objects
         vsphere_data = get_vsphere_objects(
             host=conn_info['host'],
             user=conn_info['user'],
             password=conn_info['password']
         )
         return jsonify(vsphere_data)
+
     except Exception as e:
         logging.error(f"Error in get_vsphere_objects_api for {environment}: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        traceback.print_exc()
+        return jsonify({"error": "An internal server error occurred"}), 500
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()

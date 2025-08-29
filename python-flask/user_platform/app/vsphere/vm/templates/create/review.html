@@ -3,13 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>Review Request</title>
-  <!-- 保留原本 CSS 體感：載入 Bootstrap 與 Icons（不再 extends base.html，因此自行引入） -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Bootstrap 5 CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- Bootstrap Icons -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-
   <style>
     .kv { display: grid; grid-template-columns: 220px 1fr; gap: .5rem 1rem; }
     .kv .k { color: #6c757d; font-weight: 600; }
@@ -38,16 +34,12 @@
     {% endif %}
   </h4>
 
-  {# 後端以 render_template("create/review.html", data=...) 傳入 data #}
   {% set d = data or {} %}
-
-  {# 磁碟欄位陣列處理：兩者皆可能為單值或陣列 #}
   {% set sizes = d.get('create_vm_disk_size[]', []) %}
   {% set provs = d.get('create_vm_disk_provisioning[]', []) %}
   {% if sizes is string %}{% set sizes = [sizes] %}{% endif %}
   {% if provs is string %}{% set provs = [provs] %}{% endif %}
 
-<!-- Return reason -->
 {% if workflow and workflow.status == 'RETURNED' %}
   <div class="alert alert-danger d-flex align-items-start gap-3 mt-3" role="alert">
     <i class="bi bi-x-octagon fs-4"></i>
@@ -102,6 +94,7 @@
           <div class="kv">
             <div class="k">Datacenter</div><div class="v">{{ d.get('vsphere_datacenter','-') }}</div>
             <div class="k">Cluster</div><div class="v">{{ d.get('vsphere_cluster','-') }}</div>
+            <div class="k">ESXi Host</div><div class="v">{{ d.get('vsphere_esxi_host','-') }}</div> <!-- 【新增】 -->
             <div class="k">Template</div><div class="v">{{ d.get('vsphere_template','-') }}</div>
             <div class="k">Datastore</div><div class="v">{{ d.get('vsphere_datastore','-') }}</div>
             <div class="k">Network</div><div class="v">{{ d.get('vsphere_network','-') }}</div>
@@ -150,8 +143,6 @@
     </div>
   </div>
 
-  <!-- 還原：Confirm & Submit 按鈕 -->
-  <!-- 現階段沿用你原本的 /vsphere/vm/submit。若你改為從 DRAFT 送審的後端路由，之後再把 action 改掉即可。 -->
   <div class="mt-4 d-flex justify-content-end gap-2">
     <form method="post" action="{{ url_for('vm.vsphere_submit_request') }}?from_modal=1" onsubmit="return confirm('Are you sure you want to submit this VM creation request?');">
       <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
@@ -162,8 +153,6 @@
   </div>
 
 </div>
-
-<!-- Bootstrap 5 JS (for modal behaviors etc. if needed inside iframe) -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

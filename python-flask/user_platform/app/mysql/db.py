@@ -110,6 +110,7 @@ def init_db():
             os_type VARCHAR(50) NOT NULL,
             vsphere_datacenter VARCHAR(100),
             vsphere_cluster VARCHAR(100),
+            vsphere_esxi_host VARCHAR(100),
             vsphere_network VARCHAR(100),
             vsphere_template VARCHAR(200),
             vsphere_datastore VARCHAR(200),

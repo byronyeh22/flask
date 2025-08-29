@@ -14,6 +14,7 @@ def get_vsphere_objects(host, user, password):
             "networks": ["mock-network-1", "mock-network-2"],
             "datastores": ["mock-datastore-1", "mock-datastore-2"],
             "vm_name": ["mock-vm-1", "mock-vm-2"],
+            "esxi_hosts": ["mock-esxi-host-01", "mock-esxi-host-02"],  # 新增 ESXi 主機的模擬資料
         }
 
     # 實際連線邏輯
@@ -33,12 +34,12 @@ def get_vsphere_objects(host, user, password):
                 if isinstance(cluster, vim.ClusterComputeResource):
                     clusters.append(cluster.name)
 
-    # all_vms = get(vim.VirtualMachine)
-
     vm_name = [vm.name for vm in get(vim.VirtualMachine) if vm.config and not vm.config.template]
     templates = [vm.name for vm in get(vim.VirtualMachine) if vm.config and vm.config.template]
     networks = [net.name for net in get(vim.Network)]
     datastores = [ds.name for ds in get(vim.Datastore)]
+    # 【新增】取得 ESXi 主機列表
+    esxi_hosts = [host.name for host in get(vim.HostSystem)]
 
     Disconnect(si)
 
@@ -49,4 +50,5 @@ def get_vsphere_objects(host, user, password):
         "networks": sorted(networks),
         "datastores": sorted(datastores),
         "vm_name": sorted(vm_name),
+        "esxi_hosts": sorted(esxi_hosts),  # 【新增】將 ESXi 主機列表加入回傳資料
     }

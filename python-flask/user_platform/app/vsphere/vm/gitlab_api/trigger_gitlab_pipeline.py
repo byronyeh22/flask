@@ -145,6 +145,7 @@ def trigger_gitlab_pipeline(jira_key, form_data):
         "OS_TYPE": form_data.get('os_type', ''),
         "VSPHERE_DATACENTER": form_data.get('vsphere_datacenter', ''),
         "VSPHERE_CLUSTER": form_data.get('vsphere_cluster', ''),
+        "VSPHERE_ESXI_HOST": form_data.get('vsphere_esxi_host', ''),
         "VSPHERE_NETWORK": form_data.get('vsphere_network', ''),
         "VSPHERE_TEMPLATE": form_data.get('vsphere_template', ''),
         "VSPHERE_DATASTORE": form_data.get('vsphere_datastore', ''),
