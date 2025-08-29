@@ -745,26 +745,60 @@ def manage_vsphere_connections():
 
 @vm_bp.route("/vsphere/connections/change_password/<int:conn_id>", methods=['POST'])
 def change_vsphere_password(conn_id):
+    """
+    Supports both:
+    - Normal form submit (flash + redirect)
+    - AJAX (X-Requested-With: XMLHttpRequest) -> JSON {success, message, errors?}
+    Expected fields: current_password, new_password, confirm_new_password
+    """
     db_conn = None
-    try:
-        current_password = request.form.get('current_password')
-        new_password = request.form.get('new_password')
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
-        if not current_password or not new_password:
-            flash("Both current and new passwords are required.", "danger")
-        else:
-            db_conn = get_db_connection()
-            success, message = update_connection_password(db_conn, conn_id, current_password, new_password)
-            if success:
-                flash(message, "success")
-            else:
-                flash(message, "danger")
+    try:
+        current_password = request.form.get('current_password', '').strip()
+        new_password = request.form.get('new_password', '').strip()
+        confirm_new_password = request.form.get('confirm_new_password', '').strip()
+
+        # Basic validation
+        errors = {}
+        if not current_password:
+            errors["current_password"] = "Current password is required."
+        if not new_password:
+            errors["new_password"] = "New password is required."
+        if confirm_new_password != new_password:
+            errors["confirm_new_password"] = "New passwords do not match."
+
+        if errors:
+            if is_ajax:
+                return jsonify({"success": False, "message": "Validation failed.", "errors": errors}), 400
+            # Non-AJAX: flash first error and redirect
+            for _, msg in errors.items():
+                flash(msg, "danger")
+            return redirect(url_for('vm.manage_vsphere_connections'))
+
+        # Do update via your existing helper
+        db_conn = get_db_connection()
+        success, message = update_connection_password(db_conn, conn_id, current_password, new_password)
+
+        if is_ajax:
+            status = 200 if success else 400
+            return jsonify({"success": success, "message": message}), status
+
+        flash(message, "success" if success else "danger")
+        return redirect(url_for('vm.manage_vsphere_connections'))
+
     except Exception as e:
+        if is_ajax:
+            return jsonify({"success": False, "message": f"Internal error: {e}"}), 500
         flash(f"Error updating password: {e}", "danger")
+        return redirect(url_for('vm.manage_vsphere_connections'))
+
     finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
-    return redirect(url_for('vm.manage_vsphere_connections'))
+        try:
+            if db_conn and db_conn.is_connected():
+                db_conn.close()
+        except Exception:
+            pass
 
 @vm_bp.route("/vsphere/connections/delete/<int:conn_id>", methods=['POST'])
 def delete_vsphere_connection(conn_id):

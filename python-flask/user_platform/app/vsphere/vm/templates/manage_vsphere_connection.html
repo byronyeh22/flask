@@ -262,27 +262,35 @@
           <h5 class="modal-title" id="changePasswordModalLabel">Change Password</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
+
         <div class="modal-body">
+          <!-- general error/success alert (dynamic) -->
+          <div id="cp-alert" class="alert py-2 px-3 mb-3 d-none" role="alert"></div>
+
           <div class="mb-3">
             <label for="current_password" class="form-label">Current Password</label>
             <input type="password" class="form-control" id="current_password" name="current_password" required>
+            <div class="invalid-feedback" id="error_current_password"></div>
           </div>
+
           <hr>
+
           <div class="mb-3">
             <label for="new_password" class="form-label">New Password</label>
             <input type="password" class="form-control" id="new_password" name="new_password" required>
+            <div class="invalid-feedback" id="error_new_password"></div>
           </div>
+
           <div class="mb-3">
             <label for="confirm_new_password" class="form-label">Confirm New Password</label>
             <input type="password" class="form-control" id="confirm_new_password" name="confirm_new_password" required>
-            <div class="invalid-feedback" id="passwordMismatchError" style="display: none;">
-                New passwords do not match.
-            </div>
+            <div class="invalid-feedback" id="error_confirm_new_password"></div>
           </div>
         </div>
+
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-          <button type="submit" class="btn btn-primary">Save Changes</button>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary" id="cp-submit-btn">Save Changes</button>
         </div>
       </form>
     </div>
@@ -293,44 +301,119 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const changePasswordModal = document.getElementById('changePasswordModal');
-    if (changePasswordModal) {
-        const form = document.getElementById('changePasswordForm');
-        const newPasswordInput = document.getElementById('new_password');
-        const confirmPasswordInput = document.getElementById('confirm_new_password');
-        const errorDiv = document.getElementById('passwordMismatchError');
+  // ===== Change Password Modal: inject action, title, and handle AJAX submit =====
+  const changePasswordModal = document.getElementById('changePasswordModal');
+  if (changePasswordModal) {
+    const form = document.getElementById('changePasswordForm');
+    const titleEl = document.getElementById('changePasswordModalLabel');
+    const alertBox = document.getElementById('cp-alert');
+    const submitBtn = document.getElementById('cp-submit-btn');
 
-        changePasswordModal.addEventListener('show.bs.modal', function (event) {
-            const button = event.relatedTarget;
-            const connId = button.getAttribute('data-conn-id');
-            const connEnv = button.getAttribute('data-conn-env');
-            const modalTitle = changePasswordModal.querySelector('.modal-title');
+    const fields = {
+      current_password: document.getElementById('current_password'),
+      new_password: document.getElementById('new_password'),
+      confirm_new_password: document.getElementById('confirm_new_password'),
+    };
+    const errors = {
+      current_password: document.getElementById('error_current_password'),
+      new_password: document.getElementById('error_new_password'),
+      confirm_new_password: document.getElementById('error_confirm_new_password'),
+    };
 
-            modalTitle.textContent = `Change Password for: ${connEnv}`;
-
-            let actionUrl = "{{ url_for('vm.change_vsphere_password', conn_id=0) }}";
-            form.action = actionUrl.replace('0', connId);
-
-            // Clear fields and validation on open
-            form.reset();
-            newPasswordInput.classList.remove('is-invalid');
-            confirmPasswordInput.classList.remove('is-invalid');
-            errorDiv.style.display = 'none';
-        });
-
-        form.addEventListener('submit', function(event) {
-            if (newPasswordInput.value !== confirmPasswordInput.value) {
-                event.preventDefault(); // Stop form submission
-                newPasswordInput.classList.add('is-invalid');
-                confirmPasswordInput.classList.add('is-invalid');
-                errorDiv.style.display = 'block';
-            } else {
-                newPasswordInput.classList.remove('is-invalid');
-                confirmPasswordInput.classList.remove('is-invalid');
-                errorDiv.style.display = 'none';
-            }
-        });
+    function clearFieldErrors() {
+      Object.values(fields).forEach(i => i.classList.remove('is-invalid'));
+      Object.values(errors).forEach(e => { e.textContent = ''; });
     }
+    function showAlert(kind, msg) {
+      // kind: 'success' | 'danger' | 'warning' | 'info'
+      alertBox.className = `alert alert-${kind} py-2 px-3 mb-3`;
+      alertBox.textContent = msg;
+      alertBox.classList.remove('d-none');
+    }
+    function hideAlert() {
+      alertBox.classList.add('d-none');
+      alertBox.textContent = '';
+      alertBox.className = 'alert py-2 px-3 mb-3 d-none';
+    }
+
+    changePasswordModal.addEventListener('show.bs.modal', function (event) {
+      const button = event.relatedTarget;
+      if (!button) return;
+
+      const connId  = button.getAttribute('data-conn-id');
+      const connEnv = button.getAttribute('data-conn-env') || '';
+
+      // Inject action URL
+      let actionUrl = "{{ url_for('vm.change_vsphere_password', conn_id=0) }}";
+      form.action = actionUrl.replace('0', connId);
+
+      // Title
+      if (titleEl) titleEl.textContent = `Change Password — ${connEnv}`;
+
+      // Reset inputs and errors
+      form.reset();
+      clearFieldErrors();
+      hideAlert();
+    });
+
+    // Intercept submit -> AJAX
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault(); // keep modal open
+      clearFieldErrors();
+      hideAlert();
+
+      // Client-side confirm check
+      if (fields.new_password.value !== fields.confirm_new_password.value) {
+        fields.new_password.classList.add('is-invalid');
+        fields.confirm_new_password.classList.add('is-invalid');
+        errors.confirm_new_password.textContent = 'New passwords do not match.';
+        showAlert('danger', 'Please fix the highlighted fields.');
+        return;
+      }
+
+      // Disable button during request
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Saving...';
+
+      try {
+        const resp = await fetch(form.action, {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          body: new FormData(form)
+        });
+
+        // Expect JSON from server:
+        // { success: boolean, message?: string, errors?: { field: msg, ... } }
+        const data = await resp.json().catch(() => ({}));
+
+        if (data && data.success) {
+          showAlert('success', data.message || 'Password updated successfully.');
+          // Optionally close the modal after a short delay
+          setTimeout(() => {
+            const modal = bootstrap.Modal.getInstance(changePasswordModal);
+            if (modal) modal.hide();
+          }, 800);
+        } else {
+          // Field-level errors
+          if (data && data.errors) {
+            Object.keys(data.errors).forEach(key => {
+              if (fields[key]) {
+                fields[key].classList.add('is-invalid');
+                errors[key].textContent = data.errors[key];
+              }
+            });
+          }
+          // General error
+          showAlert('danger', (data && data.message) || 'Failed to update password.');
+        }
+      } catch (err) {
+        showAlert('danger', `Request failed: ${err}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Changes';
+      }
+    });
+  }
 
   // Helper: init tooltips within a container (for dynamically inserted elements)
   function initTooltipsIn(container) {
