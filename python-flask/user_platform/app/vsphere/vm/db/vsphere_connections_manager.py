@@ -83,13 +83,36 @@ def add_or_update_vsphere_connection(db_conn, env, host, user, password_plain):
     finally:
         cursor.close()
 
-def update_connection_password(db_conn, conn_id, new_password_plain):
+def update_connection_password(db_conn, conn_id, current_password_plain, new_password_plain):
     """更新指定連線的密碼。"""
-    cursor = db_conn.cursor()
+    cursor = db_conn.cursor(dictionary=True)
     try:
-        encrypted_pass = _encrypt_password(new_password_plain)
-        cursor.execute("UPDATE vsphere_connections SET password = %s WHERE id = %s", (encrypted_pass, conn_id))
+        # 1. Fetch the current encrypted password
+        cursor.execute("SELECT password FROM vsphere_connections WHERE id = %s", (conn_id,))
+        result = cursor.fetchone()
+        if not result:
+            return (False, "Connection not found.")
+
+        stored_encrypted_pass = result['password']
+
+        # 2. Decrypt and verify the current password
+        stored_decrypted_pass = _decrypt_password(stored_encrypted_pass)
+        if stored_decrypted_pass != current_password_plain:
+            return (False, "Current password does not match.")
+
+        # 3. If verification succeeds, encrypt and update the new password
+        new_encrypted_pass = _encrypt_password(new_password_plain)
+        cursor.execute("UPDATE vsphere_connections SET password = %s WHERE id = %s", (new_encrypted_pass, conn_id))
         db_conn.commit()
+
+        return (True, "Password updated successfully.")
+
+    except Exception as e:
+        db_conn.rollback()
+        # Log the actual error for debugging
+        print(f"Error during password update for conn_id {conn_id}: {e}")
+        return (False, "An unexpected error occurred.")
+
     finally:
         cursor.close()
 

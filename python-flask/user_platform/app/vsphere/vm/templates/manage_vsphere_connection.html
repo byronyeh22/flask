@@ -259,19 +259,30 @@
     <div class="modal-content">
       <form id="changePasswordForm" method="post" action="">
         <div class="modal-header">
-          <h5 class="modal-title" id="changePasswordModalLabel">Change password</h5>
+          <h5 class="modal-title" id="changePasswordModalLabel">Change Password</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <div class="mb-3">
-            <label for="new_password" class="form-label">New password</label>
+            <label for="current_password" class="form-label">Current Password</label>
+            <input type="password" class="form-control" id="current_password" name="current_password" required>
+          </div>
+          <hr>
+          <div class="mb-3">
+            <label for="new_password" class="form-label">New Password</label>
             <input type="password" class="form-control" id="new_password" name="new_password" required>
           </div>
-          <div class="form-text">The password will only update the credentials for this connection.</div>
+          <div class="mb-3">
+            <label for="confirm_new_password" class="form-label">Confirm New Password</label>
+            <input type="password" class="form-control" id="confirm_new_password" name="confirm_new_password" required>
+            <div class="invalid-feedback" id="passwordMismatchError" style="display: none;">
+                New passwords do not match.
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-          <button type="submit" class="btn btn-primary">Save changes</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
         </div>
       </form>
     </div>
@@ -282,26 +293,44 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-  // Change Password Modal: inject action and title
-  const changePasswordModal = document.getElementById('changePasswordModal');
-  if (changePasswordModal) {
-    changePasswordModal.addEventListener('show.bs.modal', function (event) {
-      const button = event.relatedTarget;
-      if (!button) return;
-      const connId  = button.getAttribute('data-conn-id');
-      const connEnv = button.getAttribute('data-conn-env') || '';
+    const changePasswordModal = document.getElementById('changePasswordModal');
+    if (changePasswordModal) {
+        const form = document.getElementById('changePasswordForm');
+        const newPasswordInput = document.getElementById('new_password');
+        const confirmPasswordInput = document.getElementById('confirm_new_password');
+        const errorDiv = document.getElementById('passwordMismatchError');
 
-      const form = document.getElementById('changePasswordForm');
-      let actionUrl = "{{ url_for('vm.change_vsphere_password', conn_id=0) }}";
-      form.action = actionUrl.replace('0', connId);
+        changePasswordModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const connId = button.getAttribute('data-conn-id');
+            const connEnv = button.getAttribute('data-conn-env');
+            const modalTitle = changePasswordModal.querySelector('.modal-title');
 
-      const title = changePasswordModal.querySelector('#changePasswordModalLabel');
-      if (title) title.textContent = `Change password — ${connEnv}`;
+            modalTitle.textContent = `Change Password for: ${connEnv}`;
 
-      const newPwdInput = document.getElementById('new_password');
-      if (newPwdInput) newPwdInput.value = '';
-    });
-  }
+            let actionUrl = "{{ url_for('vm.change_vsphere_password', conn_id=0) }}";
+            form.action = actionUrl.replace('0', connId);
+
+            // Clear fields and validation on open
+            form.reset();
+            newPasswordInput.classList.remove('is-invalid');
+            confirmPasswordInput.classList.remove('is-invalid');
+            errorDiv.style.display = 'none';
+        });
+
+        form.addEventListener('submit', function(event) {
+            if (newPasswordInput.value !== confirmPasswordInput.value) {
+                event.preventDefault(); // Stop form submission
+                newPasswordInput.classList.add('is-invalid');
+                confirmPasswordInput.classList.add('is-invalid');
+                errorDiv.style.display = 'block';
+            } else {
+                newPasswordInput.classList.remove('is-invalid');
+                confirmPasswordInput.classList.remove('is-invalid');
+                errorDiv.style.display = 'none';
+            }
+        });
+    }
 
   // Helper: init tooltips within a container (for dynamically inserted elements)
   function initTooltipsIn(container) {

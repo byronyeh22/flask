@@ -747,13 +747,18 @@ def manage_vsphere_connections():
 def change_vsphere_password(conn_id):
     db_conn = None
     try:
+        current_password = request.form.get('current_password')
         new_password = request.form.get('new_password')
-        if not new_password:
-            flash("New password cannot be empty.", "danger")
+
+        if not current_password or not new_password:
+            flash("Both current and new passwords are required.", "danger")
         else:
             db_conn = get_db_connection()
-            update_connection_password(db_conn, conn_id, new_password)
-            flash("Password updated successfully.", "success")
+            success, message = update_connection_password(db_conn, conn_id, current_password, new_password)
+            if success:
+                flash(message, "success")
+            else:
+                flash(message, "danger")
     except Exception as e:
         flash(f"Error updating password: {e}", "danger")
     finally:
