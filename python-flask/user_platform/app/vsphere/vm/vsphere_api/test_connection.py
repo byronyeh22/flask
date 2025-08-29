@@ -10,11 +10,12 @@ def test_vsphere_connection(host, user, password, port=443, thumbprint=None, tim
     - API_MODE == 'local' 時直接回傳成功（mock）
     - 非 local 時實際連線，提供更清楚的錯誤訊息
     """
+    # 根據 API_MODE 決定是連線真實 vSphere 還是回傳模擬資料
     if current_app.config.get('API_MODE') == 'local':
         print(f"Running in local mode. Mocking connection test for host '{host}'.")
         return (True, "Connection successful (mock).")
 
-    # 先做基礎網路檢查，避免 SSL/驗證前就卡住
+    # 實際連線邏輯先做基礎網路檢查，避免 SSL/驗證前就卡住
     try:
         with socket.create_connection((host, port), timeout=timeout):
             pass
