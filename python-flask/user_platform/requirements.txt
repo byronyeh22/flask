@@ -5,6 +5,7 @@ flask
 jinja2
 PyYAML
 requests
+cryptography
 
 # DB
 mysql-connector-python

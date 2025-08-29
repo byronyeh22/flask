@@ -49,6 +49,22 @@ def init_db():
         )
     """)
 
+    # vsphere_connections：儲存 vSphere 連線資訊
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS vsphere_connections (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            environment VARCHAR(100) NOT NULL UNIQUE,
+            host VARCHAR(255) NOT NULL,
+            user VARCHAR(255) NOT NULL,
+            password TEXT NOT NULL,
+            is_active TINYINT(1) DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_environment (environment)
+        )
+    """)
+
+
     # jira_tickets：儲存對應 Jira Ticket 資訊
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS jira_tickets (

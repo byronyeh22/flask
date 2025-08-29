@@ -4,12 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}User Platform{% endblock %}</title>
-    <!-- CSS Dependencies -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/flowbite@1.6.5/dist/flowbite.min.css" rel="stylesheet" />
-    <!-- JavaScript Dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/flowbite@1.6.5/dist/flowbite.min.js"></script>
     <style>
@@ -145,14 +143,12 @@
   </head>
 
   <body>
-    <!-- Sidebar -->
     <aside id="sidebar" class="sidebar fixed top-0 left-0 z-20 flex flex-col flex-shrink-0 w-64 h-full pt-16 font-normal duration-75 lg:flex transition-width" aria-label="Sidebar">
       <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
       <div class="relative flex flex-col flex-1 min-h-0 pt-0 bg-[#ffffff] border-r border-[#dee2e6]">
         <div class="flex flex-col flex-1 pt-5 pb-4 overflow-y-auto">
           <div class="flex-1 px-1 space-y-1 bg-[#ffffff] divide-y divide-[#dee2e6]">
             <ul class="pb-2 space-y-2">
-              <!-- Dashboard Menu Item -->
               <li>
                 <a href="/" class="flex items-center p-2 text-base text-[#212529] rounded-lg hover:bg-[#e9ecef] group {% if request.path == '/' %} active {% endif %}">
                   <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
@@ -162,7 +158,6 @@
                   <span class="ml-3 sidebar-toggle-item">Dashboard</span>
                 </a>
               </li>
-              <!-- Fortigate Menu Item with Submenu -->
               <li>
                 <button type="button" class="flex items-center w-full p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if 'forti_policy' in request.path %} active {% endif %}" aria-controls="fortigateSub" data-collapse-toggle="fortigateSub">
                   <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 18 18">
@@ -181,7 +176,6 @@
                   </li>
                 </ul>
               </li>
-              <!-- Cisco Menu Item -->
               <li>
                 <a href="#" class="flex items-center p-2 text-base text-[#212529] rounded-lg hover:bg-[#e9ecef] group">
                   <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
@@ -191,7 +185,6 @@
                   <span class="ml-3 sidebar-toggle-item">Cisco</span>
                 </a>
               </li>
-              <!-- Vsphere Menu Item with Submenu -->
               <li>
                 <button type="button" class="flex items-center w-full p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if '/vsphere' in request.path %} active {% endif %}" aria-controls="vsphereSub" data-collapse-toggle="vsphereSub">
                   <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
@@ -213,9 +206,13 @@
                       Virtual Machine
                     </a>
                   </li>
-                </ul>
+                  <li>
+                    <a href="{{ url_for('vm.manage_vsphere_connections') }}" class="flex items-center p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if request.path == '/vsphere/connections' %} active {% endif %}">
+                      Connection Management
+                    </a>
+                  </li>
+                  </ul>
               </li>
-              <!-- Logging Menu Item with Submenu -->
               <li>
                 <button type="button" class="flex items-center w-full p-2 text-base text-[#212529] rounded-lg group hover:bg-[#e9ecef] {% if 'log' in request.path %} active {% endif %}" aria-controls="logSub" data-collapse-toggle="logSub">
                   <svg class="w-6 h-6 text-[#6c757d] group-hover:text-[#212529]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
@@ -237,7 +234,6 @@
 
               <hr class="my-2 border-t border-[#dee2e6]">
 
-              <!-- Logout Menu Item -->
               <li class="mt-auto">
                 <a href="/logout" class="flex items-center p-2 text-base text-[#dc3545] rounded-lg hover:bg-[#e9ecef] group {% if request.path == '/logout' %} active {% endif %}">
                   <svg class="w-6 h-6 text-[#dc3545] group-hover:text-[#dc3545]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
@@ -252,9 +248,7 @@
       </div>
     </aside>
 
-    <!-- Main Content -->
     <main id="main-content" class="main-content">
-      <!-- User Info and Logout Button -->
       <div class="d-flex justify-content-end align-items-center mb-3">
         {% if session.username %}
           <div class="me-3 d-flex align-items-center text-[#6c757d]">
@@ -268,7 +262,6 @@
         <a href="/logout" class="btn btn-outline-danger btn-sm">Logout</a>
       </div>
 
-      <!-- Flash Messages -->
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <div class="mb-3">
@@ -282,11 +275,9 @@
         {% endif %}
       {% endwith %}
 
-      <!-- Content Block -->
       {% block content %}{% endblock %}
     </main>
 
-    <!-- JavaScript for Sidebar Toggle and Dropdown -->
     <script>
       function toggleSidebar() {
         const sidebar = document.getElementById("sidebar");
@@ -296,7 +287,6 @@
       }
     </script>
 
-    <!-- Additional Scripts Block -->
     {% block scripts %}{% endblock %}
   </body>
 </html>

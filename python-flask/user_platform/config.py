@@ -6,6 +6,15 @@ class Config:
     # 預設為 'dev'
     API_MODE = os.environ.get("API_MODE", "local")
 
+    # --- Encryption Key ---
+    # !! IMPORTANT !!
+    # This key MUST be provided as an environment variable.
+    # The application will fail to start if it is not set.
+    FERNET_KEY = os.environ.get("FERNET_KEY")
+    if not FERNET_KEY:
+        raise ValueError("No FERNET_KEY set for Flask application. Please set it as an environment variable on docker-compose.yml file.")
+
+
 # --- 動態設定，根據 API_MODE 的值載入不同的連線資訊 ---
 
 if Config.API_MODE == 'dev':
@@ -41,18 +50,18 @@ else: #Config.API_MODE == 'local'
     # 這裡的設定通常是固定值，不需要從環境變數讀取
 
     # --- Database Configuration ---
-    Config.DB_HOST = "localhost"
+    Config.DB_HOST = "my_mysql"
     Config.DB_USER = "root"
     Config.DB_PASSWORD = "rootpassword"
     Config.DB_NAME = "user_platform"
 
     # --- vSphere Configuration ---
-    Config.VSPHERE_HOST = "localhost:5001"
+    Config.VSPHERE_HOST = "http://host.docker.internal:5001"
     Config.VSPHERE_USER = "mock_user"
     Config.VSPHERE_PASSWORD = "mock_password"
 
     # --- GitLab Configuration ---
-    Config.GITLAB_URL = "http://127.0.0.1:5001/mock/gitlab"
+    Config.GITLAB_URL = "http://host.docker.internal:5001/mock/gitlab"
     Config.GITLAB_PRIVATE_TOKEN = "mock-token"
     Config.GITLAB_TRIGGER_TOKEN = "mock-token"
     Config.GITLAB_PROJECT_ID = "15"
