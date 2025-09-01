@@ -32,12 +32,15 @@ from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
 from .db.vsphere_connections_manager import (
     get_all_vsphere_connections,
     get_active_vsphere_connections,
-    get_vsphere_connection_by_env,
+    # get_vsphere_connection_by_env,  # ← 已改為以 host 為主，移除不用
     add_or_update_vsphere_connection,
     update_connection_password,
     delete_vsphere_connection_by_id,
     toggle_connection_status,
-    get_vsphere_connection_by_id
+    get_vsphere_connection_by_id,
+    # 新增：依環境取主機、依主機取連線
+    get_hosts_by_environment,
+    get_vsphere_connection_by_host,
 )
 
 # --- 匯入 summary 產生器：用於 DRAFT 顯示 ---
@@ -91,10 +94,22 @@ def vm_index():
         db_conn = get_db_connection()
         # 【修改】從 vsphere_connections 取得所有已啟用的環境
         active_connections = get_active_vsphere_connections(db_conn)
-        environments = [conn['environment'] for conn in active_connections]
+        # 取出所有 environment，做大小寫不敏感且保序的去重
+        raw_envs = [
+            (c.get("environment") or "").strip()
+            for c in active_connections
+            if c.get("environment")
+        ]
+        seen = set()
+        environments = []
+        for e in raw_envs:
+            k = e.lower()
+            if k not in seen:
+                seen.add(k)
+                environments.append(e)
     except Exception as e:
         logging.error(f"Database connection error in vm_index: {e}")
-        environments = []  # 發生錯誤時 fallback 為空列表
+        environments = []
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
@@ -115,9 +130,6 @@ def vm_index():
 
 @vm_bp.route("/vsphere/overview")
 def overview_index():
-    """
-    Overview：合併 pipeline 與 workflow（含 DRAFT），狀態以 workflow_runs.status 為主。
-    """
     def _to_iso(val):
         try:
             return val.isoformat()
@@ -134,11 +146,12 @@ def overview_index():
     try:
         db_conn = get_db_connection()
 
+        # 1) 原資料
         jira_tickets = get_jira_tickets_and_stats(db_conn) or []
         pipeline_data = get_gitlab_pipeline_detail_and_stats(db_conn) or []
         pipeline_data = [_ensure_created_at(dict(p)) for p in pipeline_data]
 
-        # 取全部 workflow（包含 DRAFT）
+        # 2) 取全部 workflow（包含 DRAFT）
         cur = db_conn.cursor(dictionary=True)
         cur.execute("""
             SELECT workflow_id, status, created_at, request_payload, created_by
@@ -151,29 +164,30 @@ def overview_index():
         wf_status_map = {w["workflow_id"]: w["status"] for w in workflows}
         wf_created_by_map = {w["workflow_id"]: w.get("created_by") for w in workflows}
 
-        # 把 DRAFT 以「類 pipeline 列」補到最上方 & 產 summary
-        for w in workflows:
-            if w["status"] == "DRAFT":
-                draft_row = {
-                    "workflow_id": w["workflow_id"],
-                    "pipeline_id": None,
-                    "status": "draft",
-                    "created_at": _to_iso(w.get("created_at")),
-                    "finished_at": None,
-                    "duration": None,
-                    "created_by": w.get("created_by"),
-                }
-                pipeline_data.insert(0, draft_row)
+        # --- A) 先把 JIRA tickets 收成 map，後面針對 Draft 直接覆蓋 ---
+        jira_map = {}
+        for t in (jira_tickets or []):
+            wid = t.get("workflow_id")
+            if wid is not None:
+                jira_map[wid] = dict(t)
 
+        # --- B) 避免重複插入 Draft 列：蒐集現有 pipeline_data 的 wid ---
+        existing_wids = {row.get("workflow_id") for row in pipeline_data if row.get("workflow_id") is not None}
+
+        # --- C) 重新覆蓋 DRAFT 的 summary（用最新 payload 產生）
+        for w in workflows:
+            wid = w["workflow_id"]
+            if (w.get("status") or "").upper() == "DRAFT":
                 summary = "-"
                 try:
-                    payload = json.loads(w["request_payload"] or "{}")
+                    payload = json.loads(w.get("request_payload") or "{}")
                     summary = _generate_create_summary(payload) if payload else "-"
                 except Exception:
                     pass
 
-                jira_tickets.append({
-                    "workflow_id": w["workflow_id"],
+                # 覆蓋/寫入 jira_map（確保列表顯示用的 summary 是最新）
+                jira_map[wid] = {
+                    "workflow_id": wid,
                     "ticket_id": None,
                     "project_key": None,
                     "summary": summary,
@@ -181,17 +195,30 @@ def overview_index():
                     "status": None,
                     "url": None,
                     "created_at": _to_iso(w.get("created_at")),
-                })
+                }
 
-        # 用 workflow 狀態覆蓋 pipeline 區塊列的欄位顯示值
+                # 若 pipeline_data 裡還沒有這個 Draft 的列，補一列（避免重複）
+                if wid not in existing_wids:
+                    pipeline_data.insert(0, {
+                        "workflow_id": wid,
+                        "pipeline_id": None,
+                        "status": "DRAFT",
+                        "created_at": _to_iso(w.get("created_at")),
+                        "finished_at": None,
+                        "duration": None,
+                        "created_by": w.get("created_by"),
+                    })
+                    existing_wids.add(wid)
+
+        # --- D) 將覆蓋後的 jira_map 轉回 list 給模板使用 ---
+        jira_tickets = list(jira_map.values())
+
+        # --- E) 最後：用 workflow 狀態覆蓋 pipeline_data 的顯示欄位 ---
         for row in pipeline_data:
             wid = row.get("workflow_id")
-
-            # 補 status
             if wid in wf_status_map:
                 row["status"] = wf_status_map[wid]
-            # 補 created_by
-            if wid in wf_created_by_map and wf_created_by_map[wid]:
+            if wf_created_by_map.get(wid):
                 row["created_by"] = wf_created_by_map[wid]
             else:
                 row.setdefault("created_by", None)
@@ -499,8 +526,19 @@ def workflow_draft_edit(workflow_id: int):
         db_conn = get_db_connection()
 
         # 1) Load environments for the dropdown (active connections only)
-        active_connections = get_active_vsphere_connections(db_conn)
-        environments = [c.get("environment") for c in (active_connections or []) if c.get("environment")]
+        active_connections = get_active_vsphere_connections(db_conn) or []
+        raw_envs = [
+            (c.get("environment") or "").strip()
+            for c in active_connections
+            if c.get("environment")
+        ]
+        seen = set()
+        environments = []
+        for e in raw_envs:
+            k = e.lower()
+            if k not in seen:
+                seen.add(k)
+                environments.append(e)
 
         # 2) Load draft row
         cur = db_conn.cursor(dictionary=True)
@@ -555,27 +593,11 @@ def workflow_draft_edit(workflow_id: int):
             draft_env = (draft_data.get("environment") or "").strip()
             if draft_env:
                 try:
-                    conn_info = get_vsphere_connection_by_env(db_conn, draft_env)
-                    if not conn_info:
-                        flash(f"No active vSphere connection found for environment '{draft_env}'.", "warning")
-                    elif not conn_info.get("password"):
-                        flash(f"Missing credential for environment '{draft_env}'.", "warning")
-                    else:
-                        vsphere_data = get_vsphere_objects(
-                            host=conn_info.get("host"),
-                            user=conn_info.get("user"),
-                            password=conn_info.get("password"),
-                        ) or {}
-                        # Ensure keys exist even if backend returns partial data
-                        for key in ("datacenters", "clusters", "esxi_hosts", "templates", "networks", "datastores", "vm_name"):
-                            vsphere_data.setdefault(key, [])
-                except Exception as vs_err:
-                    logging.exception(f"[workflow_draft_edit] get_vsphere_objects failed: env={draft_env}")
-                    flash(
-                        f"Failed to preload vSphere objects for environment '{draft_env}'. "
-                        f"You can still select environment to load them again.",
-                        "warning",
-                    )
+                    # 依目前設計：由前端選 Environment -> Host，再以 Host 取得物件
+                    # 這裡僅預載 Environment 清單；實際 vSphere 物件於前端選 Host 後再載入
+                    pass
+                except Exception:
+                    pass
 
             # Render create page (your existing create tab)
             return render_template(
@@ -889,42 +911,53 @@ def toggle_vsphere_connection(conn_id):
 
 
 # --- API Routes ---
-@vm_bp.route('/api/vsphere_objects/<string:environment>')
-def get_vsphere_objects_api(environment):
-    """
-    根據指定的 environment 動態取得 vSphere 物件 (Datacenters, Clusters, etc.)
-    """
+
+# (1) 依 Environment 取得「Active」主機清單（供前端在 Environment 選定後載入 Host 下拉選單）
+@vm_bp.route('/api/vsphere/hosts/<string:environment>')
+def get_hosts_by_environment_api(environment):
     db_conn = None
     try:
         db_conn = get_db_connection()
-        # 1. 根據 environment 名稱取得該環境的 vSphere 連線資訊
-        conn_info = get_vsphere_connection_by_env(db_conn, environment)
+        hosts = get_hosts_by_environment(db_conn, environment, active_only=True) or []
+        return jsonify({"environment": environment, "hosts": hosts})
+    except Exception as e:
+        logging.error(f"Error in get_hosts_by_environment_api for {environment}: {e}")
+        return jsonify({"error": "An internal server error occurred"}), 500
+    finally:
+        if db_conn and db_conn.is_connected():
+            db_conn.close()
 
+# (2) 依 Host 取得 vSphere 物件（供前端在 Host 選定後載入 Placement/Template/Datastore/Network 等）
+@vm_bp.route('/api/vsphere_objects/by_host/<path:host>')
+def get_vsphere_objects_by_host_api(host):
+    db_conn = None
+    try:
+        db_conn = get_db_connection()
+        conn_info = get_vsphere_connection_by_host(db_conn, host, require_active=True)
         if not conn_info:
-            return jsonify({"error": f"vSphere connection details not found for environment: {environment}"}), 404
+            return jsonify({"error": f"Active vSphere connection not found for host: {host}"}), 404
 
-        # 檢查密碼是否成功解密
         if conn_info.get('password') is None:
             error_msg = conn_info.get('decrypt_error', 'Password decryption failed.')
             return jsonify({"success": False, "message": error_msg}), 400
 
-        # 2. 使用取得的連線資訊去呼叫 get_vsphere_objects
         vsphere_data = get_vsphere_objects(
             host=conn_info['host'],
             user=conn_info['user'],
             password=conn_info['password']
-        )
+        ) or {}
+
         return jsonify(vsphere_data)
 
     except Exception as e:
-        logging.error(f"Error in get_vsphere_objects_api for {environment}: {e}")
+        logging.error(f"Error in get_vsphere_objects_by_host_api for host {host}: {e}")
         traceback.print_exc()
         return jsonify({"error": "An internal server error occurred"}), 500
     finally:
         if db_conn and db_conn.is_connected():
             db_conn.close()
 
-
+# (3) 保留：VM 連線測試（管理頁使用）
 @vm_bp.route("/api/vsphere/connections/test/<int:conn_id>", methods=['POST'])
 def test_vsphere_connection_api(conn_id):
     """

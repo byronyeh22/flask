@@ -15,27 +15,34 @@
   .form-actions { margin-top: 16px; display: flex; gap: 8px; }
   .btn-draft { background-color: #0d6efd; color: #fff; border: 1px solid #0d6efd; padding: .375rem .75rem; border-radius: .25rem; }
   .btn-cancel-link { background: transparent; color: #6c757d; text-decoration: none; padding: .375rem .75rem; }
-  /* 簡易錯誤樣式（沿用你原本風格） */
   .is-invalid { border-color: #dc3545 !important; box-shadow: 0 0 0 .2rem rgba(220,53,69,.25); }
-  /* 為了讓使用者知道正在載入，可以加上一個簡單的樣式 */
   .form-select:disabled { background-color: #e9ecef; cursor: wait; }
 </style>
 
 <div class="row g-4" id="create-form-root">
   <div class="col-lg-6">
-
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-gear-wide-connected"></i> Core Configuration</div>
       <div class="card-body">
         <div class="mb-3">
           <label for="environment" class="form-label">Environment</label>
           <select id="environment" name="environment" class="form-select" data-required="true"
-                  data-vsphere-objects-url="{{ url_for('vm.get_vsphere_objects_api', environment='PLACEHOLDER') }}"
+                  data-hosts-url="{{ url_for('vm.get_hosts_by_environment_api', environment='__ENV__') }}"
                   required>
             <option value="" disabled {{ '' if d.get('environment') else 'selected' }}>--- Select Environment ---</option>
             {% for env in environment %}
                 <option value="{{ env }}" {{ 'selected' if d.get('environment') == env else '' }}>{{ env }}</option>
             {% endfor %}
+          </select>
+        </div>
+
+        <!-- vSphere Host：由 Environment 動態載入 -->
+        <div class="mb-3">
+          <label for="vsphere_host" class="form-label">vSphere Host</label>
+          <select id="vsphere_host" name="vsphere_host" class="form-select" data-required="true"
+                  data-objects-by-host-url="{{ url_for('vm.get_vsphere_objects_by_host_api', host='__HOST__') }}"
+                  required>
+            <option value="" disabled {{ '' if d.get('vsphere_host') else 'selected' }}>--- Select Environment First ---</option>
           </select>
         </div>
 
@@ -144,43 +151,40 @@
         </button>
       </div>
     </div>
-
   </div>
 
   <div class="col-lg-6">
-
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-hdd-stack"></i> vSphere Placement</div>
       <div class="card-body">
         <div class="mb-3">
           <label for="vsphere_datacenter" class="form-label">Datacenter</label>
           <select id="vsphere_datacenter" name="vsphere_datacenter" class="form-select" data-required="true" required>
-            <option value="" disabled selected>--- Select Environment First ---</option>
+            <option value="" disabled selected>--- Select Host First ---</option>
           </select>
         </div>
         <div class="mb-3">
           <label for="vsphere_cluster" class="form-label">Cluster</label>
           <select id="vsphere_cluster" name="vsphere_cluster" class="form-select" data-required="true" required>
-             <option value="" disabled selected>--- Select Environment First ---</option>
+             <option value="" disabled selected>--- Select Host First ---</option>
           </select>
         </div>
-        <!-- 【新增】ESXi Host 下拉選單 -->
         <div class="mb-3">
             <label for="vsphere_esxi_host" class="form-label">ESXi Host</label>
             <select id="vsphere_esxi_host" name="vsphere_esxi_host" class="form-select" data-required="true" required>
-                <option value="" disabled selected>--- Select Environment First ---</option>
+                <option value="" disabled selected>--- Select Host First ---</option>
             </select>
         </div>
         <div class="mb-3">
           <label for="vsphere_template" class="form-label">VM Template</label>
           <select id="vsphere_template" name="vsphere_template" class="form-select" data-required="true" required>
-            <option value="" disabled selected>--- Select Environment First ---</option>
+            <option value="" disabled selected>--- Select Host First ---</option>
           </select>
         </div>
         <div>
           <label for="vsphere_datastore" class="form-label">Datastore</label>
           <select id="vsphere_datastore" name="vsphere_datastore" class="form-select" data-required="true" required>
-            <option value="" disabled selected>--- Select Environment First ---</option>
+            <option value="" disabled selected>--- Select Host First ---</option>
           </select>
         </div>
       </div>
@@ -192,7 +196,7 @@
         <div class="mb-3">
           <label for="vsphere_network" class="form-label">Network</label>
           <select id="vsphere_network" name="vsphere_network" class="form-select" data-required="true" required>
-            <option value="" disabled selected>--- Select Environment First ---</option>
+            <option value="" disabled selected>--- Select Host First ---</option>
           </select>
         </div>
         <div>
@@ -237,12 +241,11 @@
       </button>
       <a href="{{ url_for('vm.overview_index') }}" class="btn-cancel-link">Cancel</a>
     </div>
-
   </div>
 </div>
 
 <script>
-  /* --------------------- 你的原本功能：磁碟列增減 --------------------- */
+  /* --------------------- 磁碟列增減 --------------------- */
   function relabelDisks() {
     const rows = document.querySelectorAll('#disk-container .disk-item');
     rows.forEach((row, i) => {
@@ -251,8 +254,8 @@
     });
   }
   function addDisk(size, provisioning) {
-    const defaultSize = 50;      // 預設 50GB
-    const defaultProv  = 'thin'; // 預設 thin
+    const defaultSize = 50;
+    const defaultProv  = 'thin';
     const diskContainer = document.getElementById('disk-container');
     const row = document.createElement('div');
     row.className = 'disk-item mb-2 p-3 border rounded bg-light';
@@ -291,7 +294,7 @@
     relabelDisks();
   }
 
-  /* --------------------- 你的原本功能：必填檢查 --------------------- */
+  /* --------------------- 必填檢查 --------------------- */
   function validateRequiredFields(root) {
     root.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
     let ok = true;
@@ -320,8 +323,8 @@
     return ok;
   }
 
-  /* --------------------- 新增：同環境 VM Name 防重 --------------------- */
-  const __envVmCache = {}; // { env: Set([...]) } 以小寫儲存
+  /* --------------------- VM Name 防重 --------------------- */
+  const __envVmCache = {};
   async function fetchEnvVms(env) {
     if (!env) return new Set();
     if (__envVmCache[env]) return __envVmCache[env];
@@ -382,21 +385,258 @@
     return true;
   }
 
+  /* --------------------- 旗標：僅載入時回填一次草稿 --------------------- */
+  let __restoreInProgress = false;   // true 代表正在做初次回填
+  let __applyDraftOnce    = true;    // 只允許在初次載入時回填
+
+  /* --------------------- 工具：清空/載入/去重 --------------------- */
+  function setSelectPlaceholder(selectEl, text) {
+    if (!selectEl) return;
+    selectEl.innerHTML = `<option value="" disabled selected>${text}</option>`;
+    selectEl.value = '';
+  }
+  function setLoading(selectEl, loadingText) {
+    if (!selectEl) return;
+    selectEl.disabled = true;
+    selectEl.innerHTML = `<option value="__loading__" selected>${loadingText}</option>`;
+  }
+  function clearLoading(selectEl, placeholderText) {
+    if (!selectEl) return;
+    selectEl.disabled = false;
+    if (selectEl.options.length && selectEl.options[0].value === '__loading__') {
+      setSelectPlaceholder(selectEl, placeholderText || '--- Select ---');
+    }
+  }
+  function uniqueArray(arr) {
+    const seen = new Set();
+    const out = [];
+    (arr || []).forEach(v => {
+      const s = String(v ?? '').trim();
+      if (s && !seen.has(s)) { seen.add(s); out.push(s); }
+    });
+    return out;
+  }
+  function populateSelect(selectEl, options, placeholderText) {
+    if (!selectEl) return;
+    const opts = uniqueArray(options);
+    setSelectPlaceholder(selectEl, placeholderText || '--- Select ---');
+    opts.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = v;
+      selectEl.appendChild(o);
+    });
+    // 確保沒有「殘留舊值」
+    selectEl.value = '';
+  }
+  function setSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    const v = (value ?? '').toString();
+    if (!v) return;
+    let opt = Array.from(selectEl.options).find(o => o.value === v);
+    if (opt) { selectEl.value = v; return; }
+    opt = Array.from(selectEl.options).find(o => (o.text || '').trim() === v);
+    if (opt) { opt.selected = true; return; }
+    const fallback = new Option(v, v, true, true);
+    selectEl.appendChild(fallback);
+  }
+  function resetPlacementSelects(message) {
+    const selects = [
+      document.getElementById('vsphere_datacenter'),
+      document.getElementById('vsphere_cluster'),
+      document.getElementById('vsphere_esxi_host'),
+      document.getElementById('vsphere_template'),
+      document.getElementById('vsphere_datastore'),
+      document.getElementById('vsphere_network'),
+    ];
+    selects.forEach(s => setSelectPlaceholder(s, message));
+  }
+  // 客製：去重 Environment 選單（若後端有重複）
+  function dedupeEnvironmentOptions() {
+    const envSel = document.getElementById('environment');
+    if (!envSel) return;
+    const seen = new Set();
+    const toRemove = [];
+    Array.from(envSel.options).forEach(opt => {
+      const val = (opt.value || '').trim();
+      if (!val) return;
+      if (seen.has(val)) toRemove.push(opt);
+      else seen.add(val);
+    });
+    toRemove.forEach(o => o.remove());
+  }
+
+  /* --------------------- 草稿物件 --------------------- */
+  const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
+
+  /* --------------------- 載入流程：Env → Host → Objects --------------------- */
+  async function onEnvironmentChanged() {
+    const envSel  = document.getElementById('environment');
+    const hostSel = document.getElementById('vsphere_host');
+    const env = (envSel?.value || '').trim();
+
+    // 先清空「主機＋所有下游」
+    setLoading(hostSel, 'Loading hosts...');
+    resetPlacementSelects('--- Select Host First ---');
+
+    if (!env) {
+      setSelectPlaceholder(hostSel, '--- Select Environment First ---');
+      return;
+    }
+
+    try {
+      const urlTpl = envSel.dataset.hostsUrl; // /api/vsphere/hosts/__ENV__
+      const url = urlTpl.replace('__ENV__', encodeURIComponent(env));
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to fetch hosts (${resp.status})`);
+      const data = await resp.json();
+      const hosts = Array.isArray(data?.hosts) ? data.hosts : [];
+      populateSelect(hostSel, hosts, '--- Select Host ---');
+
+      // 僅在初次回填時設定 host
+      if (__applyDraftOnce) {
+        const draftHost = (__DRAFT__?.vsphere_host || '').trim();
+        if (draftHost) {
+          setSelectValue(hostSel, draftHost);
+          await onHostChanged();
+        }
+      }
+    } catch (e) {
+      console.error('load hosts error:', e);
+      setSelectPlaceholder(hostSel, '--- Error Loading Hosts ---');
+    } finally {
+      clearLoading(hostSel, '--- Select Host ---');
+    }
+  }
+
+  async function onHostChanged() {
+    const hostSel = document.getElementById('vsphere_host');
+    const host = (hostSel?.value || '').trim();
+
+    const dep = {
+      datacenters: document.getElementById('vsphere_datacenter'),
+      clusters:    document.getElementById('vsphere_cluster'),
+      esxi_hosts:  document.getElementById('vsphere_esxi_host'),
+      templates:   document.getElementById('vsphere_template'),
+      datastores:  document.getElementById('vsphere_datastore'),
+      networks:    document.getElementById('vsphere_network'),
+    };
+
+    // 切換 Host 時：先把所有下游設成 Loading（可視覺告知）且清空舊值
+    Object.values(dep).forEach(s => setLoading(s, 'Loading...'));
+
+    if (!host) {
+      resetPlacementSelects('--- Select Host First ---');
+      return;
+    }
+
+    try {
+      const urlTpl = hostSel.dataset.objectsByHostUrl; // /api/vsphere_objects/by_host/__HOST__
+      const url = urlTpl.replace('__HOST__', encodeURIComponent(host));
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to fetch vSphere data (${resp.status})`);
+      }
+      const data = await resp.json();
+
+      populateSelect(dep.datacenters, data.datacenters, '--- Select ---');
+      populateSelect(dep.clusters,    data.clusters,    '--- Select ---');
+      populateSelect(dep.esxi_hosts,  data.esxi_hosts,  '--- Select ---');
+      populateSelect(dep.templates,   data.templates,   '--- Select ---');
+      populateSelect(dep.datastores,  data.datastores,  '--- Select ---');
+      populateSelect(dep.networks,    data.networks,    '--- Select ---');
+
+      // 僅首次載入時，回填 Draft 值；之後改 Host 不再覆蓋使用者選擇
+      if (__applyDraftOnce) {
+        setSelectValue(dep.datacenters, __DRAFT__?.vsphere_datacenter);
+        setSelectValue(dep.clusters,    __DRAFT__?.vsphere_cluster);
+        setSelectValue(dep.esxi_hosts,  __DRAFT__?.vsphere_esxi_host);
+        setSelectValue(dep.templates,   __DRAFT__?.vsphere_template);
+        setSelectValue(dep.datastores,  __DRAFT__?.vsphere_datastore);
+        setSelectValue(dep.networks,    __DRAFT__?.vsphere_network);
+      }
+    } catch (e) {
+      console.error('load objects by host error:', e);
+      Object.values(dep).forEach(s => setSelectPlaceholder(s, '--- Error Loading Data ---'));
+    } finally {
+      Object.values(dep).forEach(s => clearLoading(s, '--- Select ---'));
+      // 只在初次載入流程結束時，把旗標關掉
+      if (__restoreInProgress) {
+        __restoreInProgress = false;
+        __applyDraftOnce = false;
+      }
+    }
+  }
+
+  async function restoreDraftOnLoad() {
+    const envSel  = document.getElementById('environment');
+    const draftEnv  = (__DRAFT__?.environment || '').trim();
+
+    // 如果後端環境陣列有重複，前端先去重一次（避免你之前遇到的「環境選單重複」）
+    dedupeEnvironmentOptions();
+
+    __restoreInProgress = true;
+    __applyDraftOnce = true;
+
+    if (draftEnv) {
+      setSelectValue(envSel, draftEnv);
+    }
+
+    if (envSel?.value) {
+      await onEnvironmentChanged();  // 內部會連帶載入 host 與 objects，並回填一次
+    } else {
+      const hostSel = document.getElementById('vsphere_host');
+      setSelectPlaceholder(hostSel, '--- Select Environment First ---');
+      resetPlacementSelects('--- Select Host First ---');
+      // 沒環境也算流程結束
+      __restoreInProgress = false;
+      __applyDraftOnce = false;
+    }
+  }
+
   /* --------------------- 初始化與按鈕行為 --------------------- */
   document.addEventListener('DOMContentLoaded', () => {
     relabelDisks();
-    const wf = document.getElementById('workflow_id');
+
+    const wf  = document.getElementById('workflow_id');
     const btn = document.getElementById('btn-save-draft');
     if (wf && wf.value && btn) btn.textContent = 'Update to Draft';
 
-    // 綁定查重（環境切換 / 名稱輸入）
-    const envSel = document.getElementById('environment');
-    const input  = document.getElementById('vm_name_prefix');
-    envSel?.addEventListener('change', () => { input?.classList.remove('is-invalid'); document.getElementById('vmPrefixFeedback').style.display='none'; checkVmPrefixDuplicate(); });
-    input?.addEventListener('input', () => { clearTimeout(__vmCheckTimer); __vmCheckTimer = setTimeout(checkVmPrefixDuplicate, 200); });
+    const envSel  = document.getElementById('environment');
+    const hostSel = document.getElementById('vsphere_host');
+    const input   = document.getElementById('vm_name_prefix');
+
+    // 事件：Environment 變更 → 清空下游、載入 hosts、僅首次回填
+    envSel?.addEventListener('change', async () => {
+      // 清除 VM Name 防重樣式
+      input?.classList.remove('is-invalid');
+      const fb = document.getElementById('vmPrefixFeedback');
+      if (fb) fb.style.display='none';
+
+      await checkVmPrefixDuplicate();
+      // 使用者手動切換時，視為非初次回填
+      __applyDraftOnce = false;
+      await onEnvironmentChanged();
+    });
+
+    // 事件：Host 變更 → 清空下游、載入 objects（非首次時不回填）
+    hostSel?.addEventListener('change', async () => {
+      __applyDraftOnce = false;
+      await onHostChanged();
+    });
+
+    // VM Name 輸入，做防重 debounce
+    input?.addEventListener('input', () => {
+      clearTimeout(__vmCheckTimer);
+      __vmCheckTimer = setTimeout(checkVmPrefixDuplicate, 200);
+    });
+
+    // 載入即回填一次（從 overview 的 Edit 進來也只會在這裡回填一次）
+    restoreDraftOnLoad();
   });
 
-  // Save / Update to Draft（保留你原本流程，前面先做必填 + 防重）
+  // Save / Update to Draft
   document.getElementById('btn-save-draft').addEventListener('click', async function () {
     const root = document.getElementById('create-form-root');
     if (!validateRequiredFields(root)) return;
@@ -421,124 +661,6 @@
     } catch (err) {
       console.error(err);
       alert("Network error while saving draft.");
-    }
-  });
-
-  /* --------------------- 【更新】動態載入 vSphere 物件的 Script --------------------- */
-  // 將後端 draft_data 提供給前端 JS
-  const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
-
-  document.addEventListener('DOMContentLoaded', function() {
-    const environmentSelect = document.getElementById('environment');
-    if (!environmentSelect) return;
-
-    const dependentSelects = {
-        datacenters: document.getElementById('vsphere_datacenter'),
-        clusters: document.getElementById('vsphere_cluster'),
-        esxi_hosts: document.getElementById('vsphere_esxi_host'), // 【新增】
-        templates: document.getElementById('vsphere_template'),
-        datastores: document.getElementById('vsphere_datastore'),
-        networks: document.getElementById('vsphere_network')
-    };
-
-    // 將 select 的值選回；若 API 沒帶該選項，動態補一個被選中的 option
-    function setSelectValue(selectEl, value) {
-      if (!selectEl) return;
-      const v = (value ?? '').toString();
-      if (!v) return;
-
-      let opt = Array.from(selectEl.options).find(o => o.value === v);
-      if (opt) { selectEl.value = v; return; }
-
-      opt = Array.from(selectEl.options).find(o => (o.text || '').trim() === v);
-      if (opt) { opt.selected = true; return; }
-
-      const fallback = new Option(v, v, true, true);
-      selectEl.appendChild(fallback);
-    }
-
-    function setLoadingState(isLoading) {
-        for (const key in dependentSelects) {
-            const select = dependentSelects[key];
-            if (!select) continue;
-
-            if (isLoading) {
-                select.disabled = true;
-                // 設定固定值以便載完能精準清除
-                select.innerHTML = `<option value="__loading__" selected>Loading...</option>`;
-            } else {
-                select.disabled = false;
-                if (select.options.length && select.options[0].value === '__loading__') {
-                   select.innerHTML = '<option value="" disabled selected>--- Select ---</option>';
-                }
-            }
-        }
-    }
-
-    function populateSelect(select, options) {
-        if (!select) return;
-        select.innerHTML = '<option value="" disabled selected>--- Select ---</option>';
-        (options || []).forEach(option => {
-            const optionElement = document.createElement('option');
-            optionElement.value = option;
-            optionElement.textContent = option;
-            select.appendChild(optionElement);
-        });
-    }
-
-    async function updateVsphereObjects() {
-        const selectedEnvironment = environmentSelect.value;
-        if (!selectedEnvironment) {
-            Object.values(dependentSelects).forEach(s => {
-                if(s) s.innerHTML = '<option value="" disabled selected>--- Select Environment First ---</option>';
-            });
-            return;
-        }
-
-        setLoadingState(true);
-
-        const urlTemplate = environmentSelect.dataset.vsphereObjectsUrl;
-        const fetchUrl = urlTemplate.replace('PLACEHOLDER', selectedEnvironment);
-
-        try {
-            const response = await fetch(fetchUrl);
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || `Failed to fetch vSphere data. Status: ${response.status}`);
-            }
-            const data = await response.json();
-
-            populateSelect(dependentSelects.datacenters, data.datacenters);
-            populateSelect(dependentSelects.clusters, data.clusters);
-            populateSelect(dependentSelects.esxi_hosts, data.esxi_hosts); // 【新增】
-            populateSelect(dependentSelects.templates, data.templates);
-            populateSelect(dependentSelects.datastores, data.datastores);
-            populateSelect(dependentSelects.networks, data.networks);
-
-            // ←── 這裡回填草稿值
-            const draft = __DRAFT__ || {};
-            setSelectValue(dependentSelects.datacenters, draft.vsphere_datacenter);
-            setSelectValue(dependentSelects.clusters,    draft.vsphere_cluster);
-            setSelectValue(dependentSelects.esxi_hosts,  draft.vsphere_esxi_host);
-            setSelectValue(dependentSelects.templates,   draft.vsphere_template);
-            setSelectValue(dependentSelects.datastores,  draft.vsphere_datastore);
-            setSelectValue(dependentSelects.networks,    draft.vsphere_network);
-
-        } catch (error) {
-            console.error('Error updating vSphere objects:', error);
-            alert(error.message);
-            Object.values(dependentSelects).forEach(s => {
-              if (s) s.innerHTML = '<option value="" disabled selected>--- Error Loading Data ---</option>';
-            });
-        } finally {
-            setLoadingState(false);
-        }
-    }
-
-    environmentSelect.addEventListener('change', updateVsphereObjects);
-
-    if (environmentSelect.value) {
-        updateVsphereObjects();
     }
   });
 </script>

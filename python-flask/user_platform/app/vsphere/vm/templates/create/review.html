@@ -65,6 +65,7 @@
         <div class="k">Action</div><div class="v">{{ d.get('action_type', 'Create') }}</div>
         <div class="k">Resource</div><div class="v">{{ d.get('resource', 'vm') }}</div>
         <div class="k">Environment</div><div class="v">{{ d.get('environment','-') }}</div>
+        <div class="k">vSphere Host</div><div class="v">{{ d.get('vsphere_host','-') }}</div>
         <div class="k">VM Name Prefix</div><div class="v">{{ d.get('vm_name_prefix','-') }}</div>
       </div>
     </div>
@@ -94,7 +95,7 @@
           <div class="kv">
             <div class="k">Datacenter</div><div class="v">{{ d.get('vsphere_datacenter','-') }}</div>
             <div class="k">Cluster</div><div class="v">{{ d.get('vsphere_cluster','-') }}</div>
-            <div class="k">ESXi Host</div><div class="v">{{ d.get('vsphere_esxi_host','-') }}</div> <!-- 【新增】 -->
+            <div class="k">ESXi Host</div><div class="v">{{ d.get('vsphere_esxi_host','-') }}</div>
             <div class="k">Template</div><div class="v">{{ d.get('vsphere_template','-') }}</div>
             <div class="k">Datastore</div><div class="v">{{ d.get('vsphere_datastore','-') }}</div>
             <div class="k">Network</div><div class="v">{{ d.get('vsphere_network','-') }}</div>

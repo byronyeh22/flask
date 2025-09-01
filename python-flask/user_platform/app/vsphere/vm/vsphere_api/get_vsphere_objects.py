@@ -15,7 +15,7 @@ def _mock_from_host(host):
             "templates":   ["sandbox-template-win", "sandbox-template-linux"],
             "networks":    ["sandbox-net-1"],
             "datastores":  ["sandbox-ds-1"],
-            "vm_name":     ["sbx-vm-1", "sbx-vm-2"],
+            "vm_name":     ["sandbox-vm-1", "sandbox-vm-2"],
         }
     elif "host.docker.internal:5002" in host:
         return {
@@ -36,6 +36,16 @@ def _mock_from_host(host):
             "networks":    ["uat-net-1"],
             "datastores":  ["uat-ds-1", "uat-ds-2"],
             "vm_name":     ["uat-vm-1", "uat-vm-2"],
+        }
+    elif "host.docker.internal:5005" in host:
+        return {
+            "datacenters": ["sandbox2-dc"],
+            "clusters":    ["sandbox2-cluster"],
+            "esxi_hosts":  ["sandbox2-esxi-01", "sandbox2-esxi-02"],
+            "templates":   ["sandbox2-template-win", "sandbox2-template-linux"],
+            "networks":    ["sandbox2-net-1"],
+            "datastores":  ["sandbox2-ds-1"],
+            "vm_name":     ["sandbox2-vm-1", "sandbox2-vm-2"],
         }
     else:
         # fallback 預設

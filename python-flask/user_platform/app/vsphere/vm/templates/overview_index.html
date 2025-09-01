@@ -20,14 +20,13 @@
 
     .stats-row { margin-bottom: 2rem; }
     .stat-card { background: white; border-radius: var(--border-radius); padding: 1.5rem; box-shadow: var(--card-shadow); border-left: 4px solid var(--accent-color); transition: transform 0.2s ease, box-shadow 0.2s ease; text-align: center; }
-    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: var(--card-shadow); }
     .stat-card .stat-number { font-size: 2rem; font-weight: bold; color: var(--primary-color); margin: 0; }
     .stat-card .stat-label { color: #6c757d; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 0.5rem; }
     .stat-card.success { border-left-color: #27ae60; }
     .stat-card.failed  { border-left-color: #e74c3c; }
     .stat-card.returned { border-left-color: #9b59b6; }
     .stat-card.draft { border-left-color: #6c757d; }
-
 
     .table-container { overflow-x: auto; background: white; border-radius: var(--border-radius); box-shadow: var(--card-shadow); overflow: visible; margin-top: 2rem; }
     .table-header { background: var(--light-bg); padding: 1.5rem; border-bottom: 1px solid #dee2e6; }
@@ -57,33 +56,29 @@
     .custom-table tbody td { padding: 1rem; vertical-align: middle; border-bottom: 1px solid #f1f3f4; }
     .custom-table tbody tr:hover { background-color: rgba(52, 152, 219, 0.05); }
 
-    /* 設定表頭欄位寬度 */
-    .custom-table thead th:nth-child(1) { width: 8%; }  /* Workflow ID */
-    .custom-table thead th:nth-child(2) { width: 8%; }  /* Ticket ID */
-    .custom-table thead th:nth-child(3) { width: 10%; } /* Environment */
-    .custom-table thead th:nth-child(4) { width: 30%; } /* Summary */
-    .custom-table thead th:nth-child(5) { width: 12%; } /* Status */
-    .custom-table thead th:nth-child(6) { width: 8%; }  /* Create By */
-    .custom-table thead th:nth-child(7) { width: 12%; } /* Start */
-    .custom-table thead th:nth-child(8) { width: 12%; } /* End */
-    .custom-table thead th:nth-child(9) { width: 8%; }  /* Duration */
-    .custom-table thead th:nth-child(10) { width: 12%; } /* Action */
+    .custom-table thead th:nth-child(1) { width: 8%; }
+    .custom-table thead th:nth-child(2) { width: 8%; }
+    .custom-table thead th:nth-child(3) { width: 10%; }
+    .custom-table thead th:nth-child(4) { width: 30%; }
+    .custom-table thead th:nth-child(5) { width: 12%; }
+    .custom-table thead th:nth-child(6) { width: 8%; }
+    .custom-table thead th:nth-child(7) { width: 12%; }
+    .custom-table thead th:nth-child(8) { width: 12%; }
+    .custom-table thead th:nth-child(9) { width: 8%; }
+    .custom-table thead th:nth-child(10) { width: 12%; }
 
-    /* 設定資料欄位置中 */
-    .custom-table tbody td:nth-child(1),  /* Workflow ID */
-    .custom-table tbody td:nth-child(2),  /* Ticket ID */
-    .custom-table tbody td:nth-child(3),  /* Environment */
-    .custom-table tbody td:nth-child(5),  /* Status */
-    .custom-table tbody td:nth-child(6),  /* Create By */
-    .custom-table tbody td:nth-child(7),  /* Start */
-    .custom-table tbody td:nth-child(8),  /* End */
-    .custom-table tbody td:nth-child(9),  /* Duration */
-    .custom-table tbody td:nth-child(10) /* Action */
-    { 
+    .custom-table tbody td:nth-child(1),
+    .custom-table tbody td:nth-child(2),
+    .custom-table tbody td:nth-child(3),
+    .custom-table tbody td:nth-child(5),
+    .custom-table tbody td:nth-child(6),
+    .custom-table tbody td:nth-child(7),
+    .custom-table tbody td:nth-child(8),
+    .custom-table tbody td:nth-child(9),
+    .custom-table tbody td:nth-child(10) { 
         text-align: center; 
     }
 
-    /* 縮小 Status Badge 外觀 */
     .status-badge {
         padding: 0.3rem 0.6rem;
         border-radius: 20px;
@@ -95,11 +90,11 @@
         min-width: 60px;
         text-align: center;
     }
-    .status-in_progress { background: rgba(52,152,219,0.2); color: #3498db; }      /* IN_PROGRESS */
-    .status-pending_approval { background: rgba(241,196,15,0.2); color: #f39c12; } /* PENDING_APPROVAL */
+    .status-in_progress { background: rgba(52,152,219,0.2); color: #3498db; }
+    .status-pending_approval { background: rgba(241,196,15,0.2); color: #f39c12; }
     .status-success { background: rgba(39,174,96,0.2); color: #27ae60; }
     .status-failed  { background: rgba(231,76,60,0.2); color: #e74c3c; }
-    .status-returned { background: rgba(155, 89, 182, 0.2); color: #9b59b6; } /* RETURNED */
+    .status-returned { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
     .status-approved{ background: rgba(46,204,113,0.2); color: #2ecc71; }
     .status-draft   { background: rgba(108,117,125,0.2); color: #6c757d; }
 
@@ -121,42 +116,52 @@
     .review-iframe { width: 100%; height: 80vh; border: none; }
 </style>
 
+{# ================== 新增：以 workflow_id 去重，只保留第一筆 ================== #}
+{% set uniq = namespace(rows=[]) %}
+{% set seen = namespace(ids=[]) %}
+{% for p in pipeline_data %}
+  {% if p.workflow_id not in seen.ids %}
+    {% set _ = seen.ids.append(p.workflow_id) %}
+    {% set _ = uniq.rows.append(p) %}
+  {% endif %}
+{% endfor %}
+
 <div class="container-fluid">
     <!-- Statistics Cards -->
     <div class="row stats-row text-center">
         <div class="col stat-card running">
             <div class="stat-number">
-                {{ pipeline_data | selectattr('status', 'equalto', 'IN_PROGRESS') | list | length }}
+                {{ uniq.rows | selectattr('status', 'equalto', 'IN_PROGRESS') | list | length }}
             </div>
             <div class="stat-label">In Progress</div>
         </div>
         <div class="col stat-card success">
             <div class="stat-number">
-                {{ pipeline_data | selectattr('status', 'equalto', 'SUCCESS') | list | length }}
+                {{ uniq.rows | selectattr('status', 'equalto', 'SUCCESS') | list | length }}
             </div>
             <div class="stat-label">Success</div>
         </div>
         <div class="col stat-card failed">
             <div class="stat-number">
-                {{ pipeline_data | selectattr('status', 'equalto', 'FAILED') | list | length }}
+                {{ uniq.rows | selectattr('status', 'equalto', 'FAILED') | list | length }}
             </div>
             <div class="stat-label">Failed</div>
         </div>
         <div class="col stat-card draft">
             <div class="stat-number">
-                {{ pipeline_data | selectattr('status', 'equalto', 'DRAFT') | list | length }}
+                {{ uniq.rows | selectattr('status', 'equalto', 'DRAFT') | list | length }}
             </div>
             <div class="stat-label">Draft</div>
         </div>
         <div class="col stat-card manual">
             <div class="stat-number">
-                {{ pipeline_data | selectattr('status', 'equalto', 'PENDING_APPROVAL') | list | length }}
+                {{ uniq.rows | selectattr('status', 'equalto', 'PENDING_APPROVAL') | list | length }}
             </div>
             <div class="stat-label">Pending_Approval</div>
         </div>
         <div class="col stat-card returned">
             <div class="stat-number">
-                {{ pipeline_data | selectattr('status', 'equalto', 'RETURNED') | list | length }}
+                {{ uniq.rows | selectattr('status', 'equalto', 'RETURNED') | list | length }}
             </div>
             <div class="stat-label">Returned</div>
         </div>
@@ -206,7 +211,6 @@
                     <th>Environment</th>
                     <th><i class="fas fa-list"></i> Summary</th>
                     <th><i class="fas fa-info-circle"></i> Status</th>
-                    <!-- 新增欄位：Create By -->
                     <th><i class="fas fa-user"></i> Create By</th>
                     <th><i class="fas fa-calendar-plus"></i> Start</th>
                     <th><i class="fas fa-calendar-check"></i> End</th>
@@ -215,7 +219,8 @@
                 </tr>
             </thead>
             <tbody>
-                {% for pipeline in (pipeline_data | sort(attribute='created_at', reverse=True)) %}
+                {# ===== 用去重後的 uniq.rows 來渲染表格 ===== #}
+                {% for pipeline in (uniq.rows | sort(attribute='created_at', reverse=True)) %}
                 {% set jira_ticket = (jira_tickets | selectattr('workflow_id', 'equalto', pipeline.workflow_id) | list | first) %}
                 {% set raw_status = pipeline.status.lower() %}
                 {% set normalized_status = raw_status %}
@@ -248,17 +253,14 @@
                     <td>
                         <span class="status-badge status-{{ normalized_status }}">{{ pipeline.status }}</span>
                     </td>
-                    <!-- 新增資料列：Create By（需要後端把 created_by 併到 pipeline_data） -->
                     <td>{{ pipeline.created_by or '-' }}</td>
 
-                    {# 顯示層去掉 'T'；data-datetime 維持原值 #}
                     <td class="date-cell" data-datetime="{{ pipeline.created_at }}">{{ (pipeline.created_at or '')|replace('T',' ') or '-' }}</td>
                     <td class="date-cell" data-datetime="{{ pipeline.finished_at }}">{{ (pipeline.finished_at or '')|replace('T',' ') or '-' }}</td>
 
                     <td class="duration-cell" data-seconds="{{ pipeline.duration or 0 }}"></td>
                     <td>
                         <div class="d-flex gap-1">
-                          {# Review：所有狀態都顯示；非 DRAFT → readonly=1 #}
                           <a class="btn btn-sm btn-outline-secondary btn-row-review"
                              data-workflow-id="{{ pipeline.workflow_id }}"
                              data-readonly="{{ 1 if normalized_status != 'draft' else 0 }}"
@@ -281,21 +283,16 @@
                                       title="Delete">
                                 <i class="bi bi-trash"></i>
                               </button>
-
                           {% elif normalized_status == 'pending_approval' %}
-                            <!-- 待核可：顯示綠色 Approve（用 modal） -->
                             <button type="button"
                                     class="btn btn-sm btn-primary btn-row-approve"
                                     data-workflow-id="{{ pipeline.workflow_id }}"
                                     title="Approve">
                               Approve
                             </button>
-
                           {% else %}
-                            <!-- 其他狀態不允許核可 -->
                             <button class="btn btn-sm btn-secondary" disabled>Approve</button>
                           {% endif %}
-
                         </div>
                     </td>
                 </tr>
@@ -343,7 +340,6 @@
         <iframe id="reviewFrame" class="review-iframe"></iframe>
       </div>
       <div class="modal-footer">
-        <!-- 不改 review.html，本頁以 JS 隱藏提交鈕 -->
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
@@ -368,7 +364,6 @@
   </div>
 </div>
 
-
 <script>
 /* ========================================================================
  * Router URL templates
@@ -379,7 +374,7 @@ const EDIT_URL_TMPL   = "{{ url_for('vm.workflow_draft_edit',  workflow_id=0) }}
 const DELETE_URL_TMPL = "{{ url_for('vm.workflow_draft_delete',workflow_id=0) }}";
 
 /* ========================================================================
- * TimezoneManager：維持原邏輯；顯示上移除 'T'
+ * TimezoneManager
  * ====================================================================== */
 class TimezoneManager {
   constructor() {
@@ -428,7 +423,7 @@ class TimezoneManager {
 }
 
 /* ========================================================================
- * TablePagination：只調整 Review 事件為單一路徑
+ * TablePagination
  * ====================================================================== */
 class TablePagination {
   constructor() {
@@ -643,7 +638,7 @@ class TablePagination {
 }
 
 /* ========================================================================
- * Review Modal helper：readonly 時隱藏 iframe 內 submit
+ * Review Modal helper
  * ====================================================================== */
 function openReviewModal(workflowId, readonly=false) {
   const src = REVIEW_URL_TMPL.replace('0', workflowId) + (readonly ? '?readonly=1' : '');
@@ -670,21 +665,19 @@ function openReviewModal(workflowId, readonly=false) {
   modal.show();
 }
 
-
 /* ========================================================================
  * Approve Modal helper
  * ====================================================================== */
 function openApproveModal(workflowId) {
   const frame = document.getElementById('approveFrame');
   if (!frame) return;
-  const src = APPROVE_URL_TMPL.replace('0', workflowId) + "?from_modal=1"; // 建議帶參數給後端
+  const src = APPROVE_URL_TMPL.replace('0', workflowId) + "?from_modal=1";
 
   frame.src = src;
 
   const modalEl = document.getElementById('approveModal');
   const modal = new bootstrap.Modal(modalEl);
 
-  // 關閉後刷新（若後端已核可完成，按鈕會變 Approved）
   modalEl.addEventListener('hidden.bs.modal', () => {
     try { window.tablePagination?._refreshData(); } catch(e) { console.warn(e); }
   }, { once: true });
