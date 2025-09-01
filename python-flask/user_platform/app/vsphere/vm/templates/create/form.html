@@ -1,6 +1,6 @@
 {% set d = draft_data or {} %}
 <input type="hidden" name="resource" value="vm">
-<input type="hidden" name="action_type" value="Create">
+<input type="hidden" name="action_type" value="create">
 {% if workflow_id %}
   <input type="hidden" id="workflow_id" name="workflow_id" value="{{ workflow_id }}">
 {% endif %}
@@ -642,7 +642,9 @@
     if (!validateRequiredFields(root)) return;
     if (!(await guardDuplicateBeforeSave())) return;
 
-    const fields = document.querySelectorAll('input[name], select[name], textarea[name]');
+    const fields = document.querySelectorAll(
+      '#create-form-root [name], input[name="resource"], input[name="action_type"]'
+    );
     const fd = new FormData();
     fields.forEach(el => {
       const name = el.getAttribute('name');
