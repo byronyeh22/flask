@@ -642,7 +642,7 @@
     if (!validateRequiredFields(root)) return;
     if (!(await guardDuplicateBeforeSave())) return;
 
-    const fields = root.querySelectorAll('input[name], select[name], textarea[name]');
+    const fields = document.querySelectorAll('input[name], select[name], textarea[name]');
     const fd = new FormData();
     fields.forEach(el => {
       const name = el.getAttribute('name');
