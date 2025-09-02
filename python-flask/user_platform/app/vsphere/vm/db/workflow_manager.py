@@ -67,6 +67,8 @@ def record_pending_request(db_conn, form_data):
 def update_request_status(db_conn, workflow_id, new_status, approver=None, failed_message=None):
     """
     更新工作流狀態，並可選填入審批者與失敗訊息。
+    - 若狀態更新為 IN_PROGRESS，會同時設定 submitted_at（僅第一次）。
+    - 所有時間都由 DB 端 NOW() 產生，避免時區不一致。
     """
     cursor = None
     try:
@@ -75,15 +77,22 @@ def update_request_status(db_conn, workflow_id, new_status, approver=None, faile
         sql = "UPDATE workflow_runs SET status = %s"
         params = [new_status]
 
+        # 審批資訊：approved_by / approved_at
         if approver:
-            sql += ", approved_by = %s, approved_at = %s"
-            params.extend([approver, datetime.now()])
+            sql += ", approved_by = %s, approved_at = NOW()"
+            params.append(approver)
 
+        # 失敗訊息
         if failed_message:
             sql += ", failed_message = %s"
             params.append(failed_message)
 
-        sql += " WHERE workflow_id = %s"
+        # 第一次提交：submitted_at 只在為 NULL 時寫入
+        if new_status.upper() == "IN_PROGRESS":
+            sql += ", submitted_at = COALESCE(submitted_at, NOW())"
+
+        # 無論如何都更新 updated_at
+        sql += ", updated_at = NOW() WHERE workflow_id = %s"
         params.append(workflow_id)
 
         cursor.execute(sql, tuple(params))
@@ -91,10 +100,12 @@ def update_request_status(db_conn, workflow_id, new_status, approver=None, faile
         logging.info(f"✅ Successfully updated workflow {workflow_id} status to {new_status}.")
     except Error as e:
         logging.error(f"❌ Database error in update_request_status for workflow_id {workflow_id}: {e}")
-        if db_conn and db_conn.is_connected(): db_conn.rollback()
+        if db_conn and db_conn.is_connected():
+            db_conn.rollback()
         raise
     finally:
-        if cursor: cursor.close()
+        if cursor:
+            cursor.close()
 
 def apply_request_to_db(db_conn, workflow_id):
     """

@@ -33,6 +33,7 @@ def init_db():
             workflow_id INT AUTO_INCREMENT PRIMARY KEY,
             created_by VARCHAR(100) NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            submitted_at TIMESTAMP NULL,
             approved_by VARCHAR(100) NULL,
             approved_at TIMESTAMP NULL,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,

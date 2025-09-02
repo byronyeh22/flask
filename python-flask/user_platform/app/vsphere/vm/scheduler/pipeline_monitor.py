@@ -13,24 +13,6 @@ from mysql.connector import Error as MySQLError
 
 PIPELINE_MANUAL_STATUS = "manual"
 
-
-# ---------- Utilities ----------
-def _normalize_status(s: str) -> str:
-    """
-    Normalize status string:
-      - Treat hyphen as whitespace
-      - Collapse multiple whitespaces
-      - Lowercase
-    Examples:
-      "To Do" -> "to do"
-      "To-Do" -> "to do"
-      "To  Do" -> "to do"
-    """
-    if not s:
-        return ""
-    return " ".join(s.replace("-", " ").split()).lower()
-
-
 # ---------- Save failed_message as JSON (overwrite same source) ----------
 def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> None:
     """
@@ -68,19 +50,17 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
         cur.close()
 
 
-# ---------- Check Jira status ----------
-def monitor_jira_for_workflow(db_conn, workflow_id: int) -> bool:
+# ---------- Check Jira ticket existence ----------
+def jira_exists_for_workflow(db_conn, workflow_id: int) -> bool:
     """
-    Return True if jira_tickets has this workflow_id 且狀態不是 Done。
-    否則 return False：
-      - 沒有 ticket → 記錄 failed_message
-      - 狀態=Done → 正常結束，不記錄錯誤
+    Return True if jira_tickets has this workflow_id 且有 ticket_id。
+    否則 return False 並記錄 failed_message。
     """
     cur = db_conn.cursor(dictionary=True)
     try:
         cur.execute(
             """
-            SELECT status
+            SELECT ticket_id
               FROM jira_tickets
              WHERE workflow_id = %s
              ORDER BY id DESC
@@ -90,20 +70,14 @@ def monitor_jira_for_workflow(db_conn, workflow_id: int) -> bool:
         )
         row = cur.fetchone()
 
-        if not row:
+        if not row or not row.get("ticket_id"):
             set_failed_message(db_conn, workflow_id, "JIRA", "Jira ticket not created or not found")
             return False
 
-        status = (row.get("status") or "").strip().lower()
-        if status == "done":
-            # 已完成 → 不當作失敗，只是跳過後續檢查
-            return False
-
-        # 其他狀態 → OK
         return True
-
     finally:
         cur.close()
+
 
 # ---------- Check if GitLab pipeline is manual ----------
 def is_pipeline_manual_for_workflow(db_conn, workflow_id: int) -> bool:
@@ -131,16 +105,24 @@ def is_pipeline_manual_for_workflow(db_conn, workflow_id: int) -> bool:
         cur.close()
 
 
-# ---------- Advance to PENDING_APPROVAL if both Jira and GitLab conditions met ----------
+# ---------- Advance to PENDING_APPROVAL if Jira exists and GitLab is manual ----------
 def maybe_advance_to_pending_approval(db_conn, workflow_id: int) -> bool:
     """
     Conditions:
-      1) Jira status normalized == 'to do'
+      1) Jira ticket exists
       2) Latest pipeline status == 'manual'
-    Only when both satisfied, set workflow_runs.status -> PENDING_APPROVAL.
+      3) workflow_runs.status != 'RETURNED' (避免被退回後又誤判回 pending_approval)
     """
     try:
-        jira_ok = monitor_jira_for_workflow(db_conn, workflow_id)
+        # 防呆：如果已經是 RETURNED，就不要再推進
+        cur = db_conn.cursor(dictionary=True)
+        cur.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+        wf_row = cur.fetchone()
+        cur.close()
+        if wf_row and (wf_row.get("status") or "").upper() == "RETURNED":
+            return False
+
+        jira_ok = jira_exists_for_workflow(db_conn, workflow_id)
         if not jira_ok:
             return False
 
