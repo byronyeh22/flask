@@ -23,7 +23,8 @@ from .vsphere_api.get_vsphere_objects import get_vsphere_objects
 from .vsphere_api.test_connection import test_vsphere_connection
 from .jira_api.create_jira_ticket import create_jira_ticket
 from .jira_api.get_jira_issue_detail import get_jira_issue_detail
-from .jira_api.issue_updates import jira_return_issue  # <== 新增：Jira 通用退件
+from .jira_api.issue_updates import jira_return_issue
+from .jira_api.create_jira_ticket import _generate_create_summary
 from .gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
 from .gitlab_api.run_manual_job import run_manual_job
 from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
@@ -32,23 +33,16 @@ from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
 from .db.vsphere_connections_manager import (
     get_all_vsphere_connections,
     get_active_vsphere_connections,
-    # get_vsphere_connection_by_env,  # ← 已改為以 host 為主，移除不用
     add_or_update_vsphere_connection,
     update_connection_password,
     delete_vsphere_connection_by_id,
     toggle_connection_status,
     get_vsphere_connection_by_id,
-    # 新增：依環境取主機、依主機取連線
     get_hosts_by_environment,
     get_vsphere_connection_by_host,
 )
 
-# --- 匯入 summary 產生器：用於 DRAFT 顯示 ---
-from .jira_api.create_jira_ticket import _generate_create_summary
-
-# --- hleper ---
-
-# 抓取目前登入 User
+# --- 抓取目前登入 User ---
 def _current_username():
     # 1) Flask-Login（若你有用）
     try:
@@ -71,23 +65,12 @@ def _current_username():
     # 3) 最後退回預設
     return "webform_user"
 
-
-
-
-
 # --- 主視圖與 API (Views & APIs) ---
-
 @vm_bp.route("/vsphere/vm")
 def vm_index():
     """
     Render the main VM management page.
     """
-    # 移除舊的 vSphere 連線資訊讀取
-    # VCENTER_HOST = current_app.config['VSPHERE_HOST']
-    # VCENTER_USER = current_app.config['VSPHERE_USER']
-    # VCENTER_PASSWORD = current_app.config['VSPHERE_PASSWORD']
-    # vsphere_data = get_vsphere_objects(VCENTER_HOST, VCENTER_USER, VCENTER_PASSWORD)
-
     db_conn = None
     environments = []
     try:
@@ -116,9 +99,7 @@ def vm_index():
 
     return render_template(
         "vm_index.html",
-        # 傳遞 environment 列表到你的模板
         environment=environments,
-        # 初始載入時，這些可以為空，或提供一個預設值
         datacenters=[],
         clusters=[],
         esxi_hosts=[],
