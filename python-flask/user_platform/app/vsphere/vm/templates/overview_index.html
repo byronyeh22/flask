@@ -13,11 +13,7 @@
         --border-radius: 8px;
     }
 
-    .page-header { background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%); color: white; padding: 2rem 0; margin: -15px -15px 30px -15px; border-radius: var(--border-radius) var(--border-radius) 0 0; position: relative; overflow: hidden; }
-    .page-header::before { content: ''; position: absolute; top: 0; right: 0; width: 100px; height: 100px; background: rgba(255, 255, 255, 0.1); border-radius: 50%; transform: translate(30px, -30px); }
-    .page-header h1 { margin: 0; font-weight: 300; font-size: 2.5rem; display: flex; align-items: center; gap: 1rem; }
-    .page-header .subtitle { opacity: 0.9; margin-top: 0.5rem; font-size: 1.1rem; }
-
+    /* Cards */
     .stats-row { margin-bottom: 2rem; }
     .stat-card { background: white; border-radius: var(--border-radius); padding: 1.5rem; box-shadow: var(--card-shadow); border-left: 4px solid var(--accent-color); transition: transform 0.2s ease, box-shadow 0.2s ease; text-align: center; }
     .stat-card:hover { transform: translateY(-2px); box-shadow: var(--card-shadow); }
@@ -28,20 +24,15 @@
     .stat-card.returned { border-left-color: #9b59b6; }
     .stat-card.draft { border-left-color: #6c757d; }
 
+    /* Table wrapper */
     .table-container { overflow-x: auto; background: white; border-radius: var(--border-radius); box-shadow: var(--card-shadow); overflow: visible; margin-top: 2rem; }
     .table-header { background: var(--light-bg); padding: 1.5rem; border-bottom: 1px solid #dee2e6; }
     .table-header h3 { margin: 0; color: var(--primary-color); font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
 
-    .search-controls { margin-top: 1rem; }
-    .search-input { border: 2px solid #e9ecef; border-radius: var(--border-radius); padding: 0.75rem 1rem; transition: border-color 0.2s ease; }
-    .search-input:focus { border-color: var(--accent-color); box-shadow: none; }
-
-    .filter-btn { padding: 0.5rem 1rem; border: 2px solid #e9ecef; background: white; color: #6c757d; border-radius: var(--border-radius); transition: all 0.2s ease; margin-right: 0.5rem; cursor: pointer; }
-    .filter-btn:hover, .filter-btn.active { background: var(--accent-color); color: white; border-color: var(--accent-color); }
-
+    /* Pagination */
     .pagination-controls { background: var(--light-bg); padding: 1rem 1.5rem; border-top: 1px solid #dee2e6; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
-    .entries-control { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #6c757d; }
-    .entries-select { padding: 0.4rem 0.8rem; border: 1px solid #dee2e6; border-radius: var(--border-radius); background: white; font-size: 0.9rem; }
+    .entries-control { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #6c757d;  }
+    .entries-select { padding: 0.4rem 0.8rem; border: 1px solid #dee2e6; border-radius: var(--border-radius); background: white; font-size: 0.9rem; text-align-last: center; }
     .entries-select:focus { outline: none; border-color: var(--accent-color); }
     .pagination-info { font-size: 0.9rem; color: #6c757d; }
     .pagination-nav { display: flex; gap: 0.5rem; align-items: center; }
@@ -50,6 +41,7 @@
     .pagination-btn.active { background: var(--accent-color); color: white; border-color: var(--accent-color); }
     .pagination-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    /* Table */
     .custom-table { margin: 0; border: none; font-size: 0.85rem; table-layout: fixed; width: 100%;}
     .custom-table thead th { background: var(--primary-color); color: white; border: none; padding: 1rem; font-weight: 500; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; white-space: nowrap; text-align: center; }
 
@@ -75,10 +67,11 @@
     .custom-table tbody td:nth-child(7),
     .custom-table tbody td:nth-child(8),
     .custom-table tbody td:nth-child(9),
-    .custom-table tbody td:nth-child(10) { 
-        text-align: center; 
+    .custom-table tbody td:nth-child(10) {
+        text-align: center;
     }
 
+    /* Status badge */
     .status-badge {
         padding: 0.3rem 0.6rem;
         border-radius: 20px;
@@ -106,17 +99,78 @@
     .duration-cell { font-size: 0.75rem; text-align: center; }
     .summary-cell { white-space: normal !important; overflow: hidden; max-width: none; word-break: break-word; line-height: 1.3; }
 
-    .search-controls { min-width: 0 ;margin-top: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .search-controls { min-width: 0; margin-top: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     .search-section { flex: 1 1 300px; display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 300px; }
     .search-label { font-weight: 500; color: var(--primary-color); white-space: nowrap; }
     .filter-section { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; flex-wrap: nowrap; }
-    .filter-btn { padding: 0.5rem 1rem; border: 2px solid #e9ecef; background: white; color: #6c757d; border-radius: var(--border-radius); transition: all 0.2s ease; cursor: pointer; white-space: nowrap; font-size: 0.85rem; }
 
-    .modal-xl { max-width: 95vw; }
+    /* iframe */
     .review-iframe { width: 100%; height: 80vh; border: none; }
+
+    /* Multi-select status */
+    /* 輸入框（小圓角、置中、右側箭頭間距） */
+    .status-multiselect .status-input {
+      border-radius: 10px;
+      text-align: center;
+      padding-right: 1rem;
+      padding-left: 0;
+      cursor: pointer;
+      background: #fff;
+    }
+    /* 右側下拉箭頭 */
+    .status-multiselect .status-caret {
+      position: absolute;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-40%);
+      font-size: 0.9rem;
+      color: #6c757d;
+      pointer-events: none;
+    }
+
+    .status-menu {
+        position: absolute;
+        z-index: 1000;
+        top: 110%;
+        left: 0;
+        min-width: 260px;
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        box-shadow: var(--card-shadow);
+        padding: .5rem 0;
+        display: none;
+        max-height: 280px;
+        overflow-y: auto;
+    }
+    .status-menu.show { display: block; }
+    .status-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: .75rem;
+        padding: .4rem .75rem;
+        cursor: pointer;
+    }
+    .status-item:hover {
+        background: rgba(52, 152, 219, 0.06);
+    }
+    .status-item label {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        width: 100%;
+        cursor: pointer;
+    }
+    .status-count {
+        color: #6c757d;
+        font-size: .85rem;
+        white-space: nowrap;
+    }
 </style>
 
-{# ================== 新增：以 workflow_id 去重，只保留第一筆 ================== #}
+{# ================== 以 workflow_id 去重，只保留第一筆 ================== #}
 {% set uniq = namespace(rows=[]) %}
 {% set seen = namespace(ids=[]) %}
 {% for p in pipeline_data %}
@@ -125,6 +179,26 @@
     {% set _ = uniq.rows.append(p) %}
   {% endif %}
 {% endfor %}
+
+{# ====== 狀態計數：供下拉清單顯示 ====== #}
+{% set status_counts = {
+  'draft':              (uniq.rows | selectattr('status', 'equalto', 'DRAFT') | list | length),
+  'in_progress':        (uniq.rows | selectattr('status', 'equalto', 'IN_PROGRESS') | list | length),
+  'pending_approval':   (uniq.rows | selectattr('status', 'equalto', 'PENDING_APPROVAL') | list | length),
+  'approved':           (uniq.rows | selectattr('status', 'equalto', 'APPROVED') | list | length),
+  'success':            (uniq.rows | selectattr('status', 'equalto', 'SUCCESS') | list | length),
+  'failed':             (uniq.rows | selectattr('status', 'equalto', 'FAILED') | list | length),
+  'returned':           (uniq.rows | selectattr('status', 'equalto', 'RETURNED') | list | length)
+} %}
+{% set status_labels = {
+  'draft': 'Draft',
+  'in_progress': 'In Progress',
+  'pending_approval': 'Pending Approval',
+  'approved': 'Approved',
+  'success': 'Success',
+  'failed': 'Failed',
+  'returned': 'Returned'
+} %}
 
 <div class="container-fluid">
     <!-- Statistics Cards -->
@@ -175,16 +249,32 @@
                   <i class="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-muted"></i>
                   <input type="text" class="form-control ps-5 rounded-pill" placeholder="Search" id="searchInput">
                 </div>
+
+                <!-- ======= filter by status 多選下拉式選單 ======= -->
                 <div class="filter-section">
-                    <button class="filter-btn active" data-status="all">All</button>
-                    <button class="filter-btn" data-status="draft">Draft</button>
-                    <button class="filter-btn" data-status="success">Success</button>
-                    <button class="filter-btn" data-status="failed">Failed</button>
-                    <button class="filter-btn" data-status="manual">Approved</button>
-                    <button class="filter-btn" data-status="in_progress">In Progress</button>
-                    <button class="filter-btn" data-status="pending_approval">Pending Approval</button>
-                    <button class="filter-btn" data-status="returned">Returned</button>
+                  <div class="status-multiselect position-relative">
+                    <input
+                      type="text"
+                      id="statusFilterInput"
+                      class="form-control status-input"
+                      placeholder="Filter by status"
+                      readonly
+                    />
+                    <i class="bi bi-chevron-down status-caret" aria-hidden="true"></i>
+                    <div class="status-menu" id="statusFilterMenu">
+                      {% for key, label in status_labels.items() %}
+                        <div class="status-item">
+                          <label>
+                            <input class="form-check-input me-2" type="checkbox" name="statusFilter[]" value="{{ key }}">
+                            <span>{{ label }}</span>
+                          </label>
+                          <span class="status-count">({{ status_counts[key] }})</span>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
                 </div>
+
                 <div class="timezone-control d-flex align-items-center gap-2 small">
                     <span class="timezone-label fw-bold"><i class="fas fa-globe me-1"></i> Timezone</span>
                     <select class="timezone-select form-select form-select-sm w-auto" id="timezoneSelect">
@@ -429,7 +519,10 @@ class TablePagination {
   constructor() {
     this.currentPage     = 1;
     this.entriesPerPage  = 10;
-    this.currentFilter   = 'all';
+
+    /* 多選狀態（小寫） */
+    this.selectedStatuses = new Set();
+
     this.tableBody       = document.querySelector('#pipelinesTable tbody');
     this.allRows         = Array.from(this.tableBody?.querySelectorAll('tr') || []);
     this.filteredRows    = [...this.allRows];
@@ -442,7 +535,10 @@ class TablePagination {
     this.prevPageBtn     = document.getElementById('prevPage');
     this.nextPageBtn     = document.getElementById('nextPage');
     this.lastPageBtn     = document.getElementById('lastPage');
-    this.filterButtons   = document.querySelectorAll('.filter-btn');
+
+    /* 多選下拉控制 */
+    this.statusInput     = document.getElementById('statusFilterInput');
+    this.statusMenu      = document.getElementById('statusFilterMenu');
 
     this._bindEvents();
     this.applyFilters();
@@ -462,14 +558,32 @@ class TablePagination {
         this.currentPage = 1; this.updateDisplay();
       });
     }
-    this.filterButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        this.filterButtons.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this.currentFilter = btn.dataset.status;
-        this.applyFilters(); this.currentPage = 1; this.updateDisplay();
+
+    /* 下拉開關與勾選變更 */
+    if (this.statusInput && this.statusMenu) {
+      // 開關
+      this.statusInput.addEventListener('click', () => {
+        this.statusMenu.classList.toggle('show');
       });
-    });
+      // 點擊外部關閉
+      document.addEventListener('click', (e) => {
+        if (!this.statusMenu.contains(e.target) && e.target !== this.statusInput) {
+          this.statusMenu.classList.remove('show');
+        }
+      });
+      // 勾選即套用
+      this.statusMenu.querySelectorAll('input[name="statusFilter[]"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const key = (cb.value || '').toLowerCase();
+          if (cb.checked) this.selectedStatuses.add(key);
+          else this.selectedStatuses.delete(key);
+          this._updateStatusInputText();
+          this.applyFilters();
+          this.currentPage = 1;
+          this.updateDisplay();
+        });
+      });
+    }
 
     document.addEventListener('click', async (e) => {
       const reviewBtn = e.target.closest('.btn-row-review');
@@ -490,11 +604,11 @@ class TablePagination {
         return;
       }
 
-     if (approveBtn) {
-       const pid = approveBtn.getAttribute('data-workflow-id');
-       openApproveModal(pid);
-       return;
-     }
+      if (approveBtn) {
+        const pid = approveBtn.getAttribute('data-workflow-id');
+        openApproveModal(pid);
+        return;
+      }
 
       if (deleteBtn) {
         const wfId = deleteBtn.getAttribute('data-workflow-id');
@@ -526,10 +640,37 @@ class TablePagination {
     this.lastPageBtn?.addEventListener('click',  () => this.goToPage(this.getTotalPages()));
   }
 
+  _updateStatusInputText() {
+    if (!this.statusInput) return;
+    if (this.selectedStatuses.size === 0) {
+      this.statusInput.value = '';
+      this.statusInput.placeholder = 'Filter by status';
+      return;
+    }
+    const labelMap = {
+      draft: 'Draft',
+      in_progress: 'In Progress',
+      pending_approval: 'Pending Approval',
+      approved: 'Approved',
+      success: 'Success',
+      failed: 'Failed',
+      returned: 'Returned'
+    };
+    const labels = [];
+    this.selectedStatuses.forEach(k => labels.push(labelMap[k] || k));
+    this.statusInput.value = labels.join(', ');
+  }
+
   applyFilters() {
     const term = (this.searchInput?.value || '').toLowerCase();
+    const hasStatusFilter = this.selectedStatuses && this.selectedStatuses.size > 0;
+
     this.filteredRows = this.allRows.filter(row => {
-      if (this.currentFilter !== 'all' && row.dataset.status !== this.currentFilter) return false;
+      // 狀態過濾（data-status 為小寫）
+      if (hasStatusFilter) {
+        if (!this.selectedStatuses.has((row.dataset.status || '').toLowerCase())) return false;
+      }
+      // 搜尋過濾
       if (!term) return true;
       return Array.from(row.cells).some(td => td.textContent.toLowerCase().includes(term));
     });
@@ -587,7 +728,7 @@ class TablePagination {
 
         if (window.timezoneManager) window.timezoneManager.updateAllDateCells();
       })
-      .catch(err => console.error('刷新資料失敗:', err));
+      .catch(err => console.error('refresh data failed:', err));
   }
 
   _reindexRows() {
