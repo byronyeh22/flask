@@ -109,6 +109,7 @@ def init_db():
             environment VARCHAR(100) NOT NULL,
             resource VARCHAR(50) NOT NULL,
             os_type VARCHAR(50) NOT NULL,
+            vsphere_host VARCHAR(100),
             vsphere_datacenter VARCHAR(100),
             vsphere_cluster VARCHAR(100),
             vsphere_esxi_host VARCHAR(100),

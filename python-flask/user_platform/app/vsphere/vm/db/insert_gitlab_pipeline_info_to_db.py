@@ -1,6 +1,7 @@
 from mysql.connector import Error
 import logging
 from datetime import datetime, timezone
+from app.mysql.db import get_db_connection
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -33,14 +34,12 @@ def _parse_ts(ts_val):
                     pass
     return None
 
-def insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data):
+def insert_gitlab_pipeline_info_to_db(workflow_id, pipeline_data):
     """
     將觸發 GitLab Pipeline 當下的快照資訊寫入資料庫。
     - started_at 優先取 pipeline_data['started_at']，沒有就用 pipeline_data['created_at']。
     - 寫入時若為 None，DB 端以 NOW() 帶入目前時間（COALESCE）。
     """
-    cursor = None
-
     sql = """
         INSERT INTO gitlab_pipelines (
             workflow_id, pipeline_id, project_name, branch,
@@ -51,48 +50,50 @@ def insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data):
     """
 
     try:
-        # 1) 取回應中的時間並正規化
-        started_raw  = pipeline_data.get("started_at") or pipeline_data.get("created_at")
-        finished_raw = pipeline_data.get("finished_at")
+        db_conn = get_db_connection()
+        with db_conn.cursor() as cursor:
+            # 1) 取回應中的時間並正規化
+            started_raw  = pipeline_data.get("started_at") or pipeline_data.get("created_at")
+            finished_raw = pipeline_data.get("finished_at")
 
-        started_at_dt  = _parse_ts(started_raw)    # -> datetime or None
-        finished_at_dt = _parse_ts(finished_raw)   # -> datetime or None
+            started_at_dt  = _parse_ts(started_raw)    # -> datetime or None
+            finished_at_dt = _parse_ts(finished_raw)   # -> datetime or None
 
-        # 2) 組參數
-        params = (
-            workflow_id,
-            pipeline_data.get("id"),
-            f"project-{pipeline_data.get('project_id')}",
-            pipeline_data.get("ref"),
-            pipeline_data.get("sha"),
-            pipeline_data.get("status"),
-            started_at_dt,                 # -> COALESCE(%s, NOW())
-            finished_at_dt,
-            pipeline_data.get("duration"),
-            pipeline_data.get("web_url"),
-        )
+            # 2) 組參數
+            params = (
+                workflow_id,
+                pipeline_data.get("id"),
+                f"project-{pipeline_data.get('project_id')}",
+                pipeline_data.get("ref"),
+                pipeline_data.get("sha"),
+                pipeline_data.get("status"),
+                started_at_dt,   # -> COALESCE(%s, NOW())
+                finished_at_dt,
+                pipeline_data.get("duration"),
+                pipeline_data.get("web_url"),
+            )
 
-        # 3) 寫入
-        cursor = db_conn.cursor()
-        cursor.execute(sql, params)
-        db_conn.commit()
+            # 3) 寫入
+            cursor.execute(sql, params)
+            db_conn.commit()
 
-        logging.info(
-            "✅ Inserted GitLab pipeline: wf=%s, pipeline=%s, started_at=%s",
-            workflow_id, pipeline_data.get("id"),
-            started_at_dt.isoformat(sep=' ') if started_at_dt else "NOW()"
-        )
+            logging.info(
+                "✅ Inserted GitLab pipeline: wf=%s, pipeline=%s, started_at=%s",
+                workflow_id,
+                pipeline_data.get("id"),
+                started_at_dt.isoformat(sep=' ') if started_at_dt else "NOW()"
+            )
 
     except Error as e:
         logging.error("❌ DB error in insert_gitlab_pipeline_info_to_db (wf=%s): %s", workflow_id, e)
-        if db_conn and db_conn.is_connected():
+        if db_conn:
             db_conn.rollback()
         raise
     except Exception as e:
         logging.error("❌ Unexpected error in insert_gitlab_pipeline_info_to_db: %s", e)
-        if db_conn and db_conn.is_connected():
+        if db_conn:
             db_conn.rollback()
         raise
     finally:
-        if cursor:
-            cursor.close()
+        if db_conn:
+            db_conn.close()

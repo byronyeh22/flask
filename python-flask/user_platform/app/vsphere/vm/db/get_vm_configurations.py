@@ -1,122 +1,128 @@
 # app/vsphere/vm/db/get_vm_configurations.py
 from mysql.connector import Error
+import logging
+from app.mysql.db import get_db_connection
 
-def get_environment(db_conn):
+def get_environment():
     """
     從 vm_configurations 表中獲取所有不重複的 environment 名稱列表。
     """
-    environments = []
-    cursor = None
+    db_conn = get_db_connection()
     try:
-        cursor = db_conn.cursor()
-        query = "SELECT DISTINCT environment FROM vm_configurations ORDER BY environment"
-        cursor.execute(query)
-        environments = [item[0] for item in cursor.fetchall()]
+        with db_conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT environment FROM vm_configurations ORDER BY environment"
+            )
+            rows = cursor.fetchall() or []
+            return [item[0] for item in rows]
+
+    except Error as e:
+        logging.error(f"[get_environment] DB error: {e}")
+        return []
     except Exception as e:
-        print(f"An error occurred while getting environments from the database: {e}")
+        logging.error(f"[get_environment] Unexpected error: {e}")
         return []
     finally:
-        if cursor:
-            cursor.close()
-    return environments
+        if db_conn:
+            db_conn.close()
 
 
-def get_vms_by_environment(db_conn, environment):
+def get_vms_by_environment(environment):
     """
     根據 environment 獲取所有對應的 vm_name_prefix。
+    - 自行建立/關閉連線
     """
+    db_conn = get_db_connection()
     vms = []
-    cursor = None
     try:
-        cursor = db_conn.cursor()
-        query = """
-            SELECT vm_name_prefix
-            FROM vm_configurations
-            WHERE environment = %s
-            ORDER BY vm_name_prefix
-        """
-        cursor.execute(query, (environment,))
-        vms = [item[0] for item in cursor.fetchall()]
+        with db_conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT vm_name_prefix
+                FROM vm_configurations
+                WHERE environment = %s
+                ORDER BY vm_name_prefix
+                """,
+                (environment,)
+            )
+            rows = cursor.fetchall() or []
+            vms = [item[0] for item in rows]
+    except Error as e:
+        logging.error(f"[get_vms_by_environment] DB error: {e}")
+        return []
+    except Exception as e:
+        logging.error(f"[get_vms_by_environment] Unexpected error: {e}")
+        return []
     finally:
-        if cursor:
-            cursor.close()
+        if db_conn:
+            db_conn.close()
     return vms
 
 
-def get_vm_config(db_conn, environment, vm_name_prefix):
+def get_vms_by_environment(environment):
+    """
+    根據 environment 獲取所有對應的 vm_name_prefix。
+    """
+    try:
+        db_conn = get_db_connection()
+        with db_conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT vm_name_prefix
+                FROM vm_configurations
+                WHERE environment = %s
+                ORDER BY vm_name_prefix
+            """, (environment,))
+            return [row[0] for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"[get_vms_by_environment] DB error: {e}")
+        return []
+    finally:
+        if db_conn:
+            db_conn.close()
+
+def get_vm_config(environment, vm_name_prefix):
     """
     根據 environment 和 vm_name_prefix 獲取特定 VM 的完整設定 (包含關聯的磁碟)。
-
-    Returns:
-        dict or None:
-        {
-          id: int,
-          environment: str,
-          resource: str,
-          os_type: str,
-          ... (vm_configurations 其他欄位，包含 vm_scsi_controller_count)
-          additional_disks: [
-            {
-              id: int,
-              scsi_controller: int,
-              unit_number: int,
-              ui_disk_number: int | None,
-              size: int,
-              disk_provisioning: str,
-              thin_provisioned: bool,
-              eagerly_scrub: bool
-            },
-            ...
-          ]
-        }
     """
-    config = None
-    cursor = None
     try:
-        # 1) 讀 vm_configurations（包含 vm_scsi_controller_count）
-        cursor = db_conn.cursor(dictionary=True)
-        query = """
-            SELECT *
-            FROM vm_configurations
-            WHERE environment = %s AND vm_name_prefix = %s
-            LIMIT 1
-        """
-        cursor.execute(query, (environment, vm_name_prefix))
-        config = cursor.fetchone()
+        db_conn = get_db_connection()
+        with db_conn.cursor(dictionary=True) as cursor:
+            cursor.execute("""
+                SELECT *
+                FROM vm_configurations
+                WHERE environment = %s AND vm_name_prefix = %s
+                LIMIT 1
+            """, (environment, vm_name_prefix))
+            config = cursor.fetchone()
 
         if not config:
             return None
 
         vm_id = config["id"]
 
-        # 2) 讀 vm_disks（已移除 label，改用 scsi_controller / unit_number / ui_disk_number）
-        disk_cursor = db_conn.cursor(dictionary=True)
-        disk_query = """
-            SELECT
-              id,
-              scsi_controller,
-              unit_number,
-              ui_disk_number,
-              size,
-              disk_provisioning,
-              thin_provisioned,
-              eagerly_scrub
-            FROM vm_disks
-            WHERE vm_configuration_id = %s
-            ORDER BY scsi_controller ASC, unit_number ASC
-        """
-        disk_cursor.execute(disk_query, (vm_id,))
-        disks = disk_cursor.fetchall()
-        disk_cursor.close()
+        # 查磁碟
+        with db_conn.cursor(dictionary=True) as disk_cursor:
+            disk_cursor.execute("""
+                SELECT
+                    id,
+                    scsi_controller,
+                    unit_number,
+                    ui_disk_number,
+                    size,
+                    disk_provisioning,
+                    thin_provisioned,
+                    eagerly_scrub
+                FROM vm_disks
+                WHERE vm_configuration_id = %s
+                ORDER BY scsi_controller ASC, unit_number ASC
+            """, (vm_id,))
+            config["additional_disks"] = disk_cursor.fetchall()
 
-        # 3) 塞回 config
-        config["additional_disks"] = disks
+        return config
 
     except Error as e:
-        print(f"An error occurred while querying VM configuration: {e}")
+        logging.error(f"[get_vm_config] DB error: {e}")
         return None
     finally:
-        if cursor:
-            cursor.close()
-
-    return config
+        if db_conn:
+            db_conn.close()

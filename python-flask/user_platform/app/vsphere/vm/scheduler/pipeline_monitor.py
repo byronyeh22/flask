@@ -130,7 +130,7 @@ def maybe_advance_to_pending_approval(db_conn, workflow_id: int) -> bool:
         if not manual_ok:
             return False
 
-        update_request_status(db_conn, workflow_id, "PENDING_APPROVAL")
+        update_request_status(workflow_id, "PENDING_APPROVAL")
         return True
 
     except MySQLError as e:

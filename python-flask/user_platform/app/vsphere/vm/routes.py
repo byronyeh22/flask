@@ -9,27 +9,14 @@ from app.mysql.db import get_db_connection
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- DB 操作模組 ---
+# --- DB 函式 ---
 from .db.get_vm_configurations import get_environment, get_vms_by_environment, get_vm_config
 from .db.get_jira_tickets_and_stats import get_jira_tickets_and_stats, get_jira_ticket_by_workflow_id
 from .db.get_gitlab_pipeline_detail_and_stats import get_gitlab_pipeline_detail_and_stats, get_pipeline_details_by_workflow_id
 from .db.insert_jira_info_to_db import insert_jira_info_to_db
 from .db.insert_gitlab_pipeline_info_to_db import insert_gitlab_pipeline_info_to_db
-from .db.workflow_manager import record_pending_request, update_request_status, apply_request_to_db, return_request
+from .db.workflow_manager import get_all_workflow_runs, save_or_update_draft, get_workflow_by_id, update_request_status, apply_request_to_db, delete_draft_by_workflow_id, return_request
 from .db.update_jira_ticket_status import update_jira_ticket_status
-
-# --- API 函式 ---
-from .vsphere_api.get_vsphere_objects import get_vsphere_objects
-from .vsphere_api.test_connection import test_vsphere_connection
-from .jira_api.create_jira_ticket import create_jira_ticket
-from .jira_api.get_jira_issue_detail import get_jira_issue_detail
-from .jira_api.issue_updates import jira_return_issue
-from .jira_api.create_jira_ticket import _generate_create_summary
-from .gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
-from .gitlab_api.run_manual_job import run_manual_job
-from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
-
-# --- vSphere Connection Manager ---
 from .db.vsphere_connections_manager import (
     get_all_vsphere_connections,
     get_active_vsphere_connections,
@@ -41,6 +28,17 @@ from .db.vsphere_connections_manager import (
     get_hosts_by_environment,
     get_vsphere_connection_by_host,
 )
+
+# --- API 函式 ---
+from .vsphere_api.get_vsphere_objects import get_vsphere_objects
+from .vsphere_api.test_connection import test_vsphere_connection
+from .jira_api.create_jira_ticket import create_jira_ticket
+from .jira_api.get_jira_issue_detail import get_jira_issue_detail
+from .jira_api.issue_updates import jira_return_issue
+from .jira_api.create_jira_ticket import _generate_create_summary
+from .gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
+from .gitlab_api.run_manual_job import run_manual_job
+from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
 
 # --- 抓取目前登入 User ---
 def _current_username():
@@ -65,37 +63,31 @@ def _current_username():
     # 3) 最後退回預設
     return "webform_user"
 
-# --- 主視圖與 API (Views & APIs) ---
+# --- overview 與 API (Views & APIs) ---
 @vm_bp.route("/vsphere/vm")
 def vm_index():
     """
     Render the main VM management page.
     """
-    db_conn = None
     environments = []
     try:
-        db_conn = get_db_connection()
-        # 【修改】從 vsphere_connections 取得所有已啟用的環境
-        active_connections = get_active_vsphere_connections(db_conn)
-        # 取出所有 environment，做大小寫不敏感且保序的去重
+        active_connections = get_active_vsphere_connections()
+
         raw_envs = [
             (c.get("environment") or "").strip()
             for c in active_connections
             if c.get("environment")
         ]
         seen = set()
-        environments = []
         for e in raw_envs:
-            k = e.lower()
-            if k not in seen:
-                seen.add(k)
+            key = e.lower()
+            if key not in seen:
+                seen.add(key)
                 environments.append(e)
+
     except Exception as e:
-        logging.error(f"Database connection error in vm_index: {e}")
+        logging.error(f"Error in vm_index: {e}")
         environments = []
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
     return render_template(
         "vm_index.html",
@@ -111,145 +103,110 @@ def vm_index():
 
 @vm_bp.route("/vsphere/overview")
 def overview_index():
-    def _to_iso(val):
+    def _to_iso(v):
         try:
-            return val.isoformat()
+            return v.isoformat()
         except Exception:
-            return str(val) if val else "1970-01-01T00:00:00Z"
+            return str(v) if v else "1970-01-01T00:00:00Z"
 
-    def _ensure_created_at(item: dict):
-        if not item.get("created_at"):
-            item["created_at"] = item.get("started_at") or "1970-01-01T00:00:00Z"
-        item["created_at"] = _to_iso(item["created_at"])
-        return item
-
-    db_conn = None
     try:
-        db_conn = get_db_connection()
-
         # 1) 原資料
-        jira_tickets = get_jira_tickets_and_stats(db_conn) or []
-        pipeline_data = get_gitlab_pipeline_detail_and_stats(db_conn) or []
-        pipeline_data = [_ensure_created_at(dict(p)) for p in pipeline_data]
+        jira_tickets = get_jira_tickets_and_stats() or []
+        pipeline_data = get_gitlab_pipeline_detail_and_stats() or []
+        pipeline_data = [
+            {**dict(p), "created_at": _to_iso(p.get("created_at") or p.get("started_at"))}
+            for p in pipeline_data
+        ]
 
-        # 2) 取全部 workflow（包含 DRAFT）
-        cur = db_conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT workflow_id, status, created_at, request_payload, created_by
-            FROM workflow_runs
-            ORDER BY created_at DESC
-        """)
-        workflows = cur.fetchall()
-        cur.close()
-
+        # 2) 全部 workflow（包含 DRAFT）
+        workflows = get_all_workflow_runs()
         wf_status_map = {w["workflow_id"]: w["status"] for w in workflows}
         wf_created_by_map = {w["workflow_id"]: w.get("created_by") for w in workflows}
 
-        # --- A) 先把 JIRA tickets 收成 map，後面針對 Draft 直接覆蓋 ---
-        jira_map = {}
-        for t in (jira_tickets or []):
-            wid = t.get("workflow_id")
-            if wid is not None:
-                jira_map[wid] = dict(t)
+        # A) 先把 JIRA tickets 收成 map
+        jira_map = {t["workflow_id"]: dict(t) for t in jira_tickets if t.get("workflow_id")}
 
-        # --- B) 避免重複插入 Draft 列：蒐集現有 pipeline_data 的 wid ---
-        existing_wids = {row.get("workflow_id") for row in pipeline_data if row.get("workflow_id") is not None}
+        # B) 已存在的 pipeline workflow_ids
+        existing_wids = {row.get("workflow_id") for row in pipeline_data if row.get("workflow_id")}
 
-        # --- C) 重新覆蓋 DRAFT 的 summary（用最新 payload 產生）
+        # C) 處理 DRAFT workflow
         for w in workflows:
+            if (w.get("status") or "").upper() != "DRAFT":
+                continue
             wid = w["workflow_id"]
-            if (w.get("status") or "").upper() == "DRAFT":
+            try:
+                payload = json.loads(w.get("request_payload") or "{}")
+                summary = _generate_create_summary(payload) if payload else "-"
+            except Exception:
                 summary = "-"
-                try:
-                    payload = json.loads(w.get("request_payload") or "{}")
-                    summary = _generate_create_summary(payload) if payload else "-"
-                except Exception:
-                    pass
 
-                # 覆蓋/寫入 jira_map（確保列表顯示用的 summary 是最新）
-                jira_map[wid] = {
+            jira_map[wid] = {
+                "workflow_id": wid,
+                "ticket_id": None,
+                "project_key": None,
+                "summary": summary,
+                "description": None,
+                "status": None,
+                "url": None,
+                "created_at": _to_iso(w.get("created_at")),
+            }
+
+            if wid not in existing_wids:
+                pipeline_data.insert(0, {
                     "workflow_id": wid,
-                    "ticket_id": None,
-                    "project_key": None,
-                    "summary": summary,
-                    "description": None,
-                    "status": None,
-                    "url": None,
+                    "pipeline_id": None,
+                    "status": "DRAFT",
                     "created_at": _to_iso(w.get("created_at")),
-                }
+                    "finished_at": None,
+                    "duration": None,
+                    "created_by": w.get("created_by"),
+                })
+                existing_wids.add(wid)
 
-                # 若 pipeline_data 裡還沒有這個 Draft 的列，補一列（避免重複）
-                if wid not in existing_wids:
-                    pipeline_data.insert(0, {
-                        "workflow_id": wid,
-                        "pipeline_id": None,
-                        "status": "DRAFT",
-                        "created_at": _to_iso(w.get("created_at")),
-                        "finished_at": None,
-                        "duration": None,
-                        "created_by": w.get("created_by"),
-                    })
-                    existing_wids.add(wid)
-
-        # --- D) 將覆蓋後的 jira_map 轉回 list 給模板使用 ---
-        jira_tickets = list(jira_map.values())
-
-        # --- E) 最後：用 workflow 狀態覆蓋 pipeline_data 的顯示欄位 ---
+        # D) 用 workflow 覆蓋 pipeline_data 的顯示欄位
         for row in pipeline_data:
             wid = row.get("workflow_id")
             if wid in wf_status_map:
                 row["status"] = wf_status_map[wid]
-            if wf_created_by_map.get(wid):
-                row["created_by"] = wf_created_by_map[wid]
-            else:
-                row.setdefault("created_by", None)
+            row["created_by"] = wf_created_by_map.get(wid, row.get("created_by"))
+
+        jira_tickets = list(jira_map.values())
 
     except Exception as e:
-        logging.error(f"Database error in overview_index: {e}")
-        jira_tickets = []
-        pipeline_data = []
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
+        logging.error(f"overview_index error: {e}")
+        jira_tickets, pipeline_data = [], []
 
     return render_template("overview_index.html", jira_tickets=jira_tickets, pipeline_data=pipeline_data)
 
 @vm_bp.route('/api/get_vms_by_environment/<string:environment>')
 def get_vms_by_environment_api(environment):
-    """API endpoint to fetch VMs for a given environment."""
-    db_conn = None
+    """
+    API endpoint to fetch VMs for a given environment.
+    給 create/form.html 檢查相同環境下有沒有重複的 VM Name
+    """
     try:
-        db_conn = get_db_connection()
-        vms = get_vms_by_environment(db_conn, environment)
+        vms = get_vms_by_environment(environment)
         return jsonify(vms)
     except Exception as e:
         logging.error(f"Error in get_vms_by_environment_api: {e}")
         return jsonify({"error": "Internal server error"}), 500
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
-
 
 @vm_bp.route('/api/get_vm_config/<string:environment>/<string:vm_name_prefix>')
 def get_vm_config_api(environment, vm_name_prefix):
-    """API endpoint to fetch a specific VM's configuration."""
-    db_conn = None
+    """
+    API endpoint to fetch a specific VM's configuration.
+    再 update/form.html 選了某個 VM 後，需要把現有設定抓回來顯示
+    """
     try:
-        db_conn = get_db_connection()
-        config = get_vm_config(db_conn, environment, vm_name_prefix)
+        config = get_vm_config(environment, vm_name_prefix)
         if not config:
             return jsonify({"error": "Configuration not found"}), 404
         return jsonify(config)
     except Exception as e:
         logging.error(f"Error in get_vm_config_api: {e}")
         return jsonify({"error": "Internal server error"}), 500
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
-
-# --- Review / Cancel（沿用） ---
-
+# --- Save/Update Draft (Create VM configuration) ---
 @vm_bp.route("/vsphere/vm/create/review", methods=["POST"])
 def vsphere_create_vm_review():
     """
@@ -266,92 +223,71 @@ def vsphere_create_vm_review():
         else:
             processed_form_data[key] = value[0] if isinstance(value, list) and value else value
 
-    db_conn = None
     try:
-        db_conn = get_db_connection()
         created_by = _current_username()
-
         wf_id = processed_form_data.get("workflow_id")
-        if wf_id:
-            cur = db_conn.cursor()
-            cur.execute("SELECT status FROM workflow_runs WHERE workflow_id=%s", (wf_id,))
-            row = cur.fetchone()
-            if row and (row[0] == 'DRAFT'):
-                cur.execute(
-                    "UPDATE workflow_runs SET request_payload=%s, updated_at=NOW() WHERE workflow_id=%s",
-                    (json.dumps(processed_form_data), wf_id)
-                )
-                db_conn.commit()
-                cur.close()
-                flash(f"Draft #{wf_id} updated successfully.", "success")
-                return redirect(url_for('vm.overview_index'))
+        logging.info(f"[vsphere_create_vm_review] username={created_by}, wf_id(raw)={wf_id!r}")
 
-        # 新增 DRAFT
-        cur = db_conn.cursor()
-        cur.execute(
-            "INSERT INTO workflow_runs (created_by, status, request_payload) VALUES (%s, 'DRAFT', %s)",
-            (created_by, json.dumps(processed_form_data))
+        final_wf_id, action = save_or_update_draft(
+            processed_form_data=processed_form_data,
+            created_by=created_by,
+            workflow_id=wf_id
         )
-        new_workflow_id = cur.lastrowid
-        db_conn.commit()
-        cur.close()
-        flash(f"New draft #{new_workflow_id} created successfully.", "success")
+        logging.info(f"[vsphere_create_vm_review] save_or_update_draft returned: wf_id={final_wf_id}, action={action}")
+
+        if action == "updated":
+            flash(f"Draft #{final_wf_id} updated successfully.", "success")
+        else:
+            flash(f"New draft #{final_wf_id} created successfully.", "success")
+
+        redirect_url = url_for('vm.overview_index')
+        return f'<script>window.top.location="{redirect_url}"</script>'
 
     except Exception as e:
-        logging.error(f"Failed to save draft: {e}")
+        logging.error(f"[vsphere_create_vm_review] Failed to save draft: {e}", exc_info=True)
         flash(f"Failed to save draft: {e}", "danger")
-        return redirect(url_for('vm.vm_index'))
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
+        redirect_url = url_for('vm.overview_index')
+        return f'<script>window.top.location="{redirect_url}"</script>'
 
-    return redirect(url_for('vm.overview_index'))
-
-
+# --- Save/Update Draft (Update VM configuration) ---
 @vm_bp.route("/vsphere/vm/update/review", methods=["POST"])
 def vsphere_update_vm_review():
     """
     Handles saving an update request as a draft.
+    （Route 不處理 DB；由 helper 自行建/關連線）
     """
+    # 1) 取表單並正規化
     new_config = request.form.to_dict(flat=False)
-    processed_new_config = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in new_config.items()}
-    
+    processed_new_config = {
+        k: (v[0] if isinstance(v, list) and len(v) == 1 else v)
+        for k, v in new_config.items()
+    }
+
     env = processed_new_config.get('environment')
     prefix = processed_new_config.get('vm_name_prefix')
-    
-    db_conn = None
+
     try:
-        db_conn = get_db_connection()
-        original_config = get_vm_config(db_conn, env, prefix) or {}
-        
-        # Create a payload that includes both original and new configurations
+        # 2) 讀原始設定（helper 內部處理連線）
+        original_config = get_vm_config(env, prefix) or {}
+
+        # 3) 組 payload（頂層帶 action_type=update，給 review 用）
         payload = {
             'original_config': original_config,
             'new_config': processed_new_config,
-            # Explicitly add action_type to the top-level for easier parsing in review page
-            'action_type': 'update' 
+            'action_type': 'update',
         }
-        
-        created_by = _current_username()
-        cur = db_conn.cursor()
-        cur.execute(
-            "INSERT INTO workflow_runs (created_by, status, request_payload) VALUES (%s, 'DRAFT', %s)",
-            (created_by, json.dumps(payload))
-        )
-        new_workflow_id = cur.lastrowid
-        db_conn.commit()
-        cur.close()
-        flash(f"New update draft #{new_workflow_id} for {prefix} has been created.", "success")
-        
-    except Exception as e:
-        logging.error(f"Failed to save update draft: {e}")
-        flash(f"Failed to save update draft: {e}", "danger")
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
-    
-    return redirect(url_for('vm.overview_index'))
 
+        # 4) 建立草稿（helper 內部處理連線）
+        created_by = _current_username()
+        new_workflow_id = insert_workflow_draft(created_by, payload)
+
+        flash(f"New update draft #{new_workflow_id} for {prefix} has been created.", "success")
+
+    except Exception as e:
+        current_app.logger.exception(f"[vsphere_update_vm_review] save draft failed: {e}")
+        flash(f"Failed to save update draft: {e}", "danger")
+
+    return redirect(url_for('vm.overview_index'))
 
 @vm_bp.route("/vsphere/vm/cancel")
 def vsphere_cancel_vm_form():
@@ -361,153 +297,149 @@ def vsphere_cancel_vm_form():
 # --- Submit & Approval Workflow ---
 @vm_bp.route("/vsphere/vm/submit", methods=["POST"])
 def vsphere_submit_request():
+    """
+    Submit workflow:
+      - 需要 workflow_id
+      - 檢查 workflow_runs 的狀態與 payload
+      - Idempotent 建立 Jira / Pipeline
+    """
     from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
     workflow_id = request.form.get("workflow_id")
     if not workflow_id:
         flash("Workflow ID is missing. Cannot submit request.", "danger")
-        return redirect(url_for('vm.overview_index'))
+        redirect_url = url_for('vm.overview_index')
+        return f'<script>window.top.location="{redirect_url}"</script>'
 
-    db_conn = None
     try:
-        db_conn = get_db_connection()
-        cur = db_conn.cursor(dictionary=True)
-        cur.execute("SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s LIMIT 1", (workflow_id,))
-        wf = cur.fetchone()
-        cur.close()
-
+        # === 1. 抓 workflow_runs 草稿 ===
+        wf = get_workflow_by_id(workflow_id)
         if not wf:
             flash(f"Workflow #{workflow_id} not found.", "danger")
-            return redirect(url_for('vm.overview_index'))
+            redirect_url = url_for('vm.overview_index')
+            return f'<script>window.top.location="{redirect_url}"</script>'
 
-        payload = json.loads(wf.get('request_payload') or "{}")
-        form_data = payload.get('new_config', payload)
-
+        payload = json.loads(wf.get("request_payload") or "{}")
+        form_data = payload.get("new_config", payload)
         if not form_data:
             flash("Draft content is empty. Please check the form again.", "danger")
-            return redirect(url_for('vm.overview_index'))
+            redirect_url = url_for('vm.overview_index')
+            return f'<script>window.top.location="{redirect_url}"</script>'
 
-        # --- Idempotent Jira Ticket Creation ---
-        jira_ticket = get_jira_ticket_by_workflow_id(db_conn, workflow_id)
+        # === 2. Jira ===
+        jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
         if not jira_ticket:
-            logging.info(f"No Jira ticket found for workflow #{workflow_id}. Creating a new one.")
+            logging.info(f"No Jira ticket for workflow #{workflow_id}, creating new one...")
             jira_key = create_jira_ticket(form_data)
             ticket_data = get_jira_issue_detail(jira_key)
-            insert_jira_info_to_db(db_conn, workflow_id, ticket_data)
+            insert_jira_info_to_db(workflow_id, ticket_data)
             flash(f"Jira ticket {jira_key} created successfully.", "success")
-            jira_ticket = get_jira_ticket_by_workflow_id(db_conn, workflow_id) # Re-fetch to get the full record
+            jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
         else:
             logging.info(f"Using existing Jira ticket {jira_ticket['ticket_id']} for workflow #{workflow_id}.")
             flash(f"Using existing Jira ticket {jira_ticket['ticket_id']}.", "info")
 
-        jira_key = jira_ticket['ticket_id']
+        jira_key = jira_ticket["ticket_id"]
 
-        # --- Idempotent GitLab Pipeline Trigger ---
-        pipeline = get_pipeline_details_by_workflow_id(db_conn, workflow_id)
+        # === 3. GitLab Pipeline ===
+        pipeline = get_pipeline_details_by_workflow_id(workflow_id)
         if not pipeline:
-            logging.info(f"No GitLab pipeline found for workflow #{workflow_id}. Triggering a new one.")
+            logging.info(f"No pipeline for workflow #{workflow_id}, triggering new one...")
             pipeline_data = trigger_gitlab_pipeline(jira_key, form_data)
             if pipeline_data.get("success"):
-                insert_gitlab_pipeline_info_to_db(db_conn, workflow_id, pipeline_data)
+                insert_gitlab_pipeline_info_to_db(workflow_id, pipeline_data)
                 flash(f"Pipeline {pipeline_data['pipeline_id']} has been triggered.", "info")
             else:
-                raise Exception(f"Failed to trigger GitLab Pipeline: {pipeline_data.get('error', 'Unknown error')}")
+                raise Exception(f"Pipeline trigger failed: {pipeline_data.get('error', 'Unknown error')}")
         else:
-            logging.info(f"Using existing GitLab pipeline {pipeline['pipeline_id']} for workflow #{workflow_id}.")
-            flash(f"Using existing GitLab pipeline {pipeline['pipeline_id']}.", "info")
+            logging.info(f"Using existing pipeline {pipeline['pipeline_id']} for workflow #{workflow_id}.")
+            flash(f"Using existing pipeline {pipeline['pipeline_id']}.", "info")
 
-        update_request_status(db_conn, workflow_id, "IN_PROGRESS")
+        # === 4. 更新 workflow 狀態 ===
+        update_request_status(workflow_id, "IN_PROGRESS")
 
     except Exception as e:
-        logging.error(f"An error occurred during the submit process for workflow_id {workflow_id}: {e}")
-        traceback.print_exc()
-        # The key change is to NOT change the workflow status back to DRAFT here.
-        # It remains in its current state, allowing the user to retry.
+        logging.error(f"Submit failed for workflow {workflow_id}: {e}", exc_info=True)
         flash(f"Failed to submit request: {e}", "danger")
-        redirect_url = url_for('vm.overview_index')
-        if from_modal:
-            return f'<script>try{{window.top.location="{redirect_url}";}}catch(e){{window.parent.location="{redirect_url}";}}</script>'
-        return redirect(redirect_url)
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
-    redirect_url = url_for('vm.overview_index')
-    if from_modal:
-        return f'<script>try{{window.top.location="{redirect_url}";}}catch(e){{window.parent.location="{redirect_url}";}}</script>'
-    return redirect(redirect_url)
-
+    # === 5. 統一導回 overview ===
+    redirect_url = url_for("vm.overview_index")
+    return f'<script>window.top.location="{redirect_url}"</script>'
 
 @vm_bp.route('/workflow/approve/<int:workflow_id>', methods=['GET'])
 def workflow_approve_page(workflow_id):
     """
-    顯示審批頁面。
+    顯示 Approve page。
     """
-    db_conn = None
     try:
-        db_conn = get_db_connection()
-        cursor = db_conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
-        workflow = cursor.fetchone()
-        
+        # 1) 讀 workflow（找不到就回 overview）
+        workflow = get_workflow_by_id(workflow_id)
         if not workflow:
             flash(f"Workflow ID {workflow_id} not found.", "danger")
             return redirect(url_for('vm.overview_index'))
 
-        pipeline = get_pipeline_details_by_workflow_id(db_conn, workflow_id)
-        jira_ticket = get_jira_ticket_by_workflow_id(db_conn, workflow_id)
-        request_details = json.loads(workflow['request_payload']) if workflow.get('request_payload') else {}
-        
-        return render_template("create/approve.html", 
-                               workflow=workflow,
-                               pipeline=pipeline, 
-                               jira_ticket=jira_ticket,
-                               request_details=request_details)
+        # 2) 讀 pipeline / jira
+        pipeline = get_pipeline_details_by_workflow_id(workflow_id)
+        jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
+
+        # 3) request_payload 轉成 dict（容錯）
+        request_details = {}
+        if workflow.get('request_payload'):
+            try:
+                request_details = json.loads(workflow['request_payload'])
+            except Exception:
+                request_details = {}
+
+        # 4) Render approve page
+        return render_template(
+            "create/approve.html",
+            workflow=workflow,
+            pipeline=pipeline,
+            jira_ticket=jira_ticket,
+            request_details=request_details
+        )
+
     except Exception as e:
         flash(f"Error loading approval page: {e}", "danger")
         return redirect(url_for('vm.overview_index'))
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
-
 
 @vm_bp.route('/workflow/execute/<int:workflow_id>', methods=['POST'])
 def workflow_execute(workflow_id):
     """
     Approve & Execute。
     """
-    db_conn = None
+    from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
+
     try:
-        db_conn = get_db_connection()
-        apply_request_to_db(db_conn, workflow_id)
-        pipeline = get_pipeline_details_by_workflow_id(db_conn, workflow_id)
+        apply_request_to_db(workflow_id)
+
+        pipeline = get_pipeline_details_by_workflow_id(workflow_id)
         if not pipeline or not pipeline.get('pipeline_id'):
             raise Exception("Could not find the associated pipeline to execute.")
+
+        # 觸發手動 job（外部服務呼叫，維持原樣）
         result = run_manual_job(pipeline['pipeline_id'])
         if not result.get("success"):
             raise Exception(f"Failed to trigger manual job: {result.get('error')}")
-        flash(f"Request {workflow_id} has been approved. The pipeline is now running.", "success")
+
+        flash(f"Request #{workflow_id} has been approved. The pipeline is now running.", "success")
+
     except Exception as e:
         logging.error(f"Failed to execute workflow {workflow_id}: {e}")
         traceback.print_exc()
         flash(f"Failed to approve request: {e}", "danger")
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
-    return redirect(url_for('vm.overview_index'))
+    # 與 submit 一致的導頁方式：modal 用 JS，否則一般 redirect
+    redirect_url = url_for('vm.overview_index')
+    if from_modal:
+        return f'<script>try{{window.top.location="{redirect_url}";}}catch(e){{window.parent.location="{redirect_url}";}}</script>'
+    return redirect(redirect_url)
 
-
-# === Draft: Edit / Delete / Review ===
-
+# --- Draft: Edit / Delete / Review ---
 @vm_bp.route("/workflow/draft/<int:workflow_id>/edit", methods=["GET"])
 def workflow_draft_edit(workflow_id: int):
-    db_conn = None
-    cur = None
     try:
-        db_conn = get_db_connection()
-
         # 1) Load environments for the dropdown (active connections only)
-        active_connections = get_active_vsphere_connections(db_conn) or []
+        active_connections = get_active_vsphere_connections()
         raw_envs = [
             (c.get("environment") or "").strip()
             for c in active_connections
@@ -522,12 +454,7 @@ def workflow_draft_edit(workflow_id: int):
                 environments.append(e)
 
         # 2) Load draft row
-        cur = db_conn.cursor(dictionary=True)
-        cur.execute(
-            "SELECT status, request_payload FROM workflow_runs WHERE workflow_id=%s",
-            (workflow_id,),
-        )
-        row = cur.fetchone()
+        row = get_workflow_by_id(workflow_id)
 
         if not row:
             flash(f"Draft #{workflow_id} not found.", "warning")
@@ -544,22 +471,18 @@ def workflow_draft_edit(workflow_id: int):
         try:
             draft_data = json.loads(payload_raw)
             if not isinstance(draft_data, dict):
-                # Defensive: if payload is a list or other type, fallback
                 draft_data = {}
                 flash("Draft payload format is invalid; some values may not be prefilled.", "warning")
-        except Exception as parse_err:
+        except Exception:
             logging.exception(f"[workflow_draft_edit] JSON parse error for workflow_id={workflow_id}")
             draft_data = {}
             flash("Failed to parse draft payload; some values may not be prefilled.", "danger")
 
-        # 4) Determine action/resource (default: Create/VM)
+        # 4) Determine action/resource (default: create/vm)
         resource = (draft_data.get("resource") or "vm").strip().lower()
-        action_type = (draft_data.get("action_type") or "Create").strip().lower()
+        action_type = (draft_data.get("action_type") or "create").strip().lower()
 
-        # 5) Preload vSphere lists ONLY when:
-        #    - action_type == create
-        #    - draft has environment
-        #    Otherwise, send empty lists (front-end will fetch when env changes).
+        # 5) vSphere lists：保持空清單（前端選 Host 後再載入）
         vsphere_data = {
             "datacenters": [],
             "clusters": [],
@@ -571,16 +494,7 @@ def workflow_draft_edit(workflow_id: int):
         }
 
         if action_type == "create":
-            draft_env = (draft_data.get("environment") or "").strip()
-            if draft_env:
-                try:
-                    # 依目前設計：由前端選 Environment -> Host，再以 Host 取得物件
-                    # 這裡僅預載 Environment 清單；實際 vSphere 物件於前端選 Host 後再載入
-                    pass
-                except Exception:
-                    pass
-
-            # Render create page (your existing create tab)
+            # Render create page (你原本的 create tab)
             return render_template(
                 "vm_index.html",
                 datacenters=vsphere_data.get("datacenters", []),
@@ -597,7 +511,6 @@ def workflow_draft_edit(workflow_id: int):
             )
 
         elif action_type == "update":
-            # Your existing update entry page/template
             return render_template(
                 "update/index.html",
                 environment=environments,
@@ -606,7 +519,6 @@ def workflow_draft_edit(workflow_id: int):
             )
 
         elif action_type == "delete":
-            # Your existing delete entry page/template
             return render_template(
                 "delete/index.html",
                 environment=environments,
@@ -622,79 +534,61 @@ def workflow_draft_edit(workflow_id: int):
         logging.exception(f"[workflow_draft_edit] unexpected error: {e}")
         flash(f"Failed to open draft: {e}", "danger")
         return redirect(url_for('vm.overview_index'))
-    finally:
-        try:
-            if cur:
-                cur.close()
-        except Exception:
-            pass
-        if db_conn and getattr(db_conn, "is_connected", lambda: False)():
-            db_conn.close()
 
 @vm_bp.route("/workflow/draft/<int:workflow_id>/delete", methods=["POST"])
 def workflow_draft_delete(workflow_id: int):
     """
     刪除 DRAFT。
     """
-    db_conn = None
     try:
-        db_conn = get_db_connection()
-        cur = db_conn.cursor()
-        cur.execute("DELETE FROM workflow_runs WHERE workflow_id=%s AND status='DRAFT'", (workflow_id,))
-        affected = cur.rowcount
-        db_conn.commit()
-        cur.close()
+        affected = delete_draft_by_workflow_id(workflow_id)
+
         if affected == 0:
             return jsonify({"success": False, "message": "Draft not found or not deletable."}), 400
-        return jsonify({"success": True})
-    except Exception as e:
-        logging.error(f"[workflow_draft_delete] {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
+        return jsonify({"success": True})
+
+    except Exception as e:
+        logging.error(f"[workflow_draft_delete] {e}", exc_info=True)
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @vm_bp.route('/workflow/review/<int:workflow_id>', methods=['GET'])
-def workflow_review_page(workflow_id: int):
+def workflow_review_page(workflow_id):
     """
     以現有 create/review.html 呈現草稿或待審資料（供 Modal iframe 使用）
     """
-    db_conn = None
     try:
-        db_conn = get_db_connection()
-        cur = db_conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
-        wf = cur.fetchone()
-        cur.close()
+        wf = get_workflow_by_id(workflow_id)
 
         if not wf:
             flash(f"Workflow ID {workflow_id} not found.", "danger")
             return redirect(url_for('vm.overview_index'))
 
-        payload = {}
+        # 這裡統一補上，避免 'dict object has no attribute workflow_id'
+        if 'workflow_id' not in wf:
+            wf['workflow_id'] = workflow_id
+
+        # 安全解析 payload
+        raw = wf.get('request_payload') or "{}"
         try:
-            payload = json.loads(wf.get('request_payload') or "{}")
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                payload = {}
         except Exception:
             payload = {}
 
-        # Determine if this is an update request by checking for 'new_config' key
+        # 判斷是否為 update 類型（你現在用 'new_config' 作為判斷）
         is_update_action = 'new_config' in payload
 
         if is_update_action:
-            # For update actions, render the update review template
             return render_template("update/review.html", data=payload, workflow=wf)
         else:
-            # For create actions, render the create review template
             return render_template("create/review.html", data=payload, workflow=wf)
 
     except Exception as e:
-        logging.error(f"Error in workflow_review_page: {e}")
+        logging.error(f"[workflow_review_page] {e}")
         flash("Failed to load review page.", "danger")
         return redirect(url_for('vm.overview_index'))
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
 @vm_bp.route('/workflow/return/<int:workflow_id>', methods=['POST'])
 def workflow_return(workflow_id):
@@ -707,6 +601,7 @@ def workflow_return(workflow_id):
     5) Audit log
     + from_modal 支援父頁跳轉：與 vsphere_submit_request() 一致
     """
+
     # 讓 modal 關閉後回父頁顯示 flash
     from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
 
@@ -723,19 +618,18 @@ def workflow_return(workflow_id):
     if not reason:
         reason = "No reason provided."
 
-    db_conn = None
     try:
-        db_conn = get_db_connection()
         returned_by = _current_username()
 
-        # 1) DB：更新 workflow_runs（優先帶 returned_by；若尚未支援此參數則 fallback）
+        # 1) DB：更新 workflow_runs（由 helper 內部處理連線）
         try:
-            return_request(db_conn, workflow_id, reason, returned_by=returned_by)
+            return_request(workflow_id, reason, returned_by=returned_by)
         except TypeError:
-            return_request(db_conn, workflow_id, reason)
+            # 相容舊版 helper（沒有 returned_by 參數）
+            return_request(workflow_id, reason)
 
         # 2) GitLab：取消 manual job（若有 pipeline）
-        pipeline = get_pipeline_details_by_workflow_id(db_conn, workflow_id)
+        pipeline = get_pipeline_details_by_workflow_id(workflow_id)
         if pipeline and pipeline.get("pipeline_id"):
             try:
                 from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
@@ -743,49 +637,42 @@ def workflow_return(workflow_id):
             except Exception as e:
                 current_app.logger.warning(f"[WORKFLOW_RETURN] cancel_manual_jobs failed: {e}")
 
-        # 3) Jira：加 comment + transition 到 Done（41）
+        # 3) Jira：加 comment + transition 到 RETURNED（或你定義的狀態）
         # 4) 本地 DB：同步更新 jira_tickets.status = 'Done'
-        jira_ticket = get_jira_ticket_by_workflow_id(db_conn, workflow_id)
+        jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
         if jira_ticket and jira_ticket.get("ticket_id"):
             try:
-                # 轉到 Done，避免排程又把它打回 Pending_Approval
                 jira_return_issue(jira_ticket["ticket_id"], reason, transition_name='RETURNED')
             except Exception as e:
                 current_app.logger.warning(f"[WORKFLOW_RETURN] jira_return_issue failed: {e}")
 
-            # 無論 Jira API 是否成功，嘗試同步更新本地 DB 的狀態為 Done（你希望是 Done）
             try:
-                update_jira_ticket_status(db_conn, jira_ticket["ticket_id"], "Done")
+                update_jira_ticket_status(jira_ticket["ticket_id"], "RETURNED")
             except Exception as e:
                 current_app.logger.warning(f"[WORKFLOW_RETURN] update_jira_ticket_status failed: {e}")
 
         # 5) Audit log
-        current_app.logger.info(f"[WORKFLOW_RETURN] workflow_id={workflow_id}, reason={reason}, returned_by={returned_by}")
+        current_app.logger.info(
+            f"[WORKFLOW_RETURN] workflow_id={workflow_id}, reason={reason}, returned_by={returned_by}"
+        )
 
         flash(f"Workflow {workflow_id} has been returned.", "warning")
+
     except Exception as e:
         current_app.logger.exception(f"[WORKFLOW_RETURN] failed for workflow_id={workflow_id}")
         flash(f"Failed to return workflow: {e}", "danger")
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
     redirect_url = url_for('vm.overview_index')
     if from_modal:
-        # 父頁跳轉：讓 flash 顯示在 overview
         return f'<script>try{{window.top.location="{redirect_url}";}}catch(e){{window.parent.location="{redirect_url}";}}</script>'
     return redirect(redirect_url)
-
 
 # --- vSphere Connection Management Routes ---
 @vm_bp.route("/vsphere/connections", methods=['GET', 'POST'])
 def manage_vsphere_connections():
-    db_conn = None
     try:
-        db_conn = get_db_connection()
         if request.method == 'POST':
             add_or_update_vsphere_connection(
-                db_conn,
                 env=request.form['environment'],
                 host=request.form['host'],
                 user=request.form['user'],
@@ -794,16 +681,12 @@ def manage_vsphere_connections():
             flash(f"Connection for environment '{request.form['environment']}' saved successfully.", "success")
             return redirect(url_for('vm.manage_vsphere_connections'))
 
-        connections = get_all_vsphere_connections(db_conn)
-        # 修正：使用您指定的正確範本檔案名稱
+        connections = get_all_vsphere_connections()
         return render_template("manage_vsphere_connection.html", connections=connections)
+
     except Exception as e:
         flash(f"An error occurred: {e}", "danger")
-        # 還原：在發生錯誤時重新導向，以顯示 flash 錯誤訊息
         return redirect(url_for('vm.manage_vsphere_connections'))
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
 @vm_bp.route("/vsphere/connections/change_password/<int:conn_id>", methods=['POST'])
 def change_vsphere_password(conn_id):
@@ -813,7 +696,6 @@ def change_vsphere_password(conn_id):
     - AJAX (X-Requested-With: XMLHttpRequest) -> JSON {success, message, errors?}
     Expected fields: current_password, new_password, confirm_new_password
     """
-    db_conn = None
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
     try:
@@ -833,18 +715,14 @@ def change_vsphere_password(conn_id):
         if errors:
             if is_ajax:
                 return jsonify({"success": False, "message": "Validation failed.", "errors": errors}), 400
-            # Non-AJAX: flash first error and redirect
             for _, msg in errors.items():
                 flash(msg, "danger")
             return redirect(url_for('vm.manage_vsphere_connections'))
 
-        # Do update via your existing helper
-        db_conn = get_db_connection()
-        success, message = update_connection_password(db_conn, conn_id, current_password, new_password)
+        success, message = update_connection_password(conn_id, current_password, new_password)
 
         if is_ajax:
-            status = 200 if success else 400
-            return jsonify({"success": success, "message": message}), status
+            return jsonify({"success": success, "message": message}), (200 if success else 400)
 
         flash(message, "success" if success else "danger")
         return redirect(url_for('vm.manage_vsphere_connections'))
@@ -855,73 +733,70 @@ def change_vsphere_password(conn_id):
         flash(f"Error updating password: {e}", "danger")
         return redirect(url_for('vm.manage_vsphere_connections'))
 
-    finally:
-        try:
-            if db_conn and db_conn.is_connected():
-                db_conn.close()
-        except Exception:
-            pass
-
 @vm_bp.route("/vsphere/connections/delete/<int:conn_id>", methods=['POST'])
 def delete_vsphere_connection(conn_id):
-    db_conn = None
+    """
+    刪除指定的 vSphere 連線。
+    """
     try:
-        db_conn = get_db_connection()
-        delete_vsphere_connection_by_id(db_conn, conn_id)
-        flash("Connection deleted successfully.", "success")
+        affected = delete_vsphere_connection_by_id(conn_id)
+        if affected == 0:
+            flash(f"Connection {conn_id} not found.", "warning")
+        else:
+            flash("Connection deleted successfully.", "success")
     except Exception as e:
         flash(f"Error deleting connection: {e}", "danger")
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
+
     return redirect(url_for('vm.manage_vsphere_connections'))
 
 @vm_bp.route("/vsphere/connections/toggle/<int:conn_id>", methods=['POST'])
 def toggle_vsphere_connection(conn_id):
-    db_conn = None
+    """
+    切換 vsphere 連線的啟用狀態。
+    """
     try:
-        db_conn = get_db_connection()
-        toggle_connection_status(db_conn, conn_id)
-        flash("Connection status updated.", "info")
+        affected = toggle_connection_status(conn_id)
+        if affected > 0:
+            flash("Connection status updated.", "info")
+        else:
+            flash("No connection updated (maybe not found).", "warning")
     except Exception as e:
+        logging.error(f"[toggle_vsphere_connection] {e}")
         flash(f"Error updating status: {e}", "danger")
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
+
     return redirect(url_for('vm.manage_vsphere_connections'))
 
-
 # --- API Routes ---
-
 # (1) 依 Environment 取得「Active」主機清單（供前端在 Environment 選定後載入 Host 下拉選單）
 @vm_bp.route('/api/vsphere/hosts/<string:environment>')
 def get_hosts_by_environment_api(environment):
-    db_conn = None
+    """
+    API: 依 environment 取得可用的 vSphere hosts
+    """
     try:
-        db_conn = get_db_connection()
-        hosts = get_hosts_by_environment(db_conn, environment, active_only=True) or []
+        hosts = get_hosts_by_environment(environment, active_only=True) or []
         return jsonify({"environment": environment, "hosts": hosts})
     except Exception as e:
-        logging.error(f"Error in get_hosts_by_environment_api for {environment}: {e}")
+        logging.error(f"[get_hosts_by_environment_api] {environment} -> {e}")
         return jsonify({"error": "An internal server error occurred"}), 500
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
-# (2) 依 Host 取得 vSphere 物件（供前端在 Host 選定後載入 Placement/Template/Datastore/Network 等）
+# (2) 依 vSphere Host 取得 vSphere 物件（供前端在 Host 選定後載入 Placement/Template/Datastore/Network 等）
 @vm_bp.route('/api/vsphere_objects/by_host/<path:host>')
 def get_vsphere_objects_by_host_api(host):
-    db_conn = None
+    """
+    取得指定 host 的 vSphere 物件清單。
+    """
     try:
-        db_conn = get_db_connection()
-        conn_info = get_vsphere_connection_by_host(db_conn, host, require_active=True)
+        conn_info = get_vsphere_connection_by_host(host, require_active=True)
         if not conn_info:
             return jsonify({"error": f"Active vSphere connection not found for host: {host}"}), 404
 
+        # 解密失敗時，沿用你原本的回傳內容與狀態碼
         if conn_info.get('password') is None:
             error_msg = conn_info.get('decrypt_error', 'Password decryption failed.')
             return jsonify({"success": False, "message": error_msg}), 400
 
+        # 呼叫 vSphere API 取得物件
         vsphere_data = get_vsphere_objects(
             host=conn_info['host'],
             user=conn_info['user'],
@@ -934,38 +809,34 @@ def get_vsphere_objects_by_host_api(host):
         logging.error(f"Error in get_vsphere_objects_by_host_api for host {host}: {e}")
         traceback.print_exc()
         return jsonify({"error": "An internal server error occurred"}), 500
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
 
 # (3) 保留：VM 連線測試（管理頁使用）
 @vm_bp.route("/api/vsphere/connections/test/<int:conn_id>", methods=['POST'])
 def test_vsphere_connection_api(conn_id):
     """
     連線測試
+    （route 不處理 DB，改由 helper 自行建/關連線）
     """
-    db_conn = None
     try:
-        db_conn = get_db_connection()
-        conn_info = get_vsphere_connection_by_id(db_conn, conn_id) # 假設您有一個用ID查詢的函式
+        # 改：helper 自行處理 DB 連線/關閉
+        conn_info = get_vsphere_connection_by_id(conn_id)
 
         if not conn_info:
             return jsonify({"success": False, "message": "Connection not found or is inactive."}), 404
 
         if conn_info.get('password') is None:
-            return jsonify({"success": False, "message": conn_info.get('decrypt_error', 'Password decrypt failed.')}), 400
+            return jsonify({
+                "success": False,
+                "message": conn_info.get('decrypt_error', 'Password decrypt failed.')
+            }), 400
 
         is_ok, message = test_vsphere_connection(
             host=conn_info['host'],
             user=conn_info['user'],
             password=conn_info['password']
         )
-
         return jsonify({"success": is_ok, "message": message})
 
     except Exception as e:
         logging.error(f"Error in test_vsphere_connection_api for conn_id {conn_id}: {e}")
         return jsonify({"success": False, "message": "An internal server error occurred."}), 500
-    finally:
-        if db_conn and db_conn.is_connected():
-            db_conn.close()
