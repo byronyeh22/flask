@@ -57,6 +57,29 @@
   </div>
 {% endif %}
 
+  <!-- Workflow Info -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Workflow Info</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Created By</div>
+        <div class="v">{{ workflow.created_by or '-' }}</div>
+
+        <div class="k">Created At</div>
+        <div class="v">{{ (workflow.created_at or '-')|replace('T',' ') }}</div>
+
+        <div class="k">Submitted At</div>
+        <div class="v">{{ (workflow.submitted_at or '-')|replace('T',' ') }}</div>
+
+        <div class="k">Approved By</div>
+        <div class="v">{{ workflow.approved_by or '-' }}</div>
+
+        <div class="k">Approved At</div>
+        <div class="v">{{ (workflow.approved_at or '-')|replace('T',' ') }}</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Summary -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-light fw-bold">Summary</div>
@@ -67,19 +90,6 @@
         <div class="k">Environment</div><div class="v">{{ d.get('environment','-') }}</div>
         <div class="k">vSphere Host</div><div class="v">{{ d.get('vsphere_host','-') }}</div>
         <div class="k">VM Name Prefix</div><div class="v">{{ d.get('vm_name_prefix','-') }}</div>
-        {# 新增：建立者 / 建立時間 #}
-        <div class="k">Created By</div>
-        <div class="v">{{ workflow.created_by or '-' }}</div>
-
-        <div class="k">Created At</div>
-        <div class="v">{{ (workflow.created_at or '-')|replace('T',' ') }}</div>
-
-        {# 建議新增 submitted_at 後改用這個；若暫時沒有，就先顯示 updated_at #}
-        <div class="k">Submitted At</div>
-        <div class="v">
-          {# 先嘗試 submitted_at，沒有就用 updated_at，以免空白 #}
-          {{ (workflow.submitted_at or '-')|replace('T',' ') }}
-        </div>
       </div>
     </div>
   </div>

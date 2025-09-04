@@ -148,41 +148,80 @@ def monitor_pipelines(app):
             cursor = db_conn.cursor(dictionary=True)
 
             try:
+                # ----------------------------
+                # A. 進行中（非終態）的 pipelines：打 API 追狀態
+                # ----------------------------
                 cursor.execute(
                     """
-                    SELECT pipeline_id, workflow_id
-                      FROM gitlab_pipelines
-                     WHERE pipeline_id IS NOT NULL
-                       AND status NOT IN ('success', 'failed', 'canceled')
-                       AND started_at >= NOW() - INTERVAL 1 DAY
+                    SELECT pipeline_id, workflow_id, status, started_at
+                    FROM gitlab_pipelines
+                    WHERE workflow_id IS NOT NULL
+                      AND COALESCE(status,'') NOT IN ('success','failed','canceled')
+                      AND (started_at >= NOW() - INTERVAL 7 DAY OR started_at IS NULL)
+                    ORDER BY updated_at DESC
+                    LIMIT 100
                     """
                 )
-                pipelines = cursor.fetchall()
+                pipelines_active = cursor.fetchall()
 
-                for pipeline in pipelines:
+                # ----------------------------
+                # B. 補同步：DB 已終態，但 workflow 還沒終態（不一定打 API）
+                # ----------------------------
+                cursor.execute(
+                    """
+                    SELECT gp.pipeline_id, gp.workflow_id, gp.status, gp.started_at
+                    FROM gitlab_pipelines gp
+                    JOIN workflow_runs wr ON wr.workflow_id = gp.workflow_id
+                    WHERE gp.workflow_id IS NOT NULL
+                      AND gp.status IN ('success','failed','canceled')
+                      AND wr.status NOT IN ('SUCCESS','FAILED')
+                      AND gp.updated_at >= NOW() - INTERVAL 7 DAY
+                    ORDER BY gp.updated_at DESC
+                    LIMIT 100
+                    """
+                )
+                pipelines_finalize = cursor.fetchall()
+
+                # ---------- A. 處理進行中 ----------
+                for pipeline in pipelines_active:
                     pipeline_id = pipeline["pipeline_id"]
                     workflow_id = pipeline.get("workflow_id")
-                    print(f"🔍 Checking pipeline {pipeline_id}")
+                    print(f"🔍 [active] Checking pipeline {pipeline_id} (wf={workflow_id}) DB={pipeline.get('status')}")
 
                     gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
 
                     if gitlab_result["success"]:
-                        # Update gitlab_pipelines with latest detail
+                        # 先更新 gitlab_pipelines 明細
                         update_gitlab_pipeline_details(db_conn, pipeline_id, gitlab_result)
 
-                        # If now failed/canceled, record message
                         status = (gitlab_result.get("status") or "").lower()
-                        if status in ("failed", "canceled"):
-                            set_failed_message(
-                                db_conn, workflow_id, "GITLAB", f"Pipeline {pipeline_id} status is {status}"
-                            )
+                        print(f"⚙️  [active] pipeline {pipeline_id} status from GitLab: {status}")
 
-                        # Try advancing workflow status
                         if workflow_id:
-                            maybe_advance_to_pending_approval(db_conn, workflow_id)
+                            try:
+                                if status == "manual":
+                                    # Jira OK + manual → PENDING_APPROVAL（沿用你既有規則）
+                                    maybe_advance_to_pending_approval(db_conn, workflow_id)
 
+                                elif status == "success":
+                                    update_request_status(workflow_id, "SUCCESS")
+
+                                elif status in ("failed", "canceled"):
+                                    update_request_status(workflow_id, "FAILED")
+                                    set_failed_message(
+                                        db_conn, workflow_id, "GITLAB",
+                                        f"Pipeline {pipeline_id} status is {status}"
+                                    )
+                                # 其它狀態（created/pending/running）不動
+                                # running → DEPLOYING 交給 Approve route
+                            except MySQLError as e:
+                                set_failed_message(db_conn, workflow_id, "WORKFLOW",
+                                                   f"Failed to sync status (mysql): {e}")
+                            except Exception as e:
+                                set_failed_message(db_conn, workflow_id, "WORKFLOW",
+                                                   f"Failed to sync status (other): {e}")
                     else:
-                        # Record API error (avoid "None" wording)
+                        # API 失敗：先記錄錯誤，active 這批下一輪會再查
                         if workflow_id:
                             set_failed_message(
                                 db_conn,
@@ -191,6 +230,32 @@ def monitor_pipelines(app):
                                 f"Pipeline query failed: {gitlab_result.get('error')}",
                             )
 
+                # ---------- B. 補同步（DB終態但 workflow 還沒終態） ----------
+                for pipeline in pipelines_finalize:
+                    pipeline_id = pipeline["pipeline_id"]
+                    workflow_id = pipeline.get("workflow_id")
+                    db_status   = (pipeline.get("status") or "").lower()
+                    print(f"🧹 [finalize] pipeline {pipeline_id} DB={db_status} wf={workflow_id} → finalize workflow")
+
+                    if not workflow_id:
+                        continue
+
+                    try:
+                        if db_status == "success":
+                            update_request_status(workflow_id, "SUCCESS")
+                        else:
+                            update_request_status(workflow_id, "FAILED")
+                            set_failed_message(
+                                db_conn, workflow_id, "GITLAB",
+                                f"Pipeline {pipeline_id} status is {db_status}"
+                            )
+                    except MySQLError as e:
+                        set_failed_message(db_conn, workflow_id, "WORKFLOW",
+                                           f"Failed to finalize from DB state (mysql): {e}")
+                    except Exception as e:
+                        set_failed_message(db_conn, workflow_id, "WORKFLOW",
+                                           f"Failed to finalize from DB state (other): {e}")
+
             except Exception as e:
                 print(f"❌ Pipeline monitoring error: {e}")
 
@@ -198,6 +263,7 @@ def monitor_pipelines(app):
                 cursor.close()
                 db_conn.close()
 
+            # 輪詢間隔（開發可調短；正式可 30~60s）
             time.sleep(60)
 
 

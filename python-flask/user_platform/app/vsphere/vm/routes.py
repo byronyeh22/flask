@@ -416,11 +416,14 @@ def workflow_execute(workflow_id):
             raise Exception("Could not find the associated pipeline to execute.")
 
         # 觸發手動 job（外部服務呼叫，維持原樣）
+        approver = _current_username()
+        update_request_status(workflow_id, "DEPLOYING", approver=approver)
+
         result = run_manual_job(pipeline['pipeline_id'])
         if not result.get("success"):
             raise Exception(f"Failed to trigger manual job: {result.get('error')}")
 
-        flash(f"Request #{workflow_id} has been approved. The pipeline is now running.", "success")
+        flash(f"Request #{workflow_id} has been approved by {approver}. The pipeline is now running.", "success")
 
     except Exception as e:
         logging.error(f"Failed to execute workflow {workflow_id}: {e}")

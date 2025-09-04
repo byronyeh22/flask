@@ -37,7 +37,7 @@ def init_db():
             approved_by VARCHAR(100) NULL,
             approved_at TIMESTAMP NULL,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-            status ENUM('DRAFT','PENDING_APPROVAL','RETURNED','IN_PROGRESS','SUCCESS','FAILED')
+            status ENUM('DRAFT','PENDING_APPROVAL','RETURNED','IN_PROGRESS','DEPLOYING','SUCCESS','FAILED')
                 DEFAULT 'DRAFT',
             returned_by VARCHAR(100) NULL,
             returned_reason TEXT,
@@ -95,6 +95,7 @@ def init_db():
             commit_sha VARCHAR(100),
             status VARCHAR(50),
             started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
             finished_at TIMESTAMP NULL,
             duration INT,
             web_url TEXT,

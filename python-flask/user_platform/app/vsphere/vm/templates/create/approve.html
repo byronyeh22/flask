@@ -66,6 +66,21 @@
     </div>
   </div>
 
+  <!-- Workflow Info -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Workflow Info</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Created By</div>
+        <div class="v">{{ workflow.created_by or '-' }}</div>
+        <div class="k">Created At</div>
+        <div class="v">{{ (workflow.created_at or '-')|replace('T',' ') }}</div>
+        <div class="k">Submitted At</div>
+        <div class="v">{{ (workflow.submitted_at or '-')|replace('T',' ') }}</div>
+      </div>
+    </div>
+  </div>
+
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-light fw-bold">Summary</div>
     <div class="card-body">
