@@ -23,7 +23,7 @@
     .stat-card.failed  { border-left-color: #e74c3c; }
     .stat-card.returned { border-left-color: #9b59b6; }
     .stat-card.draft { border-left-color: #6c757d; }
-    .stat-card.deploying { border-left-color: #1abc9c; }
+    .stat-card.deploying { border-left-color: #3498db; }
 
     /* Table wrapper */
     .table-container { overflow-x: auto; background: white; border-radius: var(--border-radius); box-shadow: var(--card-shadow); overflow: visible; margin-top: 2rem; }
@@ -91,7 +91,7 @@
     .status-returned { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
     .status-approved{ background: rgba(46,204,113,0.2); color: #2ecc71; }
     .status-draft   { background: rgba(108,117,125,0.2); color: #6c757d; }
-    .status-deploying { background: rgba(26,188,156,0.2); color: #1abc9c; }
+    .status-deploying { background: rgba(52,152,219,0.2); color: #3498db; }
 
     .workflow-id { font-family: 'Courier New', monospace; background: rgba(52, 152, 219, 0.1); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; color: var(--accent-color); font-weight: 500; }
     .ticket-link { color: var(--accent-color); text-decoration: none; font-weight: 500; font-size: 0.75rem; transition: color 0.2s ease; }
@@ -353,7 +353,7 @@
                     <td class="date-cell" data-datetime="{{ pipeline.finished_at }}">{{ (pipeline.finished_at or '')|replace('T',' ') or '-' }}</td>
 
                     <td class="duration-cell" data-seconds="{{ pipeline.duration or 0 }}"></td>
-                    <td>
+<!--                     <td>
                         <div class="d-flex gap-1">
                           <a class="btn btn-sm btn-outline-secondary btn-row-review"
                              data-workflow-id="{{ pipeline.workflow_id }}"
@@ -388,6 +388,45 @@
                             <button class="btn btn-sm btn-secondary" disabled>Approve</button>
                           {% endif %}
                         </div>
+                    </td> -->
+                    <td>
+                      <div class="d-flex justify-content-center gap-1">
+                        <!-- Review button (所有狀態都有) -->
+                        <a class="btn btn-sm btn-outline-secondary btn-row-review"
+                           data-workflow-id="{{ pipeline.workflow_id }}"
+                           data-readonly="{{ 1 if normalized_status != 'draft' else 0 }}"
+                           title="Review">
+                          <i class="bi bi-eye"></i>
+                        </a>
+
+                        {% if normalized_status == 'draft' %}
+                            <!-- Draft 可編輯/刪除 -->
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-primary btn-draft-edit"
+                                    data-action="edit"
+                                    data-workflow-id="{{ pipeline.workflow_id }}"
+                                    title="Edit">
+                              <i class="bi bi-pencil-square"></i>
+                            </button>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-danger btn-draft-delete"
+                                    data-action="delete"
+                                    data-workflow-id="{{ pipeline.workflow_id }}"
+                                    title="Delete">
+                              <i class="bi bi-trash"></i>
+                            </button>
+
+                        {% elif normalized_status == 'pending_approval' %}
+                            <!-- 只有 Pending_Approval 顯示 Approve -->
+                            <button type="button"
+                                    class="btn btn-sm btn-primary btn-row-approve"
+                                    data-workflow-id="{{ pipeline.workflow_id }}"
+                                    title="Approve">
+                              Approve
+                            </button>
+
+                        {% endif %}
+                      </div>
                     </td>
                 </tr>
                 {% endfor %}
