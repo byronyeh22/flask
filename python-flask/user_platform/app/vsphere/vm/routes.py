@@ -464,7 +464,7 @@ def workflow_draft_edit(workflow_id: int):
 
         # Normalize status
         status = (row.get("status") or "").strip().upper()
-        if status != "DRAFT":
+        if status not in ("DRAFT", "RETURNED"):
             flash(f"Workflow #{workflow_id} is not editable (status={status}).", "warning")
             return redirect(url_for('vm.overview_index'))
 

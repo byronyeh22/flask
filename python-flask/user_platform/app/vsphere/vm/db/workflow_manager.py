@@ -70,7 +70,7 @@ def save_or_update_draft(processed_form_data, created_by, workflow_id=None):
                 row = cur.fetchone()
                 status = row[0] if row else None
 
-            if status == "DRAFT":
+            if status in ("DRAFT", "RETURNED"):
                 with db_conn.cursor() as cur:
                     cur.execute(
                         "UPDATE workflow_runs SET request_payload=%s, updated_at=NOW() WHERE workflow_id=%s",

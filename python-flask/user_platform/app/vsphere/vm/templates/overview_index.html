@@ -394,7 +394,7 @@
                         <!-- Review button (所有狀態都有) -->
                         <a class="btn btn-sm btn-outline-secondary btn-row-review"
                            data-workflow-id="{{ pipeline.workflow_id }}"
-                           data-readonly="{{ 1 if normalized_status != 'draft' else 0 }}"
+                           data-readonly="{{ 0 if normalized_status in ['draft', 'returned'] else 1 }}"
                            title="Review">
                           <i class="bi bi-eye"></i>
                         </a>
@@ -416,6 +416,16 @@
                               <i class="bi bi-trash"></i>
                             </button>
 
+                        {% elif normalized_status == 'returned' %}
+                            <!-- Returned 只能編輯，不可刪除 -->
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-primary btn-draft-edit"
+                                    data-action="edit"
+                                    data-workflow-id="{{ pipeline.workflow_id }}"
+                                    title="Edit">
+                              <i class="bi bi-pencil-square"></i>
+                            </button>
+
                         {% elif normalized_status == 'pending_approval' %}
                             <!-- 只有 Pending_Approval 顯示 Approve -->
                             <button type="button"
@@ -424,7 +434,6 @@
                                     title="Approve">
                               Approve
                             </button>
-
                         {% endif %}
                       </div>
                     </td>
