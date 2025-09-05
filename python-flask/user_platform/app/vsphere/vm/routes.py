@@ -325,35 +325,30 @@ def vsphere_submit_request():
             return f'<script>window.top.location="{redirect_url}"</script>'
 
         # === 2. Jira ===
-        jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
-        if not jira_ticket:
-            logging.info(f"No Jira ticket for workflow #{workflow_id}, creating new one...")
-            jira_key = create_jira_ticket(form_data)
-            ticket_data = get_jira_issue_detail(jira_key)
-            insert_jira_info_to_db(workflow_id, ticket_data)
-            flash(f"Jira ticket {jira_key} created successfully.", "success")
-            jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
+        # jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
+        # if not jira_ticket:
+        #     logging.info(f"No Jira ticket for workflow #{workflow_id}, creating new one...")
+        #     jira_key = create_jira_ticket(form_data)
+        #     ticket_data = get_jira_issue_detail(jira_key)
+        #     insert_jira_info_to_db(workflow_id, ticket_data)
+        #     flash(f"Jira ticket {jira_key} created successfully.", "success")
+        #     jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
+        # else:
+        #     logging.info(f"Using existing Jira ticket {jira_ticket['ticket_id']} for workflow #{workflow_id}.")
+        #     flash(f"Using existing Jira ticket {jira_ticket['ticket_id']}.", "info")
+
+        # jira_key = jira_ticket["ticket_id"]
+
+        # 3) GitLab Pipeline：每次 submit 一律觸發新的
+        logging.info(f"Triggering new pipeline for workflow #{workflow_id}...")
+        pipeline_data = trigger_gitlab_pipeline(form_data)
+        if pipeline_data.get("success"):
+            insert_gitlab_pipeline_info_to_db(workflow_id, pipeline_data)
+            flash(f"Pipeline {pipeline_data['pipeline_id']} has been triggered.", "info")
         else:
-            logging.info(f"Using existing Jira ticket {jira_ticket['ticket_id']} for workflow #{workflow_id}.")
-            flash(f"Using existing Jira ticket {jira_ticket['ticket_id']}.", "info")
+            raise Exception(f"Pipeline trigger failed: {pipeline_data.get('error', 'Unknown error')}")
 
-        jira_key = jira_ticket["ticket_id"]
-
-        # === 3. GitLab Pipeline ===
-        pipeline = get_pipeline_details_by_workflow_id(workflow_id)
-        if not pipeline:
-            logging.info(f"No pipeline for workflow #{workflow_id}, triggering new one...")
-            pipeline_data = trigger_gitlab_pipeline(jira_key, form_data)
-            if pipeline_data.get("success"):
-                insert_gitlab_pipeline_info_to_db(workflow_id, pipeline_data)
-                flash(f"Pipeline {pipeline_data['pipeline_id']} has been triggered.", "info")
-            else:
-                raise Exception(f"Pipeline trigger failed: {pipeline_data.get('error', 'Unknown error')}")
-        else:
-            logging.info(f"Using existing pipeline {pipeline['pipeline_id']} for workflow #{workflow_id}.")
-            flash(f"Using existing pipeline {pipeline['pipeline_id']}.", "info")
-
-        # === 4. 更新 workflow 狀態 ===
+        # 4) 更新 workflow 狀態 → IN_PROGRESS
         update_request_status(workflow_id, "IN_PROGRESS")
 
     except Exception as e:
@@ -605,18 +600,12 @@ def workflow_review_page(workflow_id):
 def workflow_return(workflow_id):
     """
     Return (退件) 流程：
-    1) workflow_runs → status='RETURNED', returned_reason=reason（抽到 workflow_manager）
-    2) GitLab → cancel manual jobs（僅在有 manual 工作的 pipeline）
-    3) Jira → 通用函式：加 comment + 轉為 Done（避免被排程打回 Pending_Approval）
-    4) 更新本地 DB：jira_tickets.status = 'Done'
-    5) Audit log
-    + from_modal 支援父頁跳轉：與 vsphere_submit_request() 一致
+    1. 取消關聯的 GitLab Pipeline
+    2. 更新 workflow_runs 狀態為 'RETURNED'
     """
-
-    # 讓 modal 關閉後回父頁顯示 flash
+    # [修正] 確保 from_modal 變數被定義
     from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
 
-    # 同時支援 JSON 與 form 的欄位名稱：returned_reason / reason
     reason = ""
     try:
         if request.is_json:
@@ -632,45 +621,33 @@ def workflow_return(workflow_id):
     try:
         returned_by = _current_username()
 
-        # 1) DB：更新 workflow_runs（由 helper 內部處理連線）
-        try:
-            return_request(workflow_id, reason, returned_by=returned_by)
-        except TypeError:
-            # 相容舊版 helper（沒有 returned_by 參數）
-            return_request(workflow_id, reason)
-
-        # 2) GitLab：取消 manual job（若有 pipeline）
+        # 步驟 1: 取消 GitLab Pipeline
         pipeline = get_pipeline_details_by_workflow_id(workflow_id)
         if pipeline and pipeline.get("pipeline_id"):
-            try:
-                from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
-                cancel_manual_jobs(pipeline["pipeline_id"])
-            except Exception as e:
-                current_app.logger.warning(f"[WORKFLOW_RETURN] cancel_manual_jobs failed: {e}")
-
-        # 3) Jira：加 comment + transition 到 RETURNED（或你定義的狀態）
-        # 4) 本地 DB：同步更新 jira_tickets.status = 'Done'
-        jira_ticket = get_jira_ticket_by_workflow_id(workflow_id)
-        if jira_ticket and jira_ticket.get("ticket_id"):
-            try:
-                jira_return_issue(jira_ticket["ticket_id"], reason, transition_name='RETURNED')
-            except Exception as e:
-                current_app.logger.warning(f"[WORKFLOW_RETURN] jira_return_issue failed: {e}")
+            pipeline_id_to_cancel = pipeline["pipeline_id"]
+            logging.info(f"Attempting to cancel pipeline #{pipeline_id_to_cancel} for returned workflow #{workflow_id}.")
 
             try:
-                update_jira_ticket_status(jira_ticket["ticket_id"], "RETURNED")
+                cancel_result = cancel_manual_jobs(pipeline_id_to_cancel)
+                if cancel_result.get("success"):
+                    flash(f"Successfully sent cancellation request for pipeline #{pipeline_id_to_cancel}.", "success")
+                else:
+                    flash(f"API failed to cancel pipeline #{pipeline_id_to_cancel}: {cancel_result.get('error')}", "danger")
             except Exception as e:
-                current_app.logger.warning(f"[WORKFLOW_RETURN] update_jira_ticket_status failed: {e}")
+                logging.error(f"[WORKFLOW_RETURN] Exception during cancel_manual_jobs call for pipeline #{pipeline_id_to_cancel}: {e}", exc_info=True)
+                flash(f"An unexpected error occurred while canceling pipeline #{pipeline_id_to_cancel}: {str(e)}", "danger")
 
-        # 5) Audit log
-        current_app.logger.info(
+        # 步驟 2: 更新 workflow 狀態為 RETURNED
+        return_request(workflow_id, reason, returned_by=returned_by)
+
+        # 步驟 3: 記錄日誌並給予最終反饋
+        logging.info(
             f"[WORKFLOW_RETURN] workflow_id={workflow_id}, reason={reason}, returned_by={returned_by}"
         )
-
         flash(f"Workflow {workflow_id} has been returned.", "warning")
 
     except Exception as e:
-        current_app.logger.exception(f"[WORKFLOW_RETURN] failed for workflow_id={workflow_id}")
+        logging.exception(f"[WORKFLOW_RETURN] failed for workflow_id={workflow_id}")
         flash(f"Failed to return workflow: {e}", "danger")
 
     redirect_url = url_for('vm.overview_index')

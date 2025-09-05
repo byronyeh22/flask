@@ -106,6 +106,21 @@ def get_pipeline_status(project_id, pipeline_id):
             "force_fail": False,
         }
 
+    # 如果狀態已經是 'canceled'，就直接回傳，不再重新計算
+    if p.get("status") == 'canceled':
+        return jsonify({
+            "id": p["id"],
+            "status": "canceled",
+            "web_url": p["web_url"],
+            "ref": p["ref"],
+            "sha": p["sha"],
+            "created_at": p["created_at"],
+            "updated_at": iso_z(now),
+            "started_at": p["started_at"],
+            "finished_at": p.get("finished_at") or iso_z(now), # 如果 finished_at 不存在，就用現在的時間
+            "duration": p.get("duration")
+        }), 200
+
     # 尚未按 Play：一直 manual（但 started_at 已存在）
     if p["played_at_dt"] is None:
         status      = "manual"
@@ -185,6 +200,29 @@ def get_gitlab_jobs(project_id, pipeline_id):
             "finished_at": apply_finished
         }
     ]), 200
+
+@mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/pipelines/<int:pipeline_id>/cancel', methods=['POST'])
+def cancel_gitlab_pipeline(project_id, pipeline_id):
+    """
+    模擬 cancel_manual_jobs.py 中取消整條 pipeline 的行為。
+    """
+    # 從記憶體中尋找對應的 pipeline
+    pipeline = PIPELINES.get(pipeline_id)
+    if not pipeline:
+        # 如果找不到，回傳 404 Not Found
+        return jsonify({"message": "404 Pipeline Not Found"}), 404
+
+    # 更新記憶體中 pipeline 的狀態為 'canceled'
+    pipeline['status'] = 'canceled'
+    pipeline['finished_at'] = utc_now_iso() # 標記一個完成時間
+
+    # 回傳一個類似真實 GitLab API 的成功回應
+    return jsonify({
+        "id": pipeline_id,
+        "project_id": project_id,
+        "status": "canceled",
+        "web_url": f"http://mock-gitlab.com/pipelines/{pipeline_id}",
+    }), 200
 
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/jobs/<int:job_id>/play', methods=['POST'])
 def run_manual_job(project_id, job_id):

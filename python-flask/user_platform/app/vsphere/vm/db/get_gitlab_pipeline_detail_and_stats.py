@@ -34,7 +34,7 @@ def get_gitlab_pipeline_detail_and_stats():
 
 def get_pipeline_details_by_workflow_id(workflow_id):
     """
-    根據 workflow_id 獲取單一的 GitLab pipeline 紀錄。找不到回傳 None
+    根據 workflow_id 獲取最新一筆 GitLab pipeline 紀錄。找不到回傳 None
     """
     try:
         db_conn = get_db_connection()
@@ -54,6 +54,7 @@ def get_pipeline_details_by_workflow_id(workflow_id):
                     web_url
                 FROM gitlab_pipelines
                 WHERE workflow_id = %s
+                ORDER BY started_at DESC, pipeline_id DESC
                 LIMIT 1
             """, (workflow_id,))
             pipeline_data = cursor.fetchone()

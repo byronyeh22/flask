@@ -111,7 +111,7 @@ def _sanitize_disks_for_tf(disks):
 
     return out
 
-def trigger_gitlab_pipeline(jira_key, form_data):
+def trigger_gitlab_pipeline(form_data):
     """
     觸發 GitLab CI pipeline (正規化版本)。
     - VM_SCSI_CONTROLLER_COUNT：新增傳給 Terraform 的控制器數量變數
@@ -138,7 +138,7 @@ def trigger_gitlab_pipeline(jira_key, form_data):
     vm_additional_disks_json = json.dumps(disks_for_tf, ensure_ascii=False)
 
     variables = {
-        "JIRA_TICKET_NUM": jira_key,
+        # "JIRA_TICKET_NUM": jira_key,
         "ACTION_TYPE": form_data.get('action_type', ''),
         "ENVIRONMENT": form_data.get('environment', ''),
         "RESOURCE": form_data.get('resource', ''),

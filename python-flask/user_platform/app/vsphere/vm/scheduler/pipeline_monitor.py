@@ -51,32 +51,32 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
 
 
 # ---------- Check Jira ticket existence ----------
-def jira_exists_for_workflow(db_conn, workflow_id: int) -> bool:
-    """
-    Return True if jira_tickets has this workflow_id 且有 ticket_id。
-    否則 return False 並記錄 failed_message。
-    """
-    cur = db_conn.cursor(dictionary=True)
-    try:
-        cur.execute(
-            """
-            SELECT ticket_id
-              FROM jira_tickets
-             WHERE workflow_id = %s
-             ORDER BY id DESC
-             LIMIT 1
-            """,
-            (workflow_id,),
-        )
-        row = cur.fetchone()
+# def jira_exists_for_workflow(db_conn, workflow_id: int) -> bool:
+#     """
+#     Return True if jira_tickets has this workflow_id 且有 ticket_id。
+#     否則 return False 並記錄 failed_message。
+#     """
+#     cur = db_conn.cursor(dictionary=True)
+#     try:
+#         cur.execute(
+#             """
+#             SELECT ticket_id
+#               FROM jira_tickets
+#              WHERE workflow_id = %s
+#              ORDER BY id DESC
+#              LIMIT 1
+#             """,
+#             (workflow_id,),
+#         )
+#         row = cur.fetchone()
 
-        if not row or not row.get("ticket_id"):
-            set_failed_message(db_conn, workflow_id, "JIRA", "Jira ticket not created or not found")
-            return False
+#         if not row or not row.get("ticket_id"):
+#             set_failed_message(db_conn, workflow_id, "JIRA", "Jira ticket not created or not found")
+#             return False
 
-        return True
-    finally:
-        cur.close()
+#         return True
+#     finally:
+#         cur.close()
 
 
 # ---------- Check if GitLab pipeline is manual ----------
@@ -104,32 +104,30 @@ def is_pipeline_manual_for_workflow(db_conn, workflow_id: int) -> bool:
     finally:
         cur.close()
 
-
-# ---------- Advance to PENDING_APPROVAL if Jira exists and GitLab is manual ----------
+# ---------- Advance to PENDING_APPROVAL when GitLab is manual ----------
 def maybe_advance_to_pending_approval(db_conn, workflow_id: int) -> bool:
     """
-    Conditions:
-      1) Jira ticket exists
-      2) Latest pipeline status == 'manual'
-      3) workflow_runs.status != 'RETURNED' (避免被退回後又誤判回 pending_approval)
+    New rule:
+      - If the latest GitLab pipeline status == 'manual' -> set workflow_runs.status = 'PENDING_APPROVAL'
+      - Skip if current workflow status is 'RETURNED' (user is re-editing)
+      - No longer requires a Jira ticket to exist up front
     """
     try:
-        # 防呆：如果已經是 RETURNED，就不要再推進
+        # 1) 保護 RETURNED：避免被誤推進
         cur = db_conn.cursor(dictionary=True)
         cur.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
         wf_row = cur.fetchone()
         cur.close()
+
         if wf_row and (wf_row.get("status") or "").upper() == "RETURNED":
             return False
 
-        jira_ok = jira_exists_for_workflow(db_conn, workflow_id)
-        if not jira_ok:
-            return False
-
+        # 2) 只看 GitLab pipeline 是否為 manual
         manual_ok = is_pipeline_manual_for_workflow(db_conn, workflow_id)
         if not manual_ok:
             return False
 
+        # 3) 推進到 PENDING_APPROVAL
         update_request_status(workflow_id, "PENDING_APPROVAL")
         return True
 
@@ -154,12 +152,17 @@ def monitor_pipelines(app):
                 cursor.execute(
                     """
                     SELECT pipeline_id, workflow_id, status, started_at
-                    FROM gitlab_pipelines
-                    WHERE workflow_id IS NOT NULL
-                      AND COALESCE(status,'') NOT IN ('success','failed','canceled')
-                      AND (started_at >= NOW() - INTERVAL 7 DAY OR started_at IS NULL)
-                    ORDER BY updated_at DESC
-                    LIMIT 100
+                      FROM gitlab_pipelines
+                     WHERE workflow_id IS NOT NULL
+                       AND status NOT IN ('success','failed','canceled')
+                       AND started_at >= NOW() - INTERVAL 7 DAY
+                       AND started_at = (
+                             SELECT MAX(started_at)
+                               FROM gitlab_pipelines
+                              WHERE workflow_id = gitlab_pipelines.workflow_id
+                       )
+                     ORDER BY started_at DESC
+                     LIMIT 100;
                     """
                 )
                 pipelines_active = cursor.fetchall()
@@ -169,15 +172,24 @@ def monitor_pipelines(app):
                 # ----------------------------
                 cursor.execute(
                     """
-                    SELECT gp.pipeline_id, gp.workflow_id, gp.status, gp.started_at
-                    FROM gitlab_pipelines gp
-                    JOIN workflow_runs wr ON wr.workflow_id = gp.workflow_id
-                    WHERE gp.workflow_id IS NOT NULL
-                      AND gp.status IN ('success','failed','canceled')
-                      AND wr.status NOT IN ('SUCCESS','FAILED')
-                      AND gp.updated_at >= NOW() - INTERVAL 7 DAY
-                    ORDER BY gp.updated_at DESC
-                    LIMIT 100
+                    SELECT gitlab_pipelines.pipeline_id,
+                           gitlab_pipelines.workflow_id,
+                           gitlab_pipelines.status,
+                           gitlab_pipelines.started_at
+                      FROM gitlab_pipelines
+                      JOIN workflow_runs
+                        ON workflow_runs.workflow_id = gitlab_pipelines.workflow_id
+                     WHERE gitlab_pipelines.workflow_id IS NOT NULL
+                       AND gitlab_pipelines.status IN ('success','failed','canceled')
+                       AND workflow_runs.status NOT IN ('SUCCESS','FAILED')
+                       AND gitlab_pipelines.started_at >= NOW() - INTERVAL 7 DAY
+                       AND gitlab_pipelines.started_at = (
+                             SELECT MAX(started_at)
+                               FROM gitlab_pipelines
+                              WHERE workflow_id = gitlab_pipelines.workflow_id
+                       )
+                     ORDER BY gitlab_pipelines.started_at DESC
+                     LIMIT 100;
                     """
                 )
                 pipelines_finalize = cursor.fetchall()
@@ -191,7 +203,6 @@ def monitor_pipelines(app):
                     gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
 
                     if gitlab_result["success"]:
-                        # 先更新 gitlab_pipelines 明細
                         update_gitlab_pipeline_details(db_conn, pipeline_id, gitlab_result)
 
                         status = (gitlab_result.get("status") or "").lower()
@@ -199,21 +210,29 @@ def monitor_pipelines(app):
 
                         if workflow_id:
                             try:
+                                # ★★★ 新增：先讀目前 workflow 狀態，RETURNED 則跳過所有改動
+                                cur_now = db_conn.cursor(dictionary=True)
+                                cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+                                _wr = cur_now.fetchone()
+                                cur_now.close()
+                                current = (_wr.get("status") or "").upper() if _wr else ""
+                                if current == "RETURNED":
+                                    # 不要覆蓋 RETURNED，直接下一筆
+                                    continue
+
                                 if status == "manual":
-                                    # Jira OK + manual → PENDING_APPROVAL（沿用你既有規則）
                                     maybe_advance_to_pending_approval(db_conn, workflow_id)
 
                                 elif status == "success":
                                     update_request_status(workflow_id, "SUCCESS")
 
-                                elif status in ("failed", "canceled"):
+                                elif status == "failed":
                                     update_request_status(workflow_id, "FAILED")
                                     set_failed_message(
                                         db_conn, workflow_id, "GITLAB",
                                         f"Pipeline {pipeline_id} status is {status}"
                                     )
-                                # 其它狀態（created/pending/running）不動
-                                # running → DEPLOYING 交給 Approve route
+                                # 其它狀態不動（created/pending/running）
                             except MySQLError as e:
                                 set_failed_message(db_conn, workflow_id, "WORKFLOW",
                                                    f"Failed to sync status (mysql): {e}")
@@ -221,12 +240,9 @@ def monitor_pipelines(app):
                                 set_failed_message(db_conn, workflow_id, "WORKFLOW",
                                                    f"Failed to sync status (other): {e}")
                     else:
-                        # API 失敗：先記錄錯誤，active 這批下一輪會再查
                         if workflow_id:
                             set_failed_message(
-                                db_conn,
-                                workflow_id,
-                                "GITLAB_API",
+                                db_conn, workflow_id, "GITLAB_API",
                                 f"Pipeline query failed: {gitlab_result.get('error')}",
                             )
 
@@ -240,15 +256,30 @@ def monitor_pipelines(app):
                     if not workflow_id:
                         continue
 
+                    # ★★★ 新增：先讀目前 workflow 狀態，RETURNED 直接跳過，避免被覆蓋
+                    cur_now = db_conn.cursor(dictionary=True)
+                    cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+                    _wr = cur_now.fetchone()
+                    cur_now.close()
+                    current = (_wr.get("status") or "").upper() if _wr else ""
+                    if current == "RETURNED":
+                        # 不覆蓋 RETURNED
+                        continue
+
                     try:
                         if db_status == "success":
                             update_request_status(workflow_id, "SUCCESS")
-                        else:
+
+                        elif db_status == "failed":
                             update_request_status(workflow_id, "FAILED")
-                            set_failed_message(
-                                db_conn, workflow_id, "GITLAB",
-                                f"Pipeline {pipeline_id} status is {db_status}"
-                            )
+                            set_failed_message(db_conn, workflow_id, "GITLAB",
+                                               f"Pipeline {pipeline_id} status is {db_status}")
+
+                        elif db_status == "canceled":
+                            # 取消就只記錄，不改 workflow 狀態（以保留目前的狀態）
+                            set_failed_message(db_conn, workflow_id, "GITLAB",
+                                               f"Pipeline {pipeline_id} status is canceled")
+                        # 其它狀態不動
                     except MySQLError as e:
                         set_failed_message(db_conn, workflow_id, "WORKFLOW",
                                            f"Failed to finalize from DB state (mysql): {e}")
