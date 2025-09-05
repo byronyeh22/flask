@@ -46,7 +46,7 @@ def _generate_update_description(data):
     except (json.JSONDecodeError, TypeError):
         original_disks = original.get('vm_disk_size', [])
     new_disks = new.get('vm_disk_size', [])
-    
+
     if original_disks != new_disks:
          desc_parts.append(f"• *Disks (GB):* {original_disks} -> *{new_disks}*")
 

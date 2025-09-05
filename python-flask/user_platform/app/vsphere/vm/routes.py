@@ -102,80 +102,99 @@ def vm_index():
 
 @vm_bp.route("/vsphere/overview")
 def overview_index():
-    def _to_iso(v):
+    def to_iso8601(value):
         try:
-            return v.isoformat()
+            return value.isoformat()
         except Exception:
-            return str(v) if v else "1970-01-01T00:00:00Z"
+            return str(value) if value else "1970-01-01T00:00:00Z"
 
     try:
-        # 1) 原資料
-        jira_tickets = get_jira_tickets_and_stats() or []
-        pipeline_data = get_gitlab_pipeline_detail_and_stats() or []
-        pipeline_data = [
-            {**dict(p), "created_at": _to_iso(p.get("created_at") or p.get("started_at"))}
-            for p in pipeline_data
+        # 1) 取回原始資料
+        jira_ticket_rows = get_jira_tickets_and_stats() or []
+        pipeline_rows = get_gitlab_pipeline_detail_and_stats() or []
+        pipeline_rows = [
+            {
+                **dict(row),
+                "created_at": to_iso8601(row.get("created_at") or row.get("started_at")),
+            }
+            for row in pipeline_rows
         ]
 
         # 2) 全部 workflow（包含 DRAFT）
-        workflows = get_all_workflow_runs()
-        wf_status_map = {w["workflow_id"]: w["status"] for w in workflows}
-        wf_created_by_map = {w["workflow_id"]: w.get("created_by") for w in workflows}
+        all_workflows = get_all_workflow_runs()
+        workflow_status_map = {row["workflow_id"]: row["status"] for row in all_workflows}
+        workflow_created_by_map = {row["workflow_id"]: row.get("created_by") for row in all_workflows}
 
-        # A) 先把 JIRA tickets 收成 map
-        jira_map = {t["workflow_id"]: dict(t) for t in jira_tickets if t.get("workflow_id")}
+        # A) 先把已有的 JIRA tickets 收成 map（key=workflow_id）
+        jira_by_workflow_id = {
+            row["workflow_id"]: dict(row) for row in jira_ticket_rows if row.get("workflow_id")
+        }
 
-        # B) 已存在的 pipeline workflow_ids
-        existing_wids = {row.get("workflow_id") for row in pipeline_data if row.get("workflow_id")}
+        # B) 目前 pipeline_rows 中已經出現過的 workflow_id
+        pipeline_existing_workflow_ids = {
+            row.get("workflow_id") for row in pipeline_rows if row.get("workflow_id")
+        }
 
-        # C) 處理 DRAFT workflow
-        for w in workflows:
-            if (w.get("status") or "").upper() != "DRAFT":
+        # C) 用 payload 補齊「尚未建立 Jira」的 workflow（不分狀態）
+        for workflow in all_workflows:
+            workflow_id = workflow["workflow_id"]
+
+            # 已有 Jira 的 workflow 不需要 fallback
+            if workflow_id in jira_by_workflow_id:
                 continue
-            wid = w["workflow_id"]
-            try:
-                payload = json.loads(w.get("request_payload") or "{}")
-                summary = _generate_create_summary(payload) if payload else "-"
-            except Exception:
-                summary = "-"
 
-            jira_map[wid] = {
-                "workflow_id": wid,
-                "ticket_id": None,
+            # 產生 fallback 的 summary（沿用 Draft 的做法）
+            try:
+                request_payload = json.loads(workflow.get("request_payload") or "{}")
+                summary_text = _generate_create_summary(request_payload) if request_payload else "-"
+            except Exception:
+                summary_text = "-"
+
+            jira_by_workflow_id[workflow_id] = {
+                "workflow_id": workflow_id,
+                "ticket_id": None,                # 尚未建立 Jira → Ticket ID 留空
                 "project_key": None,
-                "summary": summary,
+                "summary": summary_text,          # 讓 Environment / Summary 能顯示
                 "description": None,
                 "status": None,
                 "url": None,
-                "created_at": _to_iso(w.get("created_at")),
+                "created_at": to_iso8601(workflow.get("created_at")),
             }
 
-            if wid not in existing_wids:
-                pipeline_data.insert(0, {
-                    "workflow_id": wid,
+        # D) 確保每個 workflow 都會出現在 pipeline_rows（不再只限 DRAFT）
+        for workflow in all_workflows:
+            workflow_id = workflow["workflow_id"]
+            if workflow_id not in pipeline_existing_workflow_ids:
+                pipeline_rows.insert(0, {
+                    "workflow_id": workflow_id,
                     "pipeline_id": None,
-                    "status": "DRAFT",
-                    "created_at": _to_iso(w.get("created_at")),
+                    "status": workflow.get("status"),             # 使用實際 workflow 狀態
+                    "created_at": to_iso8601(workflow.get("created_at")),
                     "finished_at": None,
                     "duration": None,
-                    "created_by": w.get("created_by"),
+                    "created_by": workflow.get("created_by"),
                 })
-                existing_wids.add(wid)
+                pipeline_existing_workflow_ids.add(workflow_id)
 
-        # D) 用 workflow 覆蓋 pipeline_data 的顯示欄位
-        for row in pipeline_data:
-            wid = row.get("workflow_id")
-            if wid in wf_status_map:
-                row["status"] = wf_status_map[wid]
-            row["created_by"] = wf_created_by_map.get(wid, row.get("created_by"))
+        # E) 用 workflow 的狀態/建立者覆蓋 pipeline_rows 的顯示欄位（保持欄位一致）
+        for row in pipeline_rows:
+            workflow_id = row.get("workflow_id")
+            if workflow_id in workflow_status_map:
+                row["status"] = workflow_status_map[workflow_id]
+            row["created_by"] = workflow_created_by_map.get(workflow_id, row.get("created_by"))
 
-        jira_tickets = list(jira_map.values())
+        # 最後把 Jira map 轉回 list 給模板
+        jira_ticket_rows = list(jira_by_workflow_id.values())
 
     except Exception as e:
         logging.error(f"overview_index error: {e}")
-        jira_tickets, pipeline_data = [], []
+        jira_ticket_rows, pipeline_rows = [], []
 
-    return render_template("overview_index.html", jira_tickets=jira_tickets, pipeline_data=pipeline_data)
+    return render_template(
+        "overview_index.html",
+        jira_tickets=jira_ticket_rows,
+        pipeline_data=pipeline_rows,
+    )
 
 @vm_bp.route('/api/get_vms_by_environment/<string:environment>')
 def get_vms_by_environment_api(environment):

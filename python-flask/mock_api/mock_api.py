@@ -4,9 +4,19 @@ import random
 
 mock_app = Flask(__name__)
 
+
+# --- Helper ---
 def utc_now_iso():
     # ISO8601 with timezone (Z)；你的 insert 會做正規化
     return datetime.now(timezone.utc).isoformat()
+
+PIPELINE_SEQ = 0  # 控制 pipeline id 起始值你可自行選，確保大於現有資料
+
+def next_pipeline_id() -> int:
+    """Return a process-wide monotonically increasing pipeline id."""
+    global PIPELINE_SEQ
+    PIPELINE_SEQ += 1
+    return PIPELINE_SEQ
 
 # --- 模擬 vSphere API ---
 @mock_app.route('/mock/vsphere/objects', methods=['GET'])
@@ -35,29 +45,55 @@ def trigger_gitlab_pipeline(project_id):
       - ref / sha / status / web_url（str）
       - created_at / started_at / finished_at / duration
     """
-    pipeline_id = random.randint(1000, 9999)
+    # ✅ 改為單調遞增
+    pipeline_id = next_pipeline_id()
 
-    payload = {
-        # 你 insert 會先找 pipeline_id，再退回 id
-        "pipeline_id": pipeline_id,
+    # 產生時間
+    created_dt = _utc_now()
+    created_iso = iso_z(created_dt)
+
+    # 直接把 pipeline 狀態註冊到 in-memory（這樣 GET 立刻能看到，不用等第一次查詢才建立）
+    PIPELINES[pipeline_id] = {
         "id": pipeline_id,
-
-        "project_id": project_id,                 # 用來組 project_name 或其他欄位
+        "pipeline_id": pipeline_id,
+        "project_id": project_id,
         "ref": "main",
         "sha": "mock-sha-12345",
-        "status": "created",                      # 觸發當下先 created
         "web_url": f"http://mock-gitlab.com/pipelines/{pipeline_id}",
 
-        # 你 insert 會優先取 started_at，其次 created_at
-        "created_at": utc_now_iso(),
-        "started_at": utc_now_iso(),              # 直接給，避免 None
-        "finished_at": None,                      # 尚未完成
-        "duration": None,                         # 尚未有 duration
+        # 狀態時間線
+        "created_at_dt": created_dt,
+        "started_at_dt": created_dt,       # 觸發就開始
+        "played_at_dt":  None,
+        "finish_at_dt":  None,
 
-        # 透傳你觸發時塞進來的 form 變數（可選）
-        "variables": dict(request.form)
+        "pre_run_seconds": 0,
+        "post_run_seconds": DEFAULT_RUN_SECONDS,
+
+        "status": "created",               # 觸發當下給 created（你也可直接給 manual）
+        "created_at": created_iso,
+        "started_at": created_iso,
+        "finished_at": None,
+        "duration": None,
+
+        "force_fail": False,
     }
-    return jsonify(payload)
+
+    # 回傳 payload（維持你原本 insert 期望欄位）
+    return jsonify({
+        "pipeline_id": pipeline_id,
+        "id": pipeline_id,
+        "project_id": project_id,
+        "ref": "main",
+        "sha": "mock-sha-12345",
+        "status": "created",
+        "web_url": f"http://mock-gitlab.com/pipelines/{pipeline_id}",
+        "created_at": created_iso,
+        "started_at": created_iso,
+        "finished_at": None,
+        "duration": None,
+        "variables": dict(request.form)
+    })
 
 
 # ===== in-memory state & helpers (add these) =====
@@ -226,12 +262,11 @@ def cancel_gitlab_pipeline(project_id, pipeline_id):
 
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/jobs/<int:job_id>/play', methods=['POST'])
 def run_manual_job(project_id, job_id):
-    # 找這個 project_id 最新的一條 pipeline（未完成者優先）
-    candidates = [x for x in PIPELINES.values() if x["project_id"] == project_id]
-    if not candidates:
-        return jsonify({"error": "pipeline not found"}), 404
-    unfinished = [x for x in candidates if not x["finished_at"]]
-    p = max(unfinished or candidates, key=lambda x: x["created_at_dt"])
+    # 由 job_id 推回對應的 pipeline_id（因為 job_id = pipeline_id*100 + 序號）
+    pipeline_id = job_id // 100
+    p = PIPELINES.get(pipeline_id)
+    if not p or p.get("project_id") != project_id:
+        return jsonify({"error": "pipeline not found for this job"}), 404
 
     # 允許用表單參數覆蓋跑多久（秒）
     try:
@@ -240,11 +275,10 @@ def run_manual_job(project_id, job_id):
         run_secs = 0
     if run_secs <= 0:
         run_secs = p.get("post_run_seconds", DEFAULT_RUN_SECONDS)
-    # 同步回到 state（以便 GET 時也用同樣值）
     p["post_run_seconds"] = run_secs
 
     # 第一次按 Play：開始跑，設定 finish_at_dt
-    if p["played_at_dt"] is None:
+    if p.get("played_at_dt") is None:
         now = _utc_now()
         p["played_at_dt"] = now
         p["finish_at_dt"] = now + timedelta(seconds=run_secs)

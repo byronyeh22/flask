@@ -4,8 +4,16 @@ import json
 from datetime import datetime
 
 from app.mysql.db import get_db_connection
+
+# ---------- GitLab ----------
 from app.vsphere.vm.db.update_gitlab_pipeline_details import update_gitlab_pipeline_details
 from app.vsphere.vm.gitlab_api.get_pipeline_status_from_gitlab import get_pipeline_status_from_gitlab
+
+# ---------- Jira ----------
+from app.vsphere.vm.db.get_jira_tickets_and_stats import get_jira_ticket_by_workflow_id
+from app.vsphere.vm.db.insert_jira_info_to_db import insert_jira_info_to_db
+from app.vsphere.vm.jira_api.create_jira_ticket import create_jira_ticket
+from app.vsphere.vm.jira_api.get_jira_issue_detail import get_jira_issue_detail
 
 # Update workflow status
 from app.vsphere.vm.db.workflow_manager import update_request_status
@@ -48,6 +56,51 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
         cur2.close()
     finally:
         cur.close()
+
+
+def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
+    try:
+        print(f"[JIRA] ensure_jira_after_success() enter wf={workflow_id}")
+
+        # 1) 已有就跳過（idempotent）
+        existing = get_jira_ticket_by_workflow_id(workflow_id)
+        print(f"[JIRA] existing ticket for wf={workflow_id}: {existing}")
+        if existing and existing.get("ticket_id"):
+            print(f"[JIRA] skip create, already has ticket_id={existing.get('ticket_id')}")
+            return
+
+        # 2) 取原始草稿 payload
+        cur = db_conn.cursor(dictionary=True)
+        cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+        row = cur.fetchone()
+        cur.close()
+        print(f"[JIRA] payload row for wf={workflow_id}: {'ok' if row and row.get('request_payload') else 'missing'}")
+
+        if not row or not row.get("request_payload"):
+            set_failed_message(db_conn, workflow_id, "JIRA", "No request_payload to create Jira.")
+            return
+
+        try:
+            payload = json.loads(row["request_payload"])
+        except Exception as je:
+            set_failed_message(db_conn, workflow_id, "JIRA", f"Invalid request_payload JSON: {je}")
+            return
+
+        form_data = payload.get("new_config", payload)
+        print(f"[JIRA] creating ticket for wf={workflow_id} with action={form_data.get('action_type')} env={form_data.get('environment')}")
+
+        jira_key = create_jira_ticket(form_data)
+        print(f"[JIRA] created jira_key={jira_key} for wf={workflow_id}")
+
+        ticket_data = get_jira_issue_detail(jira_key)
+        print(f"[JIRA] fetched issue detail for {jira_key}")
+
+        insert_jira_info_to_db(workflow_id, ticket_data)
+        print(f"[JIRA] inserted ticket into DB for wf={workflow_id}")
+
+    except Exception as e:
+        set_failed_message(db_conn, workflow_id, "JIRA", f"Create ticket failed: {e}")
+        print(f"[JIRA] ERROR wf={workflow_id}: {e}")
 
 
 # ---------- Check Jira ticket existence ----------
@@ -143,159 +196,114 @@ def monitor_pipelines(app):
             print("\n🚀 Start monitoring GitLab pipelines...")
 
             db_conn = get_db_connection()
-            cursor = db_conn.cursor(dictionary=True)
-
             try:
-                # ----------------------------
-                # A. 進行中（非終態）的 pipelines：打 API 追狀態
-                # ----------------------------
-                cursor.execute(
+                # 1) 列出所有尚未終態的 workflows（7 天內）
+                cur = db_conn.cursor(dictionary=True)
+                cur.execute(
                     """
-                    SELECT pipeline_id, workflow_id, status, started_at
-                      FROM gitlab_pipelines
-                     WHERE workflow_id IS NOT NULL
-                       AND status NOT IN ('success','failed','canceled')
-                       AND started_at >= NOW() - INTERVAL 7 DAY
-                       AND started_at = (
-                             SELECT MAX(started_at)
-                               FROM gitlab_pipelines
-                              WHERE workflow_id = gitlab_pipelines.workflow_id
-                       )
-                     ORDER BY started_at DESC
-                     LIMIT 100;
+                    SELECT workflow_id, status
+                      FROM workflow_runs
+                     WHERE status NOT IN ('SUCCESS','FAILED')
+                       AND created_at >= NOW() - INTERVAL 7 DAY
+                     ORDER BY workflow_id DESC
                     """
                 )
-                pipelines_active = cursor.fetchall()
+                workflows_todo = cur.fetchall()
+                cur.close()
 
-                # ----------------------------
-                # B. 補同步：DB 已終態，但 workflow 還沒終態（不一定打 API）
-                # ----------------------------
-                cursor.execute(
-                    """
-                    SELECT gitlab_pipelines.pipeline_id,
-                           gitlab_pipelines.workflow_id,
-                           gitlab_pipelines.status,
-                           gitlab_pipelines.started_at
-                      FROM gitlab_pipelines
-                      JOIN workflow_runs
-                        ON workflow_runs.workflow_id = gitlab_pipelines.workflow_id
-                     WHERE gitlab_pipelines.workflow_id IS NOT NULL
-                       AND gitlab_pipelines.status IN ('success','failed','canceled')
-                       AND workflow_runs.status NOT IN ('SUCCESS','FAILED')
-                       AND gitlab_pipelines.started_at >= NOW() - INTERVAL 7 DAY
-                       AND gitlab_pipelines.started_at = (
-                             SELECT MAX(started_at)
-                               FROM gitlab_pipelines
-                              WHERE workflow_id = gitlab_pipelines.workflow_id
-                       )
-                     ORDER BY gitlab_pipelines.started_at DESC
-                     LIMIT 100;
-                    """
-                )
-                pipelines_finalize = cursor.fetchall()
+                for wr in workflows_todo:
+                    workflow_id = wr["workflow_id"]
 
-                # ---------- A. 處理進行中 ----------
-                for pipeline in pipelines_active:
-                    pipeline_id = pipeline["pipeline_id"]
-                    workflow_id = pipeline.get("workflow_id")
-                    print(f"🔍 [active] Checking pipeline {pipeline_id} (wf={workflow_id}) DB={pipeline.get('status')}")
+                    # 2) 抓該 workflow 最新一筆 pipeline（單筆、可讀性高）
+                    cur_p = db_conn.cursor(dictionary=True)
+                    cur_p.execute(
+                        """
+                        SELECT pipeline_id, workflow_id, status, started_at
+                          FROM gitlab_pipelines
+                         WHERE workflow_id = %s
+                         ORDER BY started_at DESC, pipeline_id DESC
+                         LIMIT 1
+                        """,
+                        (workflow_id,),
+                    )
+                    latest = cur_p.fetchone()
+                    cur_p.close()
 
-                    gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
+                    if not latest:
+                        # 沒 pipeline（可能尚未觸發）— 看需求要不要記錄訊息；這裡略過
+                        continue
 
-                    if gitlab_result["success"]:
-                        update_gitlab_pipeline_details(db_conn, pipeline_id, gitlab_result)
+                    pipeline_id = latest["pipeline_id"]
+                    db_status   = (latest.get("status") or "").lower()
 
-                        status = (gitlab_result.get("status") or "").lower()
-                        print(f"⚙️  [active] pipeline {pipeline_id} status from GitLab: {status}")
+                    # 3) 如果 DB 狀態不是終態 → 打 GitLab API 更新 DB，再依結果推進
+                    if db_status not in ("success", "failed", "canceled"):
+                        print(f"🔍 [poll] wf={workflow_id} pid={pipeline_id} DB={db_status} → query GitLab")
 
-                        if workflow_id:
-                            try:
-                                # ★★★ 新增：先讀目前 workflow 狀態，RETURNED 則跳過所有改動
-                                cur_now = db_conn.cursor(dictionary=True)
-                                cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
-                                _wr = cur_now.fetchone()
-                                cur_now.close()
-                                current = (_wr.get("status") or "").upper() if _wr else ""
-                                if current == "RETURNED":
-                                    # 不要覆蓋 RETURNED，直接下一筆
-                                    continue
+                        gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
+                        if gitlab_result.get("success"):
+                            update_gitlab_pipeline_details(db_conn, pipeline_id, gitlab_result)
+                            fresh = (gitlab_result.get("status") or "").lower()
+                            print(f"⚙️  [poll] wf={workflow_id} pid={pipeline_id} GitLab={fresh}")
 
-                                if status == "manual":
-                                    maybe_advance_to_pending_approval(db_conn, workflow_id)
+                            # 防護：RETURNED 直接跳過任何覆蓋
+                            cur_now = db_conn.cursor(dictionary=True)
+                            cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+                            wr_now = cur_now.fetchone()
+                            cur_now.close()
+                            if wr_now and (wr_now.get("status") or "").upper() == "RETURNED":
+                                continue
 
-                                elif status == "success":
-                                    update_request_status(workflow_id, "SUCCESS")
+                            if fresh == "manual":
+                                maybe_advance_to_pending_approval(db_conn, workflow_id)
 
-                                elif status == "failed":
-                                    update_request_status(workflow_id, "FAILED")
-                                    set_failed_message(
-                                        db_conn, workflow_id, "GITLAB",
-                                        f"Pipeline {pipeline_id} status is {status}"
-                                    )
-                                # 其它狀態不動（created/pending/running）
-                            except MySQLError as e:
-                                set_failed_message(db_conn, workflow_id, "WORKFLOW",
-                                                   f"Failed to sync status (mysql): {e}")
-                            except Exception as e:
-                                set_failed_message(db_conn, workflow_id, "WORKFLOW",
-                                                   f"Failed to sync status (other): {e}")
-                    else:
-                        if workflow_id:
+                            elif fresh == "success":
+                                update_request_status(workflow_id, "SUCCESS")
+                                ensure_jira_after_success(db_conn, workflow_id)
+
+                            elif fresh == "failed":
+                                update_request_status(workflow_id, "FAILED")
+                                set_failed_message(
+                                    db_conn, workflow_id, "GITLAB",
+                                    f"Pipeline {pipeline_id} status is failed"
+                                )
+                            # 其它（created/pending/running）不動
+                        else:
                             set_failed_message(
                                 db_conn, workflow_id, "GITLAB_API",
                                 f"Pipeline query failed: {gitlab_result.get('error')}",
                             )
 
-                # ---------- B. 補同步（DB終態但 workflow 還沒終態） ----------
-                for pipeline in pipelines_finalize:
-                    pipeline_id = pipeline["pipeline_id"]
-                    workflow_id = pipeline.get("workflow_id")
-                    db_status   = (pipeline.get("status") or "").lower()
-                    print(f"🧹 [finalize] pipeline {pipeline_id} DB={db_status} wf={workflow_id} → finalize workflow")
+                    else:
+                        # 4) DB 已是終態 → 直接用 DB 狀態補同步（避免漏單）
+                        print(f"🧹 [finalize] wf={workflow_id} pid={pipeline_id} DB={db_status}")
+                        # 防護：RETURNED 不覆蓋
+                        cur_now = db_conn.cursor(dictionary=True)
+                        cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+                        wr_now = cur_now.fetchone()
+                        cur_now.close()
+                        if wr_now and (wr_now.get("status") or "").upper() == "RETURNED":
+                            continue
 
-                    if not workflow_id:
-                        continue
-
-                    # ★★★ 新增：先讀目前 workflow 狀態，RETURNED 直接跳過，避免被覆蓋
-                    cur_now = db_conn.cursor(dictionary=True)
-                    cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
-                    _wr = cur_now.fetchone()
-                    cur_now.close()
-                    current = (_wr.get("status") or "").upper() if _wr else ""
-                    if current == "RETURNED":
-                        # 不覆蓋 RETURNED
-                        continue
-
-                    try:
                         if db_status == "success":
                             update_request_status(workflow_id, "SUCCESS")
-
+                            ensure_jira_after_success(db_conn, workflow_id)
                         elif db_status == "failed":
                             update_request_status(workflow_id, "FAILED")
                             set_failed_message(db_conn, workflow_id, "GITLAB",
-                                               f"Pipeline {pipeline_id} status is {db_status}")
-
+                                               f"Pipeline {pipeline_id} status is failed")
                         elif db_status == "canceled":
-                            # 取消就只記錄，不改 workflow 狀態（以保留目前的狀態）
+                            # 僅記錄，不改 workflow 狀態
                             set_failed_message(db_conn, workflow_id, "GITLAB",
                                                f"Pipeline {pipeline_id} status is canceled")
-                        # 其它狀態不動
-                    except MySQLError as e:
-                        set_failed_message(db_conn, workflow_id, "WORKFLOW",
-                                           f"Failed to finalize from DB state (mysql): {e}")
-                    except Exception as e:
-                        set_failed_message(db_conn, workflow_id, "WORKFLOW",
-                                           f"Failed to finalize from DB state (other): {e}")
 
             except Exception as e:
                 print(f"❌ Pipeline monitoring error: {e}")
-
             finally:
-                cursor.close()
                 db_conn.close()
 
             # 輪詢間隔（開發可調短；正式可 30~60s）
-            time.sleep(60)
+            time.sleep(5)
 
 
 # ---------- Scan IN_PROGRESS workflows ----------
