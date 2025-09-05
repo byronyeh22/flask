@@ -566,11 +566,21 @@ def workflow_review_page(workflow_id):
             flash(f"Workflow ID {workflow_id} not found.", "danger")
             return redirect(url_for('vm.overview_index'))
 
-        # 這裡統一補上，避免 'dict object has no attribute workflow_id'
         if 'workflow_id' not in wf:
             wf['workflow_id'] = workflow_id
 
-        # 安全解析 payload
+        # 根據 workflow_id 查詢對應的 pipeline 資訊
+        pipeline_details = get_pipeline_details_by_workflow_id(workflow_id)
+
+        # 如果找到了 pipeline 資訊，就把 finished_at 的值加入到 wf 物件中
+        if pipeline_details and pipeline_details.get('finished_at'):
+            wf['finished_at'] = pipeline_details['finished_at']
+        else:
+            wf['finished_at'] = None # 確保 finished_at 欄位存在，即使為空
+
+        if wf.get('status'):
+            wf['status'] = str(wf['status']).strip().upper()
+
         raw = wf.get('request_payload') or "{}"
         try:
             payload = json.loads(raw)
@@ -579,7 +589,6 @@ def workflow_review_page(workflow_id):
         except Exception:
             payload = {}
 
-        # 判斷是否為 update 類型（你現在用 'new_config' 作為判斷）
         is_update_action = 'new_config' in payload
 
         if is_update_action:
@@ -588,9 +597,9 @@ def workflow_review_page(workflow_id):
             return render_template("create/review.html", data=payload, workflow=wf)
 
     except Exception as e:
-        logging.error(f"[workflow_review_page] {e}")
+        logging.error(f"[workflow_review_page] {e}", exc_info=True)
         flash("Failed to load review page.", "danger")
-        return redirect(url_for('vm.overview_index'))
+        return "Failed to load review page.", 500
 
 @vm_bp.route('/workflow/return/<int:workflow_id>', methods=['POST'])
 def workflow_return(workflow_id):
