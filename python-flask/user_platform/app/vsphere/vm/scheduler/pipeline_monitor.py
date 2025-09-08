@@ -1,6 +1,7 @@
 import time
 import threading
 import json
+import logging
 from datetime import datetime
 
 from app.mysql.db import get_db_connection
@@ -20,6 +21,8 @@ from app.vsphere.vm.jira_api.issue_updates import jira_add_comment,jira_transiti
 from app.vsphere.vm.db.workflow_manager import update_request_status
 from mysql.connector import Error as MySQLError
 
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 PIPELINE_MANUAL_STATUS = "manual"
 
 # ---------- Save failed_message as JSON (overwrite same source) ----------
@@ -55,9 +58,12 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
         )
         db_conn.commit()
         cur2.close()
+        logging.info(f"💾 Failed message recorded for workflow {workflow_id}: {source} - {message}")
+
+    except Exception as e:
+        logging.error(f"❌ Failed to save failed_message for workflow {workflow_id}: {str(e)}")
     finally:
         cur.close()
-
 
 def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
     """
@@ -71,6 +77,7 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
         # 0) 已有 ticket 就跳過
         existing = get_jira_ticket_by_workflow_id(workflow_id)
         if existing and existing.get("ticket_id"):
+            logging.info(f"✅ Jira ticket already exists for workflow {workflow_id}")
             return
 
         # 1) 取 payload
@@ -92,58 +99,86 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
         form_data = payload.get("new_config", payload)
 
         # 2) 建單
+        logging.info(f"🎫 Creating Jira ticket for workflow {workflow_id}")
         jira_key = create_jira_ticket(form_data)
+        logging.info(f"✅ Jira ticket created: {jira_key} for workflow {workflow_id}")
 
-        # 【⭐ 新增的修改 ⭐】
-        # 在操作新建的 ticket 之前，加入一個短暫的延遲，並增加重試機制
-        max_retries = 3
-        retry_delay = 2  # 秒
+        # 🔴 增加初始等待時間，讓 Jira 系統完全初始化
+        initial_wait = 5  # 秒
+        logging.info(f"⏳ Waiting {initial_wait}s for Jira ticket {jira_key} to fully initialize...")
+        time.sleep(initial_wait)
+
+        # 設定重試參數
+        max_retries = 5  # 🔴 增加重試次數
+        retry_delay = 3   # 🔴 增加重試間隔
 
         # --- 3) 嘗試加 comment ---
         comment_success = False
         for attempt in range(max_retries):
             try:
-                time.sleep(retry_delay) # 等待一下
+                if attempt > 0:  # 第一次已經等過了
+                    time.sleep(retry_delay)
+
+                logging.info(f"💬 Adding comment to {jira_key}, attempt {attempt + 1}/{max_retries}")
                 jira_add_comment(jira_key, "Auto-created by pipeline SUCCESS.")
+                logging.info(f"✅ Comment added successfully to {jira_key}")
                 comment_success = True
-                break # 成功就跳出迴圈
+                break  # 成功就跳出迴圈
+
             except Exception as e:
-                logging.warning(f"[JIRA RETRY] Add comment failed on attempt {attempt + 1}/{max_retries} for ticket {jira_key}: {e}")
-                if attempt + 1 == max_retries: # 如果是最後一次嘗試
-                    set_failed_message(db_conn, workflow_id, "JIRA", f"Add comment failed after {max_retries} attempts: {e}")
+                logging.warning(f"⚠️  [JIRA RETRY] Add comment failed on attempt {attempt + 1}/{max_retries} for ticket {jira_key}: {str(e)}")
+                if attempt + 1 == max_retries:  # 如果是最後一次嘗試
+                    set_failed_message(db_conn, workflow_id, "JIRA", f"Add comment failed after {max_retries} attempts: {str(e)}")
                     return
 
         if not comment_success:
+            logging.error(f"❌ Failed to add comment to {jira_key} after all retries")
             return
+
+        # 🔴 在 comment 和 transition 之間增加短暫延遲
+        time.sleep(2)
 
         # --- 4) 嘗試變更狀態 ---
         transition_success = False
         for attempt in range(max_retries):
             try:
-                # 這裡也可以加一個短暫延遲，但通常不是必要的
-                # time.sleep(1)
+                if attempt > 0:
+                    time.sleep(retry_delay)
+
+                logging.info(f"🔄 Transitioning {jira_key} to Done, attempt {attempt + 1}/{max_retries}")
                 jira_transition_issue(jira_key, "Done")
+                logging.info(f"✅ Successfully transitioned {jira_key} to Done")
                 transition_success = True
-                break # 成功就跳出迴圈
+                break  # 成功就跳出迴圈
+
             except Exception as e:
-                logging.warning(f"[JIRA RETRY] Transition to Done failed on attempt {attempt + 1}/{max_retries} for ticket {jira_key}: {e}")
+                logging.warning(f"⚠️  [JIRA RETRY] Transition to Done failed on attempt {attempt + 1}/{max_retries} for ticket {jira_key}: {str(e)}")
                 if attempt + 1 == max_retries:
-                    set_failed_message(db_conn, workflow_id, "JIRA", f"Transition to Done failed after {max_retries} attempts: {e}")
+                    set_failed_message(db_conn, workflow_id, "JIRA", f"Transition to Done failed after {max_retries} attempts: {str(e)}")
                     return
 
         if not transition_success:
+            logging.error(f"❌ Failed to transition {jira_key} to Done after all retries")
             return
+
+        # 🔴 在最終步驟前也加延遲，確保狀態變更完全生效
+        time.sleep(3)
 
         # 5) 重新抓詳細，再入庫
         try:
+            logging.info(f"📋 Fetching final details for {jira_key}")
             ticket_data = get_jira_issue_detail(jira_key)
             insert_jira_info_to_db(workflow_id, ticket_data)
+            logging.info(f"✅ Successfully inserted ticket {jira_key} to database for workflow {workflow_id}")
+
         except Exception as e:
-            set_failed_message(db_conn, workflow_id, "JIRA", f"Insert ticket to DB failed: {e}")
+            logging.error(f"❌ Insert ticket to DB failed for {jira_key}: {str(e)}")
+            set_failed_message(db_conn, workflow_id, "JIRA", f"Insert ticket to DB failed: {str(e)}")
             return
 
     except Exception as e:
-        set_failed_message(db_conn, workflow_id, "JIRA", f"Create ticket failed: {e}")
+        logging.error(f"❌ Create ticket failed for workflow {workflow_id}: {str(e)}")
+        set_failed_message(db_conn, workflow_id, "JIRA", f"Create ticket failed: {str(e)}")
 
 # ---------- Check Jira ticket existence ----------
 # def jira_exists_for_workflow(db_conn, workflow_id: int) -> bool:
