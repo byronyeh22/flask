@@ -6,6 +6,7 @@ jinja2
 PyYAML
 requests
 cryptography
+python-dotenv
 
 # DB
 mysql-connector-python

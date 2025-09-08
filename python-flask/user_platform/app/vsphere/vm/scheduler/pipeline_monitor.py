@@ -73,7 +73,7 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
         if existing and existing.get("ticket_id"):
             return
 
-        # 1) 取 payload（從 workflow_runs.request_payload）
+        # 1) 取 payload
         cur = db_conn.cursor(dictionary=True)
         cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
         row = cur.fetchone()
@@ -94,22 +94,47 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
         # 2) 建單
         jira_key = create_jira_ticket(form_data)
 
-        # 3) 立刻加 comment（失敗就終止，不寫 DB）
-        try:
-            jira_add_comment(jira_key, "Auto-created by pipeline SUCCESS.")
-        except Exception as e:
-            set_failed_message(db_conn, workflow_id, "JIRA", f"Add comment failed: {e}")
+        # 【⭐ 新增的修改 ⭐】
+        # 在操作新建的 ticket 之前，加入一個短暫的延遲，並增加重試機制
+        max_retries = 3
+        retry_delay = 2  # 秒
+
+        # --- 3) 嘗試加 comment ---
+        comment_success = False
+        for attempt in range(max_retries):
+            try:
+                time.sleep(retry_delay) # 等待一下
+                jira_add_comment(jira_key, "Auto-created by pipeline SUCCESS.")
+                comment_success = True
+                break # 成功就跳出迴圈
+            except Exception as e:
+                logging.warning(f"[JIRA RETRY] Add comment failed on attempt {attempt + 1}/{max_retries} for ticket {jira_key}: {e}")
+                if attempt + 1 == max_retries: # 如果是最後一次嘗試
+                    set_failed_message(db_conn, workflow_id, "JIRA", f"Add comment failed after {max_retries} attempts: {e}")
+                    return
+
+        if not comment_success:
             return
 
-        # 4) 嘗試 transition 到 Done（名稱視你的 workflow 而定；大小寫不敏感）
-        #    若你的流程需要 resolution，請改用 issue_updates 版本帶 resolution 或在專案流程上放寬
-        try:
-            jira_transition_issue(jira_key, "Done")
-        except Exception as e:
-            set_failed_message(db_conn, workflow_id, "JIRA", f"Transition to Done failed: {e}")
+        # --- 4) 嘗試變更狀態 ---
+        transition_success = False
+        for attempt in range(max_retries):
+            try:
+                # 這裡也可以加一個短暫延遲，但通常不是必要的
+                # time.sleep(1)
+                jira_transition_issue(jira_key, "Done")
+                transition_success = True
+                break # 成功就跳出迴圈
+            except Exception as e:
+                logging.warning(f"[JIRA RETRY] Transition to Done failed on attempt {attempt + 1}/{max_retries} for ticket {jira_key}: {e}")
+                if attempt + 1 == max_retries:
+                    set_failed_message(db_conn, workflow_id, "JIRA", f"Transition to Done failed after {max_retries} attempts: {e}")
+                    return
+
+        if not transition_success:
             return
 
-        # 5) 重新抓詳細（此時狀態已是最終），再入庫
+        # 5) 重新抓詳細，再入庫
         try:
             ticket_data = get_jira_issue_detail(jira_key)
             insert_jira_info_to_db(workflow_id, ticket_data)
@@ -119,6 +144,7 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
 
     except Exception as e:
         set_failed_message(db_conn, workflow_id, "JIRA", f"Create ticket failed: {e}")
+
 # ---------- Check Jira ticket existence ----------
 # def jira_exists_for_workflow(db_conn, workflow_id: int) -> bool:
 #     """

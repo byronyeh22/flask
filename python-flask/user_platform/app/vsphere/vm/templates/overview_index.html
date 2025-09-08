@@ -349,8 +349,15 @@
                     </td>
                     <td>{{ pipeline.created_by or '-' }}</td>
 
+                {% if normalized_status == 'draft' or normalized_status == 'returned' %}
+                    {# 如果是草稿或被退回的狀態，START 和 END 欄位顯示橫線 #}
+                    <td class="date-cell" data-datetime="">-</td>
+                    <td class="date-cell" data-datetime="">-</td>
+                {% else %}
+                    {# 對於其他所有狀態 (例如 IN_PROGRESS, SUCCESS)，才顯示時間 #}
                     <td class="date-cell" data-datetime="{{ pipeline.created_at }}">{{ (pipeline.created_at or '')|replace('T',' ') or '-' }}</td>
                     <td class="date-cell" data-datetime="{{ pipeline.finished_at }}">{{ (pipeline.finished_at or '')|replace('T',' ') or '-' }}</td>
+                {% endif %}
 
                     <td class="duration-cell" data-seconds="{{ pipeline.duration or 0 }}"></td>
 <!--                     <td>

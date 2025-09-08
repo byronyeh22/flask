@@ -1,47 +1,14 @@
 # app/vsphere/vm/db/insert_jira_info_to_db.py
 from mysql.connector import Error
 import logging
-from datetime import datetime, timezone
 from app.mysql.db import get_db_connection
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-def _parse_ts(ts_val):
-    """
-    將多種格式的時間值轉成「UTC naive datetime」。
-    - 支援 Python datetime（aware/naive）、ISO8601 字串（含/不含時區）。
-    - 無法解析則回傳 None，交給 SQL 的 COALESCE 用 NOW()。
-    """
-    if not ts_val:
-        return None
-    if isinstance(ts_val, datetime):
-        if ts_val.tzinfo is not None:
-            ts_val = ts_val.astimezone(timezone.utc).replace(tzinfo=None)
-        return ts_val
-    if isinstance(ts_val, str):
-        try:
-            # 盡量吃 Jira 的 ISO 格式，像 2025-08-26T15:59:25.506+0800 / ...+00:00 / ...Z
-            dt = datetime.fromisoformat(ts_val.replace("Z", "+00:00"))
-            if dt.tzinfo is not None:
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            return dt
-        except Exception:
-            for fmt in ("%Y-%m-%d %H:%M:%S",
-                        "%Y-%m-%dT%H:%M:%S",
-                        "%Y-%m-%d %H:%M:%S.%f",
-                        "%Y-%m-%dT%H:%M:%S.%f"):
-                try:
-                    return datetime.strptime(ts_val, fmt)
-                except Exception:
-                    pass
-    return None
-
 def insert_jira_info_to_db(workflow_id, ticket_data):
     """
     將 Jira Ticket 資訊寫入資料庫。
-    會嘗試將 ticket_data['created_at'] 轉成 MySQL 可接受的 datetime；
-    若無法解析則由 DB 端以 NOW() 帶入。
+    直接使用 get_jira_issue_detail 傳來的、已是 UTC+8 的時間字串。
     """
     sql = """
         INSERT INTO jira_tickets (
@@ -57,8 +24,8 @@ def insert_jira_info_to_db(workflow_id, ticket_data):
     try:
         db_conn = get_db_connection()
         with db_conn.cursor() as cursor:
-            # 讓 created_at 支援多種輸入格式；不能解析就交給 COALESCE 用 NOW()
-            created_dt = _parse_ts(ticket_data.get("created_at"))
+            # 直接使用傳入的時間字串，不再進行任何解析
+            created_dt = ticket_data.get("created_at")
 
             params = (
                 workflow_id,
@@ -74,11 +41,12 @@ def insert_jira_info_to_db(workflow_id, ticket_data):
             cursor.execute(sql, params)
             db_conn.commit()
 
+            # 【修正】日誌記錄：直接印出 created_dt 字串，不再呼叫 .isoformat()
             logging.info(
                 "✅ Inserted Jira ticket: wf=%s, ticket=%s, created_at=%s",
                 workflow_id,
                 ticket_data.get("ticket_id"),
-                created_dt.isoformat(sep=' ') if created_dt else "NOW()"
+                created_dt if created_dt else "NOW()"
             )
 
     except Error as e:

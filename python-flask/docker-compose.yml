@@ -8,9 +8,11 @@ services:
       - ./user_platform:/app
     ports:
       # Maps your local port 16999 to the container's port 16999
-      - "16999:16999"
+      - "16888:16888"
     environment:
       - FERNET_KEY="6gIX0NVO-B1waQNCrEnikAJe8QRCXWfO3MQKr_toim0="
+    env_file:
+      - ./user_platform/.env
     # Add this section to connect to the external network
     networks:
       - mysql_default
