@@ -1,5 +1,27 @@
 import requests
-from flask import current_app # 導入 current_app
+from flask import current_app
+from datetime import datetime, timezone, timedelta
+
+def _to_tw_datetime(iso_str: str):
+    """
+    Jira Cloud 的 fields.created 會是 UTC（例：2025-09-08T03:08:52.123+0000 或沒有毫秒）。
+    轉成台北時間(+08:00)後，以 'YYYY-MM-DD HH:MM:SS' 字串回傳。
+    解析失敗就原樣回傳（不擋流程）。
+    """
+    if not iso_str:
+        return None
+    try:
+        # 常見：含毫秒
+        dt = datetime.strptime(iso_str, "%Y-%m-%dT%H:%M:%S.%f%z")
+    except ValueError:
+        try:
+            # 次常見：不含毫秒
+            dt = datetime.strptime(iso_str, "%Y-%m-%dT%H:%M:%S%z")
+        except Exception:
+            return iso_str
+
+    tw = dt.astimezone(timezone(timedelta(hours=8)))
+    return tw.strftime("%Y-%m-%d %H:%M:%S")
 
 def get_jira_issue_detail(ticket_id, fields=None):
     jira_base = current_app.config['JIRA_BASE_URL']
@@ -8,28 +30,20 @@ def get_jira_issue_detail(ticket_id, fields=None):
         current_app.config['JIRA_API_TOKEN']
     )
 
-    # 如果有指定 fields，會把欄位用逗號連接起來並加到 URL 查詢字串
     fields_param = f"?fields={','.join(fields)}" if fields else ""
 
     try:
-        # 送出 GET 請求到 Jira API，查詢指定的 issue (ticket)
-        response = requests.get(
+        resp = requests.get(
             f"{jira_base}/rest/api/2/issue/{ticket_id}{fields_param}",
             auth=auth,
             headers={"Content-Type": "application/json"},
             timeout=10
         )
-        # 如果 HTTP 狀態碼不是 2xx，就會拋出錯誤
-        response.raise_for_status()
+        resp.raise_for_status()
 
-         # 解析回傳的 JSON 資料
-        data = response.json()
-
-         # 從回傳資料中取出 fields 這個區塊（Jira issue 的詳細欄位）
+        data = resp.json()
         fields_data = data.get("fields", {})
 
-         # 依需求把欄位組成一個新的 dict 回傳
-         # 字串前加上 f，並在字串內用 {} 括住變數或表達式，Python 會自動把它替換成對應的值
         return {
             "ticket_id": data.get("key"),
             "project_key": fields_data.get("project", {}).get("key", ""),
@@ -37,20 +51,18 @@ def get_jira_issue_detail(ticket_id, fields=None):
             "description": fields_data.get("description", ""),
             "status": fields_data.get("status", {}).get("name", ""),
             "url": f"{jira_base}/browse/{ticket_id}",
-            "created_at": fields_data.get("created")
+            # ⭐ 這裡把 UTC 轉成 +08:00 的字串
+            "created_at": _to_tw_datetime(fields_data.get("created")),
         }
 
-    # 如果請求出錯，印出錯誤並把例外拋出
     except requests.exceptions.RequestException as err:
         print(f"Failed to get Jira issue detail: {err}")
         raise
 
-
-# 測試範例
+# 測試範例（與你原本相同）
 if __name__ == "__main__":
     ticket_id = "SJT-86"
     fields = ["project", "status", "summary", "description"]
-
     result = get_jira_issue_detail(ticket_id, fields=fields)
     if result:
         print("=== Jira Issue Detail ===")

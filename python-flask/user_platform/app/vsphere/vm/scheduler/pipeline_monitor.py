@@ -14,6 +14,7 @@ from app.vsphere.vm.db.get_jira_tickets_and_stats import get_jira_ticket_by_work
 from app.vsphere.vm.db.insert_jira_info_to_db import insert_jira_info_to_db
 from app.vsphere.vm.jira_api.create_jira_ticket import create_jira_ticket
 from app.vsphere.vm.jira_api.get_jira_issue_detail import get_jira_issue_detail
+from app.vsphere.vm.jira_api.issue_updates import jira_add_comment,jira_transition_issue
 
 # Update workflow status
 from app.vsphere.vm.db.workflow_manager import update_request_status
@@ -59,22 +60,24 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
 
 
 def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
+    """
+    若該 workflow 還沒有 Jira，就在 pipeline success 後開單（idempotent）。
+    建單後：
+      1) 先加一則 comment（若失敗 -> 記 failed_message 並 return）
+      2) 再 transition 到 Done（若失敗 -> 記 failed_message 並 return）
+      3) 成功後重新抓 issue 詳細，再 insert 到 DB（最終狀態才入庫）
+    """
     try:
-        print(f"[JIRA] ensure_jira_after_success() enter wf={workflow_id}")
-
-        # 1) 已有就跳過（idempotent）
+        # 0) 已有 ticket 就跳過
         existing = get_jira_ticket_by_workflow_id(workflow_id)
-        print(f"[JIRA] existing ticket for wf={workflow_id}: {existing}")
         if existing and existing.get("ticket_id"):
-            print(f"[JIRA] skip create, already has ticket_id={existing.get('ticket_id')}")
             return
 
-        # 2) 取原始草稿 payload
+        # 1) 取 payload（從 workflow_runs.request_payload）
         cur = db_conn.cursor(dictionary=True)
         cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
         row = cur.fetchone()
         cur.close()
-        print(f"[JIRA] payload row for wf={workflow_id}: {'ok' if row and row.get('request_payload') else 'missing'}")
 
         if not row or not row.get("request_payload"):
             set_failed_message(db_conn, workflow_id, "JIRA", "No request_payload to create Jira.")
@@ -87,22 +90,35 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
             return
 
         form_data = payload.get("new_config", payload)
-        print(f"[JIRA] creating ticket for wf={workflow_id} with action={form_data.get('action_type')} env={form_data.get('environment')}")
 
+        # 2) 建單
         jira_key = create_jira_ticket(form_data)
-        print(f"[JIRA] created jira_key={jira_key} for wf={workflow_id}")
 
-        ticket_data = get_jira_issue_detail(jira_key)
-        print(f"[JIRA] fetched issue detail for {jira_key}")
+        # 3) 立刻加 comment（失敗就終止，不寫 DB）
+        try:
+            jira_add_comment(jira_key, "Auto-created by pipeline SUCCESS.")
+        except Exception as e:
+            set_failed_message(db_conn, workflow_id, "JIRA", f"Add comment failed: {e}")
+            return
 
-        insert_jira_info_to_db(workflow_id, ticket_data)
-        print(f"[JIRA] inserted ticket into DB for wf={workflow_id}")
+        # 4) 嘗試 transition 到 Done（名稱視你的 workflow 而定；大小寫不敏感）
+        #    若你的流程需要 resolution，請改用 issue_updates 版本帶 resolution 或在專案流程上放寬
+        try:
+            jira_transition_issue(jira_key, "Done")
+        except Exception as e:
+            set_failed_message(db_conn, workflow_id, "JIRA", f"Transition to Done failed: {e}")
+            return
+
+        # 5) 重新抓詳細（此時狀態已是最終），再入庫
+        try:
+            ticket_data = get_jira_issue_detail(jira_key)
+            insert_jira_info_to_db(workflow_id, ticket_data)
+        except Exception as e:
+            set_failed_message(db_conn, workflow_id, "JIRA", f"Insert ticket to DB failed: {e}")
+            return
 
     except Exception as e:
         set_failed_message(db_conn, workflow_id, "JIRA", f"Create ticket failed: {e}")
-        print(f"[JIRA] ERROR wf={workflow_id}: {e}")
-
-
 # ---------- Check Jira ticket existence ----------
 # def jira_exists_for_workflow(db_conn, workflow_id: int) -> bool:
 #     """

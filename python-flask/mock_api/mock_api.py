@@ -99,7 +99,7 @@ def trigger_gitlab_pipeline(project_id):
 # ===== in-memory state & helpers (add these) =====
 PIPELINES = {}                   # pipeline_id -> state dict
 
-DEFAULT_RUN_SECONDS = 120          # 進入 running 後維持秒數
+DEFAULT_RUN_SECONDS = 30          # 進入 running 後維持秒數
 
 def _utc_now():
     return datetime.now(timezone.utc)
