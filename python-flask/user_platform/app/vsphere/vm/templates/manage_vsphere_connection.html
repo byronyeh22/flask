@@ -96,7 +96,6 @@
 </style>
 
 <div class="container-fluid">
-  <!-- Header -->
   <div class="page-header">
     <div>
       <h1 class="page-title fs-4">
@@ -104,14 +103,19 @@
       </h1>
       <div class="page-subtitle">View, test, and manage your vSphere connection settings.</div>
     </div>
-    <div>
+    <div class="d-flex align-items-center gap-2">
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="test-vault-btn">
+        <i class="bi bi-shield-check"></i> Test Vault
+      </button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="sync-all-vault-btn">
+        <i class="bi bi-arrow-repeat"></i> Sync All to Vault
+      </button>
       <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addConnectionModal">
         <i class="bi bi-plus-circle me-1"></i> Create Connection
       </button>
     </div>
   </div>
 
-  <!-- List card -->
   <div class="card shadow-sm mb-4">
     <div class="card-header py-3 d-flex justify-content-between align-items-center">
       <h6 class="m-0 fw-bold text-primary">Existing Connections</h6>
@@ -123,13 +127,12 @@
 
     <div class="card-body">
       <div class="table-responsive">
-        <table class="table table-hover table-striped align-middle">
+        <table class="table table-hover table-striped align-middle" id="connections-table">
           <thead>
             <tr>
               <th style="width: 12%">Environment</th>
               <th style="width: 28%">vSphere Host</th>
               <th style="width: 24%">Username</th>
-              <!-- 1) Swap order: State before Status -->
               <th style="width: 16%">State</th>
               <th style="width: 10%">Status</th>
               <th style="width: 10%">Action</th>
@@ -137,7 +140,7 @@
           </thead>
           <tbody>
             {% for conn in connections %}
-            <tr>
+            <tr data-conn-id="{{ conn.id }}">
               <td class="{% if not conn.is_active %}inactive-cell{% endif %}">
                 <span class="truncate" title="{{ conn.environment }}">{{ conn.environment }}</span>
               </td>
@@ -148,7 +151,6 @@
                 <span class="truncate" title="{{ conn.user }}">{{ conn.user }}</span>
               </td>
 
-              <!-- State column -->
               <td id="state-cell-{{ conn.id }}" class="state-cell">
                 <button type="button"
                         class="btn btn-outline-primary btn-sm check-connection-btn"
@@ -158,7 +160,6 @@
                 </button>
               </td>
 
-              <!-- Status column -->
               <td>
                 {% if conn.is_active %}
                   <span class="state-badge bg-success"><i class="bi bi-lightning-charge-fill"></i> Active</span>
@@ -212,7 +213,6 @@
   </div>
 </div>
 
-<!-- Add/Update Connection Modal -->
 <div class="modal fade" id="addConnectionModal" tabindex="-1" aria-labelledby="addConnectionModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -253,7 +253,6 @@
   </div>
 </div>
 
-<!-- Change Password Modal -->
 <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -264,7 +263,6 @@
         </div>
 
         <div class="modal-body">
-          <!-- general error/success alert (dynamic) -->
           <div id="cp-alert" class="alert py-2 px-3 mb-3 d-none" role="alert"></div>
 
           <div class="mb-3">
@@ -301,6 +299,67 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  // ===== Vault Actions =====
+  const testVaultBtn = document.getElementById('test-vault-btn');
+  const syncAllVaultBtn = document.getElementById('sync-all-vault-btn');
+
+  if (testVaultBtn) {
+    testVaultBtn.addEventListener('click', async () => {
+      testVaultBtn.disabled = true;
+      testVaultBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Testing...`;
+      try {
+        const resp = await fetch("{{ url_for('vm.test_vault_connection') }}", { method: 'POST' });
+        const data = await resp.json();
+        alert(`Vault Test Result:\n\n${data.message}`);
+      } catch (err) {
+        alert(`An error occurred: ${err}`);
+      } finally {
+        testVaultBtn.disabled = false;
+        testVaultBtn.innerHTML = `<i class="bi bi-shield-check"></i> Test Vault`;
+      }
+    });
+  }
+
+  if (syncAllVaultBtn) {
+    syncAllVaultBtn.addEventListener('click', async () => {
+      if (!confirm('This will sync all connections to Vault. Are you sure?')) return;
+
+      syncAllVaultBtn.disabled = true;
+      syncAllVaultBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Syncing...`;
+      
+      const rows = document.querySelectorAll('#connections-table tbody tr[data-conn-id]');
+      const total = rows.length;
+      let successCount = 0;
+      let failedMessages = [];
+
+      for (const row of rows) {
+        const connId = row.dataset.connId;
+        const syncUrl = "{{ url_for('vm.sync_connection_to_vault', conn_id=0) }}".replace('0', connId);
+        try {
+          const resp = await fetch(syncUrl, { method: 'POST' });
+          const data = await resp.json();
+          if (data.success) {
+            successCount++;
+          } else {
+            failedMessages.push(`ID ${connId}: ${data.message}`);
+          }
+        } catch (err) {
+          failedMessages.push(`ID ${connId}: Network or script error`);
+        }
+      }
+
+      let alertMessage = `Sync complete.\n\n- Successful: ${successCount} / ${total}`;
+      if (failedMessages.length > 0) {
+        alertMessage += `\n- Failed: ${failedMessages.length}\n\nDetails:\n${failedMessages.join('\n')}`;
+      }
+      alert(alertMessage);
+
+      syncAllVaultBtn.disabled = false;
+      syncAllVaultBtn.innerHTML = `<i class="bi bi-arrow-repeat"></i> Sync All to Vault`;
+    });
+  }
+
+
   // ===== Change Password Modal: inject action, title, and handle AJAX submit =====
   const changePasswordModal = document.getElementById('changePasswordModal');
   if (changePasswordModal) {

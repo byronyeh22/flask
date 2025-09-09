@@ -38,6 +38,8 @@ from .jira_api.create_jira_ticket import _generate_create_summary
 from .gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
 from .gitlab_api.run_manual_job import run_manual_job
 from .gitlab_api.cancel_manual_jobs import cancel_manual_jobs
+# --- 新增 Vault Manager import ---
+from .vault.vault_manager import VaultManager
 
 # --- 抓取目前登入 User ---
 def _current_username():
@@ -685,7 +687,7 @@ def manage_vsphere_connections():
                 user=request.form['user'],
                 password_plain=request.form['password']
             )
-            flash(f"Connection for environment '{request.form['environment']}' saved successfully.", "success")
+            flash(f"Connection for '{request.form['host']}' saved and synced to Vault successfully.", "success")
             return redirect(url_for('vm.manage_vsphere_connections'))
 
         connections = get_all_vsphere_connections()
@@ -822,28 +824,78 @@ def get_vsphere_objects_by_host_api(host):
 def test_vsphere_connection_api(conn_id):
     """
     連線測試
-    （route 不處理 DB，改由 helper 自行建/關連線）
     """
     try:
-        # 改：helper 自行處理 DB 連線/關閉
         conn_info = get_vsphere_connection_by_id(conn_id)
-
         if not conn_info:
             return jsonify({"success": False, "message": "Connection not found or is inactive."}), 404
-
         if conn_info.get('password') is None:
             return jsonify({
                 "success": False,
                 "message": conn_info.get('decrypt_error', 'Password decrypt failed.')
             }), 400
-
         is_ok, message = test_vsphere_connection(
             host=conn_info['host'],
             user=conn_info['user'],
             password=conn_info['password']
         )
         return jsonify({"success": is_ok, "message": message})
-
     except Exception as e:
         logging.error(f"Error in test_vsphere_connection_api for conn_id {conn_id}: {e}")
         return jsonify({"success": False, "message": "An internal server error occurred."}), 500
+
+# Vault 連線測試
+@vm_bp.route("/api/vault/test", methods=['POST'])
+def test_vault_connection():
+    """
+    測試 Vault 連線狀態
+    """
+    try:
+        vault_manager = VaultManager()
+        success, message = vault_manager.test_connection()
+
+        return jsonify({
+            "success": success,
+            "message": message,
+            "vault_configured": bool(current_app.config.get('VAULT_TOKEN'))
+        })
+
+    except Exception as e:
+        logging.error(f"Vault test error: {e}")
+        return jsonify({
+            "success": False,
+            "message": f"Test failed: {str(e)}"
+        }), 500
+
+# 手動同步到 Vault
+@vm_bp.route("/api/vault/sync/<int:conn_id>", methods=['POST'])
+def sync_connection_to_vault(conn_id):
+    """
+    手動將指定連線同步到 Vault（管理員功能）
+    """
+    try:
+        # 取得連線資訊（含解密密碼）
+        conn_info = get_vsphere_connection_by_id(conn_id)
+        if not conn_info:
+            return jsonify({"success": False, "message": "Connection not found"}), 404
+
+        if conn_info.get('password') is None:
+            return jsonify({
+                "success": False,
+                "message": conn_info.get('decrypt_error', 'Password decrypt failed')
+            }), 400
+
+        # 同步到 Vault
+        vault_manager = VaultManager()
+        success, message = vault_manager.store_vsphere_credentials(
+            environment=conn_info['environment'],
+            host=conn_info['host'],
+            user=conn_info['user'],
+            password=conn_info['password']
+        )
+
+        return jsonify({"success": success, "message": message})
+
+    except Exception as e:
+        logging.error(f"Vault sync error for conn_id {conn_id}: {e}")
+        return jsonify({"success": False, "message": f"Sync failed: {str(e)}"}), 500

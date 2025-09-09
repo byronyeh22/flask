@@ -43,6 +43,11 @@ if Config.API_MODE == 'dev':
     Config.JIRA_API_TOKEN = os.getenv("DEV_JIRA_API_TOKEN")
     Config.JIRA_PROJECT_KEY = os.getenv("DEV_JIRA_PROJECT_KEY")
 
+    # --- Vault Configuration ---
+    Config.VAULT_ADDR = os.getenv("DEV_VAULT_ADDR")
+    Config.VAULT_TOKEN = os.getenv("DEV_VAULT_TOKEN")
+    Config.VAULT_PATH_PREFIX = os.getenv("DEV_VAULT_PATH_PREFIX")
+
 else: # Config.API_MODE == 'local'
     # --- 本地模擬環境 (Mock API)：讀取 LOCAL_ 前綴的變數 ---
 
@@ -70,3 +75,7 @@ else: # Config.API_MODE == 'local'
     Config.JIRA_API_TOKEN = os.getenv("LOCAL_JIRA_API_TOKEN")
     Config.JIRA_PROJECT_KEY = os.getenv("LOCAL_JIRA_PROJECT_KEY")
 
+    # --- Vault Configuration ---
+    Config.VAULT_ADDR = os.getenv("LOCAL_VAULT_ADDR")
+    Config.VAULT_TOKEN = os.getenv("LOCAL_VAULT_TOKEN")
+    Config.VAULT_PATH_PREFIX = os.getenv("LOCAL_VAULT_PATH_PREFIX")

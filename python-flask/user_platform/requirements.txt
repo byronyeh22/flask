@@ -13,3 +13,6 @@ mysql-connector-python
 
 # VMware vSphere
 pyvmomi
+
+# HashiCorp Vault
+hvac

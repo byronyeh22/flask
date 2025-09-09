@@ -16,10 +16,13 @@ services:
     # Add this section to connect to the external network
     networks:
       - mysql_default
+      - vault_default
     command: >
       bash -c "pip install --no-cache-dir -r requirements.txt && python run.py"
     restart: unless-stopped
 # Define the external network
 networks:
   mysql_default:
+    external: true
+  vault_default:
     external: true
