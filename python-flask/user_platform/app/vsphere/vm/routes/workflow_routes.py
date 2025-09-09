@@ -10,10 +10,12 @@ from ..db.workflow_manager import (
     get_workflow_by_id,
     save_or_update_draft,
     update_request_status,
-    apply_request_to_db,
+    # apply_request_to_db,
     delete_draft_by_workflow_id,
     return_request
 )
+from ..db.vm_provisioning_manager import apply_request_to_db
+
 from ..db.get_vm_configurations import get_vms_by_environment, get_vm_config
 from ..db.get_gitlab_pipeline_detail_and_stats import get_pipeline_details_by_workflow_id
 from ..db.get_jira_tickets_and_stats import get_jira_ticket_by_workflow_id
