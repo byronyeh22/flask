@@ -334,7 +334,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
       for (const row of rows) {
         const connId = row.dataset.connId;
-        const syncUrl = "{{ url_for('vm.sync_connection_to_vault', conn_id=0) }}".replace('0', connId);
+        const syncUrl = "{{ url_for('vm.sync_vsphere_connection_to_vault', conn_id=0) }}".replace('0', connId);
         try {
           const resp = await fetch(syncUrl, { method: 'POST' });
           const data = await resp.json();
