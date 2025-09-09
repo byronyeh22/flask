@@ -10,7 +10,6 @@ from ..db.workflow_manager import (
     get_workflow_by_id,
     save_or_update_draft,
     update_request_status,
-    # apply_request_to_db,
     delete_draft_by_workflow_id,
     return_request
 )
