@@ -1,26 +1,12 @@
 # app/vsphere/vm/vsphere_api/disk_manager.py
-import os
 import ssl
 import time
 import logging
 from typing import Tuple, List, Dict, Optional
 
-# ===== 動態決定要用 mock 還是真實 vCenter =====
-_USE_MOCK = os.environ.get("VSPHERE_USE_MOCK", "0") == "1"
+from flask import current_app
 
-if _USE_MOCK:
-    # 你的 mock_api.py 需提供下列介面
-    from .mock_api import SmartConnect, Disconnect
-    from .mock_api import vim  # 模擬 pyVmomi.vim
-else:
-    from pyVim.connect import SmartConnect, Disconnect
-    from pyVmomi import vim
-
-# ===== vCenter 連線設定（真實模式才會用到；mock 模式忽略）=====
-_VCENTER_HOST = os.environ.get("VSPHERE_HOST", "127.0.0.1")
-_VCENTER_USER = os.environ.get("VSPHERE_USER", "administrator@vsphere.local")
-_VCENTER_PASSWORD = os.environ.get("VSPHERE_PASSWORD", "password")
-_VCENTER_DISABLE_SSL_VERIFY = os.environ.get("VSPHERE_DISABLE_SSL_VERIFY", "1") == "1"
+logger = logging.getLogger(__name__)
 
 # ===== SCSI 上限與規則 =====
 _MAX_SCSI_BUS = 3          # bus 0..3 共 4 顆 controller
@@ -29,58 +15,89 @@ _RESERVED_UNIT = 7         # SCSI 上保留的號碼
 _OS_BOOT_SLOT = (0, 0)     # OS 系統碟慣例放在 scsi(0:0)
 
 # --------------------------------------------------------------------------------------
-# 共用核心：wait_for_task / get_obj
+# 環境判斷 & 依模式載入依賴
 # --------------------------------------------------------------------------------------
-def wait_for_task(task):
-    """等待 vSphere Task 完成（與你原本行為一致）"""
-    while task.info.state not in [vim.TaskInfo.State.success, vim.TaskInfo.State.error]:
-        time.sleep(1)
-    if task.info.state == 'success':
-        return task.info.result
-    else:
-        raise Exception(f"Task failed: {task.info.error.msg if task.info.error else 'Unknown error'}")
-
-def get_obj(content, vimtype, name):
-    """根據名稱尋找 vSphere 物件（與你原本行為一致）"""
-    view = content.viewManager.CreateContainerView(content.rootFolder, vimtype, True)
+def _is_local_mode() -> bool:
     try:
-        for obj in view.view:
-            if obj.name == name:
-                return obj
-        return None
-    finally:
-        try:
-            view.Destroy()
-        except Exception:
-            pass
+        return (current_app and (current_app.config.get('API_MODE') or '').lower() == 'local')
+    except RuntimeError:
+        return False
+
+if not _is_local_mode():
+    # 真實 vCenter 連線才需要 pyVmomi
+    from pyVim.connect import SmartConnect, Disconnect
+    from pyVmomi import vim
+else:
+    # local 模式不載入 pyVmomi，避免誤用
+    SmartConnect = None
+    Disconnect = None
+    vim = None
+    import requests  # 只在 local 使用 HTTP mock
 
 # --------------------------------------------------------------------------------------
-# 連線裝飾器：參考你原本 vcenter_connector 行為（支援 mock 與真實）
+# 共用核心（僅真實模式會用到）：wait_for_task / get_obj
 # --------------------------------------------------------------------------------------
-def vcenter_connector(func):
+if not _is_local_mode():
+    def wait_for_task(task):
+        """等待 vSphere Task 完成"""
+        while task.info.state not in [vim.TaskInfo.State.success, vim.TaskInfo.State.error]:
+            time.sleep(1)
+        if task.info.state == 'success':
+            return task.info.result
+        else:
+            raise Exception(f"Task failed: {getattr(task.info.error, 'msg', 'Unknown error')}")
+
+    def get_obj(content, vimtype, name):
+        """根據名稱尋找 vSphere 物件"""
+        view = content.viewManager.CreateContainerView(content.rootFolder, vimtype, True)
+        try:
+            for obj in view.view:
+                if obj.name == name:
+                    return obj
+            return None
+        finally:
+            try:
+                view.Destroy()
+            except Exception:
+                pass
+
+# --------------------------------------------------------------------------------------
+# 連線：參考 config.py（current_app.config）
+# - local：不連 vCenter，直接走 HTTP mock
+# - real ：使用 pyVmomi 連線
+# --------------------------------------------------------------------------------------
+def _connect_vcenter_from_config():
     """
-    包住需要 si 的函式。
-    - 在 mock 模式會呼叫 mock_api.SmartConnect / Disconnect
-    - 在真實模式會呼叫 pyVim.connect.SmartConnect / Disconnect
+    非 local 模式才會真的連 vCenter。
+    local 模式下會由裝飾器直接跳過連線。
     """
+    api_mode = (current_app.config.get('API_MODE') or '').lower()
+    if api_mode == 'local':
+        return None  # local 不需要 vCenter 連線
+
+    host = current_app.config.get('VSPHERE_HOST')
+    user = current_app.config.get('VSPHERE_USER')
+    password = current_app.config.get('VSPHERE_PASSWORD')
+    disable_verify = str(current_app.config.get('VSPHERE_DISABLE_SSL_VERIFY', '1')).lower() in ('1', 'true', 'yes')
+
+    if not host or not user or not password:
+        raise ValueError("缺少 vSphere 連線設定（VSPHERE_HOST / VSPHERE_USER / VSPHERE_PASSWORD）")
+
+    ssl_ctx = ssl._create_unverified_context() if disable_verify else None
+    si = SmartConnect(host=host, user=user, pwd=password, sslContext=ssl_ctx,
+                      disableSslCertValidation=disable_verify)
+    return si
+
+def _with_connection(func):
+    """裝飾器：幫需要 si 的函式自動建立/關閉連線；local 模式直接跳過連線。"""
     def wrapper(*args, **kwargs):
+        if _is_local_mode():
+            # local：不建立 vCenter 連線，直接呼叫
+            return func(None, *args, **kwargs)
+
         si = None
         try:
-            if _USE_MOCK:
-                si = SmartConnect()
-            else:
-                ctx = None
-                if _VCENTER_DISABLE_SSL_VERIFY:
-                    ctx = ssl._create_unverified_context()
-                si = SmartConnect(
-                    host=_VCENTER_HOST,
-                    user=_VCENTER_USER,
-                    pwd=_VCENTER_PASSWORD,
-                    sslContext=ctx,
-                    disableSslCertValidation=_VCENTER_DISABLE_SSL_VERIFY
-                )
-            if not si:
-                raise ConnectionError("Could not connect to vCenter.")
+            si = _connect_vcenter_from_config()
             return func(si, *args, **kwargs)
         finally:
             if si:
@@ -91,14 +108,162 @@ def vcenter_connector(func):
     return wrapper
 
 # --------------------------------------------------------------------------------------
-# 查詢 VM 磁碟
+# 真實模式專用工具（local 用不到）
 # --------------------------------------------------------------------------------------
+if not _is_local_mode():
+    def _get_vm_by_name(si, vm_name: str):
+        content = si.RetrieveContent()
+        vm = get_obj(content, [vim.VirtualMachine], vm_name)
+        if not vm:
+            raise ValueError(f"VM '{vm_name}' not found.")
+        return vm
+
+    def _collect_scsi_state(vm) -> Tuple[List['vim.vm.device.VirtualSCSIController'], Dict[int, int], Dict[int, set]]:
+        controllers: List[vim.vm.device.VirtualSCSIController] = []
+        controller_bus_by_key: Dict[int, int] = {}
+        used_units_by_ctrl: Dict[int, set] = {}
+
+        for dev in vm.config.hardware.device:
+            if isinstance(dev, vim.vm.device.VirtualSCSIController):
+                controllers.append(dev)
+                controller_bus_by_key[dev.key] = dev.busNumber
+                used_units_by_ctrl[dev.key] = set()
+
+        for dev in vm.config.hardware.device:
+            if isinstance(dev, vim.vm.device.VirtualDisk):
+                ctrl_key = dev.controllerKey
+                if ctrl_key in used_units_by_ctrl:
+                    used_units_by_ctrl[ctrl_key].add(dev.unitNumber)
+
+        return controllers, controller_bus_by_key, used_units_by_ctrl
+
+    def _ensure_scsi_controller(vm, bus_number: int):
+        # 先找現有
+        for dev in vm.config.hardware.device:
+            if isinstance(dev, vim.vm.device.VirtualSCSIController) and dev.busNumber == bus_number:
+                return dev
+
+        # 沒有就建一顆（優先 ParaVirtual；否則 LsiLogic SAS）
+        controller = (
+            vim.vm.device.ParaVirtualSCSIController()
+            if hasattr(vim.vm.device, "ParaVirtualSCSIController")
+            else vim.vm.device.VirtualLsiLogicSASController()
+        )
+        controller.busNumber = bus_number
+        controller.sharedBus = vim.vm.device.VirtualSCSIController.Sharing.noSharing
+        controller.key = -101  # 任意負值，讓 vCenter 分配實際 key
+
+        spec = vim.vm.ConfigSpec()
+        dev_spec = vim.vm.device.VirtualDeviceSpec()
+        dev_spec.operation = vim.vm.device.VirtualDeviceSpec.Operation.add
+        dev_spec.device = controller
+        spec.deviceChange = [dev_spec]
+
+        wait_for_task(vm.ReconfigVM_Task(spec=spec))
+
+        # 重新取得，拿到實際 key
+        for dev in vm.config.hardware.device:
+            if isinstance(dev, vim.vm.device.VirtualSCSIController) and dev.busNumber == bus_number:
+                return dev
+
+        raise RuntimeError(f"Failed to create SCSI controller for bus {bus_number}.")
+
+    def _find_next_slot_auto(vm):
+        """
+        自動分配下一個可用 slot：
+          - 永遠跳過 OS 盤位 scsi(0:0)
+          - 優先塞 bus=0：unit=1..15（跳 7）
+          - bus=0 塞滿後：建立/使用 bus=1..3，依序挑 unit=0..15（跳 7）
+        """
+        _ensure_scsi_controller(vm, 0)  # 確保 bus=0 存在
+
+        controllers, _, used_units = _collect_scsi_state(vm)
+        controllers_by_bus = {c.busNumber: c for c in controllers}
+
+        # 先試 bus=0，從 1..15（跳 7；避開 0:0）
+        controller_bus0 = controllers_by_bus.get(0) or _ensure_scsi_controller(vm, 0)
+        used_on_bus0 = used_units.get(controller_bus0.key, set())
+        for unit in range(_MAX_UNITS_PER_BUS):
+            if unit in (0, _RESERVED_UNIT):
+                continue
+            if unit not in used_on_bus0:
+                return controller_bus0, unit
+
+        # bus=0 滿了 → 往 1.._MAX_SCSI_BUS
+        for bus in range(1, _MAX_SCSI_BUS + 1):
+            controller = controllers_by_bus.get(bus)
+            if not controller:
+                controller = _ensure_scsi_controller(vm, bus)
+                return controller, 0  # 新 controller 第一顆用 0
+
+            used_on_bus = used_units.get(controller.key, set())
+            for unit in range(_MAX_UNITS_PER_BUS):
+                if unit == _RESERVED_UNIT:
+                    continue
+                if unit not in used_on_bus:
+                    return controller, unit
+
+        raise Exception(f"No available SCSI slot up to bus {_MAX_SCSI_BUS}.")
+
+# --------------------------------------------------------------------------------------
+# 小工具
+# --------------------------------------------------------------------------------------
+def _parse_label_number(label_text: Optional[str]) -> Optional[int]:
+    """將 vSphere deviceInfo.label（如 'Hard disk 2'）解析出數字 2。"""
+    if not label_text:
+        return None
+    try:
+        parts = label_text.strip().split()
+        last = parts[-1]
+        return int(last) if last.isdigit() else None
+    except Exception:
+        return None
+
+def _mock_base() -> str:
+    """
+    取得 mock vSphere API 的 base URL。
+    直接使用 config.VSPHERE_HOST，並確保補上 /mock。
+    """
+    host = (current_app.config.get("VSPHERE_HOST") or "").rstrip("/")
+    return host if host.endswith("/mock") else host + "/mock"
+
+# --------------------------------------------------------------------------------------
+# 查詢 VM 磁碟（公開）
+# --------------------------------------------------------------------------------------
+@_with_connection
 def get_vm_disks(si, vm_name: str) -> List[Dict]:
-    """查詢指定 VM 上的所有虛擬硬碟（跳過 OS 盤 0:0）"""
-    content = si.RetrieveContent()
-    vm = get_obj(content, [vim.VirtualMachine], vm_name)
-    if not vm:
-        raise ValueError(f"VM '{vm_name}' not found.")
+    """
+    查詢指定 VM 上的所有虛擬硬碟（跳過 OS 盤 0:0）。vm_name 就是 vm_name_prefix。
+    local：呼叫 GET /mock/vsphere/vms/<vm>/disks
+    real ：讀取 pyVmomi VM 裝置
+    """
+    if _is_local_mode():
+        # 先確保 VM 存在（避免第一次查詢報不存在）
+        try:
+            requests.post(f"{_mock_base()}/vsphere/vms/{vm_name}/ensure", timeout=5)
+        except Exception:
+            pass
+
+        import requests
+        r = requests.get(f"{_mock_base()}/vsphere/vms/{vm_name}/disks", timeout=10)
+        r.raise_for_status()
+        items = r.json() or []
+        # 直接以 mock 結構轉換
+        disks = []
+        for it in items:
+            disks.append({
+                "key": it.get("key"),
+                "label": it.get("label_text"),
+                "capacity_gb": it.get("capacity_gb"),
+                "provisioning": it.get("provision_type"),
+                "unit_number": it.get("unit_number"),
+                "controller_bus": it.get("controller_bus"),
+                "vmdk_path": it.get("vmdk_path"),
+            })
+        return sorted(disks, key=lambda d: (d["controller_bus"], d["unit_number"]))
+
+    # ------- 真實 pyVmomi -------
+    vm = _get_vm_by_name(si, vm_name)
 
     # 建立 controller key -> busNumber 對照
     controller_bus_by_key: Dict[int, int] = {}
@@ -111,11 +276,9 @@ def get_vm_disks(si, vm_name: str) -> List[Dict]:
         if isinstance(dev, vim.vm.device.VirtualDisk):
             bus = controller_bus_by_key.get(dev.controllerKey, -1)
             unit = dev.unitNumber
-            # 跳過 OS 系統碟位（0:0）
             if (bus, unit) == _OS_BOOT_SLOT:
-                continue
+                continue  # 跳過 OS 盤位 0:0
 
-            # 判斷 Provisioning 類型（延續你原本的判斷）
             provisioning = (
                 "Thin" if getattr(dev.backing, "thinProvisioned", False)
                 else "Thick (Eager Zeroed)" if getattr(dev.backing, "eagerlyScrub", False)
@@ -123,158 +286,79 @@ def get_vm_disks(si, vm_name: str) -> List[Dict]:
             )
             disks.append({
                 "key": dev.key,
-                "label": dev.deviceInfo.label,
+                "label": getattr(dev.deviceInfo, "label", None),
                 "capacity_gb": dev.capacityInKB // (1024 * 1024),
                 "provisioning": provisioning,
                 "unit_number": unit,
                 "controller_bus": bus,
-                "vmdk_path": dev.backing.fileName
+                "vmdk_path": getattr(dev.backing, "fileName", None),
             })
-    # 依 bus, unit 排序
     return sorted(disks, key=lambda d: (d["controller_bus"], d["unit_number"]))
 
 # --------------------------------------------------------------------------------------
-# 內部工具：蒐集 SCSI 狀態/建立 Controller/尋找下一個可用 slot
+# 建立/刪除/調整磁碟（公開）
 # --------------------------------------------------------------------------------------
-def _collect_scsi_state(vm) -> Tuple[List[vim.vm.device.VirtualSCSIController], Dict[int, int], Dict[int, set]]:
+@_with_connection
+def add_disk_to_vm(si, vm_name: str, disk_spec: Dict) -> Dict[str, Optional[object]]:
     """
-    回傳：
-      controllers: list of controller
-      controller_bus_by_key: {controllerKey -> busNumber}
-      used_units_by_ctrl: {controllerKey -> set(unitNumbers)}
-    """
-    controllers: List[vim.vm.device.VirtualSCSIController] = []
-    controller_bus_by_key: Dict[int, int] = {}
-    used_units_by_ctrl: Dict[int, set] = {}
-
-    for dev in vm.config.hardware.device:
-        if isinstance(dev, vim.vm.device.VirtualSCSIController):
-            controllers.append(dev)
-            controller_bus_by_key[dev.key] = dev.busNumber
-            used_units_by_ctrl[dev.key] = set()
-
-    for dev in vm.config.hardware.device:
-        if isinstance(dev, vim.vm.device.VirtualDisk):
-            ctrl_key = dev.controllerKey
-            if ctrl_key in used_units_by_ctrl:
-                used_units_by_ctrl[ctrl_key].add(dev.unitNumber)
-
-    return controllers, controller_bus_by_key, used_units_by_ctrl
-
-def _ensure_scsi_controller(vm, bus_number: int) -> vim.vm.device.VirtualSCSIController:
-    """
-    確保指定 bus 的 SCSI controller 存在；若不存在則建立一顆。
-    回傳該 bus 的 controller 物件（新的或既有）。
-    """
-    # 先找現有
-    for dev in vm.config.hardware.device:
-        if isinstance(dev, vim.vm.device.VirtualSCSIController) and dev.busNumber == bus_number:
-            return dev
-
-    # 沒有就建一顆（使用 LsiLogic SAS；與常見預設相容）
-    controller = vim.vm.device.ParaVirtualSCSIController() if hasattr(vim.vm.device, "ParaVirtualSCSIController") else vim.vm.device.VirtualLsiLogicSASController()
-    controller.busNumber = bus_number
-    controller.sharedBus = vim.vm.device.VirtualSCSIController.Sharing.noSharing
-    controller.key = -101  # 任意負值，讓 vCenter 分配實際 key
-
-    spec = vim.vm.ConfigSpec()
-    dev_spec = vim.vm.device.VirtualDeviceSpec()
-    dev_spec.operation = vim.vm.device.VirtualDeviceSpec.Operation.add
-    dev_spec.device = controller
-    spec.deviceChange = [dev_spec]
-
-    wait_for_task(vm.ReconfigVM_Task(spec=spec))
-
-    # 重新取得，拿到實際 key
-    for dev in vm.config.hardware.device:
-        if isinstance(dev, vim.vm.device.VirtualSCSIController) and dev.busNumber == bus_number:
-            return dev
-
-    raise RuntimeError(f"Failed to create SCSI controller for bus {bus_number}.")
-
-def _find_next_slot_auto(vm) -> Tuple[vim.vm.device.VirtualSCSIController, int]:
-    """
-    自動分配下一個可用 slot：
-      - 永遠跳過 OS 盤位 scsi(0:0)
-      - 優先塞 bus=0：unit=1..15（跳 7）
-      - bus=0 塞滿後：建立 bus=1 controller，從 1:0..15（跳 7），以此類推
-    """
-    # 確保 bus=0 存在
-    _ensure_scsi_controller(vm, 0)
-
-    controllers, _, used_units = _collect_scsi_state(vm)
-    controllers_by_bus = {c.busNumber: c for c in controllers}
-    existing_buses = sorted(controllers_by_bus.keys())
-
-    # 先試 bus=0，從 1..15（跳 7）
-    c0 = controllers_by_bus.get(0) or _ensure_scsi_controller(vm, 0)
-    used0 = used_units.get(c0.key, set())
-    for unit in range(_MAX_UNITS_PER_BUS):
-        if unit == _RESERVED_UNIT:
-            continue
-        if unit == 0:  # 跳過 OS 盤位
-            continue
-        if unit not in used0:
-            return c0, unit
-
-    # bus=0 滿了 → 往 1.._MAX_SCSI_BUS
-    for bus in range(1, _MAX_SCSI_BUS + 1):
-        c = controllers_by_bus.get(bus)
-        if not c:
-            c = _ensure_scsi_controller(vm, bus)
-            return c, 0  # 新 controller 第一顆用 0
-
-        used = used_units.get(c.key, set())
-        for unit in range(_MAX_UNITS_PER_BUS):
-            if unit == _RESERVED_UNIT:
-                continue
-            if unit not in used:
-                return c, unit
-
-    raise Exception(f"No available SCSI slot up to bus {_MAX_SCSI_BUS}.")
-
-# --------------------------------------------------------------------------------------
-# 建立/刪除/調整磁碟
-# --------------------------------------------------------------------------------------
-def add_disk_to_vm(si, vm_name: str, disk_spec: Dict) -> str:
-    """
-    新增硬碟到指定 VM。
-    - 若 disk_spec 帶 controller_id：沿用舊行為（在該 bus 自動找 unit，規則同跳 7；若 bus=0 會跳過 0:0）
-    - 若未帶 controller_id：走自動分配（0:1.. → 1:0..，跳 7；必要時自動建立 controller）
-    disk_spec keys:
+    新增硬碟到指定 VM（vm_name 就是 vm_name_prefix）。
+    disk_spec:
       - size_gb (int)            : 必填
       - provision_type (str)     : 'thin' | 'thick_lazy' | 'thick_eager'
-      - controller_id (int)      : 選填（建議不帶，讓系統自動決定）
+      - controller_id (int)      : 選填（指定 bus；建議不帶）
+    回傳（可直接回寫 DB）：
+      controller_bus, unit_number, label_text, label_number, vmdk_path, size_gb, provision_type
     """
     size_gb = int(disk_spec["size_gb"])
-    prov = (disk_spec.get("provision_type") or "").lower().strip()
+    provision_type = (disk_spec.get("provision_type") or "").lower().strip()
 
-    content = si.RetrieveContent()
-    vm = get_obj(content, [vim.VirtualMachine], vm_name)
-    if not vm:
-        raise ValueError(f"VM '{vm_name}' not found.")
+    if _is_local_mode():
+        import requests
+        # 確保 VM 存在
+        requests.post(f"{_mock_base()}/vsphere/vms/{vm_name}/ensure", timeout=5)
+
+        payload = {
+            "size_gb": size_gb,
+            "provision_type": provision_type or "thin",
+        }
+        if disk_spec.get("controller_id") is not None:
+            payload["controller_id"] = int(disk_spec["controller_id"])
+
+        r = requests.post(f"{_mock_base()}/vsphere/vms/{vm_name}/disks", json=payload, timeout=20)
+        r.raise_for_status()
+        data = r.json() or {}
+        return {
+            "controller_bus": data.get("controller_bus"),
+            "unit_number": data.get("unit_number"),
+            "label_text": data.get("label_text"),
+            "label_number": data.get("label_number"),
+            "vmdk_path": data.get("vmdk_path"),
+            "size_gb": data.get("size_gb"),
+            "provision_type": data.get("provision_type"),
+        }
+
+    # ------- 真實 pyVmomi -------
+    vm = _get_vm_by_name(si, vm_name)
 
     # 取得目標 controller 與 unit
     if "controller_id" in disk_spec and disk_spec["controller_id"] is not None:
         target_bus = int(disk_spec["controller_id"])
-        ctrl = _ensure_scsi_controller(vm, target_bus)
+        controller = _ensure_scsi_controller(vm, target_bus)
 
-        # 找 unit；bus=0 需跳過 0；所有 bus 跳 7
         used_units = {d.unitNumber for d in vm.config.hardware.device
-                      if isinstance(d, vim.vm.device.VirtualDisk) and d.controllerKey == ctrl.key}
+                      if isinstance(d, vim.vm.device.VirtualDisk) and d.controllerKey == controller.key}
         start_unit = 1 if target_bus == 0 else 0
-        unit = None
-        for u in range(start_unit, _MAX_UNITS_PER_BUS):
-            if u == _RESERVED_UNIT:
+        unit_number = None
+        for candidate in range(start_unit, _MAX_UNITS_PER_BUS):
+            if candidate == _RESERVED_UNIT:
                 continue
-            if target_bus == 0 and u == 0:
+            if target_bus == 0 and candidate == 0:
                 continue
-            if u not in used_units:
-                unit = u
+            if candidate not in used_units:
+                unit_number = candidate
                 break
-        if unit is None:
+        if unit_number is None:
             raise Exception(f"No available unit on SCSI controller {target_bus}.")
-        controller, unit_number = ctrl, unit
     else:
         controller, unit_number = _find_next_slot_auto(vm)
 
@@ -285,11 +369,11 @@ def add_disk_to_vm(si, vm_name: str, disk_spec: Dict) -> str:
     dev_spec.fileOperation = vim.vm.device.VirtualDeviceSpec.FileOperation.create
 
     backing = vim.vm.device.VirtualDisk.FlatVer2BackingInfo(diskMode='persistent')
-    if prov == 'thin':
+    if provision_type == 'thin':
         backing.thinProvisioned = True
-    elif prov == 'thick_eager':
+    elif provision_type == 'thick_eager':
         backing.eagerlyScrub = True
-    # thick_lazy -> 兩個 flag 都不設
+    # 'thick_lazy' -> 兩個 flag 都不設
 
     new_disk = vim.vm.device.VirtualDisk()
     new_disk.key = -1
@@ -302,14 +386,42 @@ def add_disk_to_vm(si, vm_name: str, disk_spec: Dict) -> str:
     spec.deviceChange = [dev_spec]
 
     wait_for_task(vm.ReconfigVM_Task(spec=spec))
-    return f"Successfully added {size_gb}GB disk to '{vm_name}' at scsi({controller.busNumber}:{unit_number})."
 
+    # 回讀新磁碟資訊（用 controllerKey + unitNumber 配對）
+    target_disk = None
+    for dev in vm.config.hardware.device:
+        if isinstance(dev, vim.vm.device.VirtualDisk):
+            if dev.controllerKey == controller.key and dev.unitNumber == unit_number:
+                target_disk = dev
+                break
+
+    label_text = getattr(target_disk.deviceInfo, "label", None) if target_disk else None
+    vmdk_path = getattr(target_disk.backing, "fileName", None) if target_disk else None
+    label_number = _parse_label_number(label_text)
+
+    return {
+        "controller_bus": controller.busNumber,     # -> vm_disks.scsi_controller
+        "unit_number": unit_number,                 # -> vm_disks.unit_number
+        "label_text": label_text,                   # -> 顯示用
+        "label_number": label_number,               # -> vm_disks.label
+        "vmdk_path": vmdk_path,                     # -> vm_disks.vmdk_path
+        "size_gb": size_gb,
+        "provision_type": provision_type or "thick_lazy",
+    }
+
+@_with_connection
 def remove_disk_from_vm(si, vm_name: str, disk_key: int) -> str:
     """移除指定 VM 的硬碟（destroy VMDK）"""
-    content = si.RetrieveContent()
-    vm = get_obj(content, [vim.VirtualMachine], vm_name)
-    if not vm:
-        raise ValueError(f"VM '{vm_name}' not found.")
+    if _is_local_mode():
+        import requests
+        r = requests.delete(f"{_mock_base()}/vsphere/vms/{vm_name}/disks/{int(disk_key)}", timeout=15)
+        if r.status_code == 404:
+            raise ValueError(f"Disk with key {disk_key} not found.")
+        r.raise_for_status()
+        return f"Successfully removed disk (key: {disk_key})."
+
+    # ------- 真實 pyVmomi -------
+    vm = _get_vm_by_name(si, vm_name)
 
     target = None
     for dev in vm.config.hardware.device:
@@ -327,14 +439,27 @@ def remove_disk_from_vm(si, vm_name: str, disk_key: int) -> str:
     spec.deviceChange = [dev_spec]
 
     wait_for_task(vm.ReconfigVM_Task(spec=spec))
-    return f"Successfully removed disk (key: {disk_key}) from '{vm_name}'."
+    return f"Successfully removed disk (key: {disk_key})."
 
+@_with_connection
 def update_disk_size(si, vm_name: str, disk_key: int, new_size_gb: int) -> str:
     """放大指定硬碟（不可縮小）"""
-    content = si.RetrieveContent()
-    vm = get_obj(content, [vim.VirtualMachine], vm_name)
-    if not vm:
-        raise ValueError(f"VM '{vm_name}' not found.")
+    if _is_local_mode():
+        import requests
+        payload = {"new_size_gb": int(new_size_gb)}
+        r = requests.patch(f"{_mock_base()}/vsphere/vms/{vm_name}/disks/{int(disk_key)}",
+                           json=payload, timeout=20)
+        if r.status_code == 404:
+            raise ValueError(f"Disk with key {disk_key} not found.")
+        if r.status_code == 400:
+            # e.g. cannot shrink
+            err = (r.json() or {}).get("error") or "Bad Request"
+            raise ValueError(err)
+        r.raise_for_status()
+        return f"Successfully updated disk (key: {disk_key}) to {new_size_gb}GB."
+
+    # ------- 真實 pyVmomi -------
+    vm = _get_vm_by_name(si, vm_name)
 
     disk = None
     for dev in vm.config.hardware.device:
@@ -359,4 +484,4 @@ def update_disk_size(si, vm_name: str, disk_key: int, new_size_gb: int) -> str:
     spec.deviceChange = [dev_spec]
 
     wait_for_task(vm.ReconfigVM_Task(spec=spec))
-    return f"Successfully updated disk (key: {disk_key}) on '{vm_name}' to {new_size_gb}GB."
+    return f"Successfully updated disk (key: {disk_key}) to {new_size_gb}GB."

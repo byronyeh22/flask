@@ -4,36 +4,46 @@ import random
 
 mock_app = Flask(__name__)
 
-
-# --- Helper ---
+# =========================
+# 通用 Helper
+# =========================
 def utc_now_iso():
     # ISO8601 with timezone (Z)；你的 insert 會做正規化
     return datetime.now(timezone.utc).isoformat()
 
-PIPELINE_SEQ = 0  # 控制 pipeline id 起始值你可自行選，確保大於現有資料
+def _utc_now():
+    return datetime.now(timezone.utc)
 
+def iso_z(dt):
+    if not isinstance(dt, datetime):
+        return None
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+# =========================
+# In-memory (GitLab / vSphere / Jira)
+# =========================
+PIPELINE_SEQ = 0  # 控制 pipeline id 起始值你可自行選，確保大於現有資料
+PIPELINES = {}    # pipeline_id -> state dict
+
+# vSphere in-memory
+VMS = {}          # vm_name -> {"controllers": {bus: {"key": int}}, "disks": [{...}], "next_key": int}
+                  # disk: {"key": int, "controller_bus": int, "controller_key": int, "unit_number": int,
+                  #        "capacity_gb": int, "provision_type": str, "label_text": str, "label_number": int,
+                  #        "vmdk_path": str}
+
+# Jira in-memory
+mock_jira_tickets = {}
+
+DEFAULT_RUN_SECONDS = 30  # GitLab：進入 running 後維持秒數
+
+# =========================
+# GitLab Mock
+# =========================
 def next_pipeline_id() -> int:
     """Return a process-wide monotonically increasing pipeline id."""
     global PIPELINE_SEQ
     PIPELINE_SEQ += 1
     return PIPELINE_SEQ
-
-# --- 模擬 vSphere API ---
-@mock_app.route('/mock/vsphere/objects', methods=['GET'])
-def get_vsphere_objects():
-    """模擬 get_vsphere_objects.py 的回應"""
-    return jsonify({
-        "datacenters": ["mock-dc-1", "mock-dc-2"],
-        "clusters": ["mock-cluster-a", "mock-cluster-b"],
-        "templates": ["mock-template-win", "mock-template-linux"],
-        "networks": ["mock-network-1", "mock-network-2"],
-        "datastores": ["mock-datastore-1", "mock-datastore-2"],
-        "vm_name": ["mock-vm-1", "mock-vm-2"],
-    })
-
-# =========================
-# Mock GitLab API
-# =========================
 
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/trigger/pipeline', methods=['POST'])
 def trigger_gitlab_pipeline(project_id):
@@ -52,7 +62,7 @@ def trigger_gitlab_pipeline(project_id):
     created_dt = _utc_now()
     created_iso = iso_z(created_dt)
 
-    # 直接把 pipeline 狀態註冊到 in-memory（這樣 GET 立刻能看到，不用等第一次查詢才建立）
+    # 註冊到 in-memory
     PIPELINES[pipeline_id] = {
         "id": pipeline_id,
         "pipeline_id": pipeline_id,
@@ -63,14 +73,14 @@ def trigger_gitlab_pipeline(project_id):
 
         # 狀態時間線
         "created_at_dt": created_dt,
-        "started_at_dt": created_dt,       # 觸發就開始
+        "started_at_dt": created_dt,  # 觸發就開始
         "played_at_dt":  None,
         "finish_at_dt":  None,
 
         "pre_run_seconds": 0,
         "post_run_seconds": DEFAULT_RUN_SECONDS,
 
-        "status": "created",               # 觸發當下給 created（你也可直接給 manual）
+        "status": "created",  # 觸發當下給 created（你也可直接給 manual）
         "created_at": created_iso,
         "started_at": created_iso,
         "finished_at": None,
@@ -79,7 +89,7 @@ def trigger_gitlab_pipeline(project_id):
         "force_fail": False,
     }
 
-    # 回傳 payload（維持你原本 insert 期望欄位）
+    # 回傳 payload
     return jsonify({
         "pipeline_id": pipeline_id,
         "id": pipeline_id,
@@ -95,20 +105,6 @@ def trigger_gitlab_pipeline(project_id):
         "variables": dict(request.form)
     })
 
-
-# ===== in-memory state & helpers (add these) =====
-PIPELINES = {}                   # pipeline_id -> state dict
-
-DEFAULT_RUN_SECONDS = 30          # 進入 running 後維持秒數
-
-def _utc_now():
-    return datetime.now(timezone.utc)
-
-def iso_z(dt):
-    if not isinstance(dt, datetime):
-        return None
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/pipelines/<int:pipeline_id>', methods=['GET'])
 def get_pipeline_status(project_id, pipeline_id):
     now = _utc_now()
@@ -123,14 +119,12 @@ def get_pipeline_status(project_id, pipeline_id):
             "sha": "mock-sha-12345",
             "web_url": f"http://mock-gitlab.com/pipelines/{pipeline_id}",
 
-            # 時間線：觸發即開始；按 Play 後才會設定 finish_at
             "created_at_dt": created_at,
-            "started_at_dt": created_at,                 # ★ 觸發就開始
-            "played_at_dt":  None,                       # ★ 等你按 Play
-            "finish_at_dt":  None,                       #   = played_at_dt + post_run_seconds
+            "started_at_dt": created_at,
+            "played_at_dt":  None,
+            "finish_at_dt":  None,
 
-            # 執行段（不含等待）秒數：可調整（這裡預設：前段 0 秒、後段 DEFAULT_RUN_SECONDS 秒）
-            "pre_run_seconds": 0,                        # 例如想模擬 job1=3s，就改成 3
+            "pre_run_seconds": 0,
             "post_run_seconds": DEFAULT_RUN_SECONDS,
 
             "status": "manual",
@@ -142,7 +136,7 @@ def get_pipeline_status(project_id, pipeline_id):
             "force_fail": False,
         }
 
-    # 如果狀態已經是 'canceled'，就直接回傳，不再重新計算
+    # 若已 canceled
     if p.get("status") == 'canceled':
         return jsonify({
             "id": p["id"],
@@ -153,11 +147,11 @@ def get_pipeline_status(project_id, pipeline_id):
             "created_at": p["created_at"],
             "updated_at": iso_z(now),
             "started_at": p["started_at"],
-            "finished_at": p.get("finished_at") or iso_z(now), # 如果 finished_at 不存在，就用現在的時間
+            "finished_at": p.get("finished_at") or iso_z(now),
             "duration": p.get("duration")
         }), 200
 
-    # 尚未按 Play：一直 manual（但 started_at 已存在）
+    # 尚未 Play
     if p["played_at_dt"] is None:
         status      = "manual"
         started_at  = p["started_at"]
@@ -174,7 +168,6 @@ def get_pipeline_status(project_id, pipeline_id):
             status = "failed" if p["force_fail"] else "success"
             if not p["finished_at"]:
                 p["finished_at"] = iso_z(p["finish_at_dt"])
-                # ★ duration 只計執行段（前段 + 後段），不含等待 Play 的時間
                 p["duration"] = int(p.get("pre_run_seconds", 0) + p.get("post_run_seconds", DEFAULT_RUN_SECONDS))
             started_at  = p["started_at"]
             finished_at = p["finished_at"]
@@ -190,9 +183,9 @@ def get_pipeline_status(project_id, pipeline_id):
         "sha": p["sha"],
         "created_at": p["created_at"],
         "updated_at": iso_z(now),
-        "started_at": started_at,          # 觸發時間（Z）
-        "finished_at": finished_at,        # 完成時間（Z/None）
-        "duration": duration               # 只計執行段秒數
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration": duration
     }), 200
 
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/pipelines/<int:pipeline_id>/jobs', methods=['GET'])
@@ -212,7 +205,7 @@ def get_gitlab_jobs(project_id, pipeline_id):
             apply_started = iso_z(p["played_at_dt"])
             apply_finished = None
         else:
-            apply_status = "failed" if p["force_fail"] else "success"
+            apply_status  = "failed" if p["force_fail"] else "success"
             apply_started = iso_z(p["played_at_dt"])
             apply_finished = p["finished_at"]
 
@@ -239,20 +232,13 @@ def get_gitlab_jobs(project_id, pipeline_id):
 
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/pipelines/<int:pipeline_id>/cancel', methods=['POST'])
 def cancel_gitlab_pipeline(project_id, pipeline_id):
-    """
-    模擬 cancel_manual_jobs.py 中取消整條 pipeline 的行為。
-    """
-    # 從記憶體中尋找對應的 pipeline
     pipeline = PIPELINES.get(pipeline_id)
     if not pipeline:
-        # 如果找不到，回傳 404 Not Found
         return jsonify({"message": "404 Pipeline Not Found"}), 404
 
-    # 更新記憶體中 pipeline 的狀態為 'canceled'
     pipeline['status'] = 'canceled'
-    pipeline['finished_at'] = utc_now_iso() # 標記一個完成時間
+    pipeline['finished_at'] = utc_now_iso()
 
-    # 回傳一個類似真實 GitLab API 的成功回應
     return jsonify({
         "id": pipeline_id,
         "project_id": project_id,
@@ -262,13 +248,11 @@ def cancel_gitlab_pipeline(project_id, pipeline_id):
 
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/jobs/<int:job_id>/play', methods=['POST'])
 def run_manual_job(project_id, job_id):
-    # 由 job_id 推回對應的 pipeline_id（因為 job_id = pipeline_id*100 + 序號）
     pipeline_id = job_id // 100
     p = PIPELINES.get(pipeline_id)
     if not p or p.get("project_id") != project_id:
         return jsonify({"error": "pipeline not found for this job"}), 404
 
-    # 允許用表單參數覆蓋跑多久（秒）
     try:
         run_secs = int(request.form.get("RUN_SECONDS", "") or 0)
     except ValueError:
@@ -277,7 +261,7 @@ def run_manual_job(project_id, job_id):
         run_secs = p.get("post_run_seconds", DEFAULT_RUN_SECONDS)
     p["post_run_seconds"] = run_secs
 
-    # 第一次按 Play：開始跑，設定 finish_at_dt
+    # 第一次按 Play：開始跑
     if p.get("played_at_dt") is None:
         now = _utc_now()
         p["played_at_dt"] = now
@@ -294,13 +278,257 @@ def run_manual_job(project_id, job_id):
         "duration": None
     }), 200
 
+
+# =========================
+# vSphere Mock (HTTP 版)
+# =========================
+
+# SCSI 規則
+MAX_SCSI_BUS = 3          # 0..3
+MAX_UNITS_PER_BUS = 16    # 0..15
+RESERVED_UNIT = 7
+OS_BOOT_SLOT = (0, 0)
+
+def _vm_ensure(vm_name: str):
+    vm = VMS.get(vm_name)
+    if vm:
+        return vm
+    # 初始：controller bus=0, key=100，OS disk scsi(0:0)
+    vm = {
+        "controllers": {0: {"key": 100}},  # bus -> controller
+        "disks": [],
+        "next_key": 101
+    }
+    # OS disk
+    os_disk = {
+        "key": vm["next_key"],
+        "controller_bus": 0,
+        "controller_key": vm["controllers"][0]["key"],
+        "unit_number": 0,
+        "capacity_gb": 40,
+        "provision_type": "thick_lazy",
+        "label_text": "Hard disk 1",
+        "label_number": 1,
+        "vmdk_path": f"[mock-ds] {vm_name}/{vm_name}_0-0.vmdk"
+    }
+    vm["next_key"] += 1
+    vm["disks"].append(os_disk)
+    VMS[vm_name] = vm
+    return vm
+
+def _next_key(vm):
+    k = vm["next_key"]
+    vm["next_key"] += 1
+    return k
+
+def _ensure_controller(vm, bus: int):
+    if bus in vm["controllers"]:
+        return vm["controllers"][bus]
+    if bus < 0 or bus > MAX_SCSI_BUS:
+        raise ValueError(f"Invalid SCSI bus: {bus}")
+    vm["controllers"][bus] = {"key": _next_key(vm)}
+    return vm["controllers"][bus]
+
+def _used_units_on_controller(vm, controller_key: int) -> set:
+    return {d["unit_number"] for d in vm["disks"] if d["controller_key"] == controller_key}
+
+def _find_next_slot_auto(vm) -> (int, int, int):
+    """
+    回傳 (controller_bus, controller_key, unit_number)
+      - 先塞 bus=0，unit=1..15（跳 7；跳 OS 0）
+      - 再 bus=1..3，unit=0..15（跳 7）
+      - 不存在的 bus 自動建立
+    """
+    # 確保 bus0 存在
+    c0 = _ensure_controller(vm, 0)
+
+    # bus 0：unit 1..15，跳 7 與 0
+    used0 = _used_units_on_controller(vm, c0["key"])
+    for unit in range(MAX_UNITS_PER_BUS):
+        if unit in (0, RESERVED_UNIT):  # 跳 OS 與 7
+            continue
+        if unit not in used0:
+            return (0, c0["key"], unit)
+
+    # bus 1..3
+    for bus in range(1, MAX_SCSI_BUS + 1):
+        c = vm["controllers"].get(bus)
+        if not c:
+            c = _ensure_controller(vm, bus)
+            return (bus, c["key"], 0)  # 新 controller 第一顆用 0
+
+        used = _used_units_on_controller(vm, c["key"])
+        for unit in range(MAX_UNITS_PER_BUS):
+            if unit == RESERVED_UNIT:
+                continue
+            if unit not in used:
+                return (bus, c["key"], unit)
+
+    raise RuntimeError("No available SCSI slot")
+
+def _next_label_number(vm) -> int:
+    """取現有 label 的最大 N，再 +1（較貼近 vSphere 規則）"""
+    max_n = 0
+    for d in vm["disks"]:
+        label = d.get("label_text") or ""
+        parts = label.split()
+        if parts and parts[-1].isdigit():
+            max_n = max(max_n, int(parts[-1]))
+    return max_n + 1
+
+def _build_disk_json(d):
+    return {
+        "key": d["key"],
+        "controller_bus": d["controller_bus"],
+        "controller_key": d["controller_key"],
+        "unit_number": d["unit_number"],
+        "capacity_gb": d["capacity_gb"],
+        "provision_type": d["provision_type"],
+        "label_text": d["label_text"],
+        "label_number": d["label_number"],
+        "vmdk_path": d["vmdk_path"]
+    }
+
+@mock_app.route('/mock/vsphere/objects', methods=['GET'])
+def get_vsphere_objects():
+    """模擬 get_vsphere_objects.py 的回應"""
+    return jsonify({
+        "datacenters": ["mock-dc-1", "mock-dc-2"],
+        "clusters": ["mock-cluster-a", "mock-cluster-b"],
+        "templates": ["mock-template-win", "mock-template-linux"],
+        "networks": ["mock-network-1", "mock-network-2"],
+        "datastores": ["mock-datastore-1", "mock-datastore-2"],
+        "vm_name": ["mock-vm-1", "mock-vm-2"],
+    })
+
+# ---- vSphere Mock: VM & Disk APIs ----
+
+@mock_app.route('/mock/vsphere/vms/<string:vm_name>/ensure', methods=['POST'])
+def vsphere_vm_ensure(vm_name):
+    vm = _vm_ensure(vm_name)
+    return jsonify({
+        "vm": vm_name,
+        "controllers": {str(bus): c["key"] for bus, c in vm["controllers"].items()},
+        "disks": [_build_disk_json(d) for d in sorted(vm["disks"], key=lambda x: (x["controller_bus"], x["unit_number"]))]
+    })
+
+@mock_app.route('/mock/vsphere/vms/<string:vm_name>/disks', methods=['GET'])
+def vsphere_list_disks(vm_name):
+    vm = _vm_ensure(vm_name)
+    disks = sorted(vm["disks"], key=lambda x: (x["controller_bus"], x["unit_number"]))
+    # 跳過 OS 盤 0:0（與真實查詢一致）
+    disks = [d for d in disks if not (d["controller_bus"] == 0 and d["unit_number"] == 0)]
+    return jsonify([_build_disk_json(d) for d in disks])
+
+@mock_app.route('/mock/vsphere/vms/<string:vm_name>/disks', methods=['POST'])
+def vsphere_add_disk(vm_name):
+    """
+    body JSON:
+    {
+      "size_gb": 50,
+      "provision_type": "thin" | "thick_lazy" | "thick_eager",
+      "controller_id": 0   # optional：指定 bus；不給則自動分配
+    }
+    """
+    body = request.get_json(silent=True) or {}
+    size_gb = int(body.get("size_gb") or 0)
+    if size_gb <= 0:
+        return jsonify({"error": "size_gb must be > 0"}), 400
+    provision_type = (body.get("provision_type") or "thin").lower().strip()
+    if provision_type not in ("thin", "thick_lazy", "thick_eager"):
+        provision_type = "thin"
+
+    vm = _vm_ensure(vm_name)
+
+    # 找 slot
+    if body.get("controller_id") is not None:
+        target_bus = int(body["controller_id"])
+        ctrl = _ensure_controller(vm, target_bus)
+        used = _used_units_on_controller(vm, ctrl["key"])
+        start_unit = 1 if target_bus == 0 else 0
+        unit = None
+        for u in range(start_unit, MAX_UNITS_PER_BUS):
+            if u == RESERVED_UNIT:
+                continue
+            if u not in used:
+                unit = u
+                break
+        if unit is None:
+            return jsonify({"error": f"No free unit on SCSI bus {target_bus}"}), 409
+        controller_bus, controller_key, unit_number = target_bus, ctrl["key"], unit
+    else:
+        controller_bus, controller_key, unit_number = _find_next_slot_auto(vm)
+
+    # 產生 label 與 key / 路徑
+    label_number = _next_label_number(vm)
+    label_text   = f"Hard disk {label_number}"
+    disk_key     = _next_key(vm)
+    vmdk_path    = f"[mock-ds] {vm_name}/{vm_name}_{controller_bus}-{unit_number}.vmdk"
+
+    disk = {
+        "key": disk_key,
+        "controller_bus": controller_bus,
+        "controller_key": controller_key,
+        "unit_number": unit_number,
+        "capacity_gb": size_gb,
+        "provision_type": provision_type,
+        "label_text": label_text,
+        "label_number": label_number,
+        "vmdk_path": vmdk_path
+    }
+    vm["disks"].append(disk)
+
+    result = {
+        "controller_bus": controller_bus,
+        "unit_number": unit_number,
+        "label_text": label_text,
+        "label_number": label_number,
+        "vmdk_path": vmdk_path,
+        "size_gb": size_gb,
+        "provision_type": provision_type,
+        "disk_key": disk_key
+    }
+    return jsonify(result), 201
+
+@mock_app.route('/mock/vsphere/vms/<string:vm_name>/disks/<int:disk_key>', methods=['DELETE'])
+def vsphere_remove_disk(vm_name, disk_key):
+    vm = _vm_ensure(vm_name)
+    before = len(vm["disks"])
+    vm["disks"] = [d for d in vm["disks"] if d["key"] != disk_key]
+    if len(vm["disks"]) == before:
+        return jsonify({"error": "disk not found"}), 404
+    return jsonify({"message": "removed", "disk_key": disk_key})
+
+@mock_app.route('/mock/vsphere/vms/<string:vm_name>/disks/<int:disk_key>', methods=['PATCH'])
+def vsphere_resize_disk(vm_name, disk_key):
+    body = request.get_json(silent=True) or {}
+    try:
+        new_size_gb = int(body.get("new_size_gb"))
+    except Exception:
+        return jsonify({"error": "new_size_gb required and must be int"}), 400
+    if new_size_gb <= 0:
+        return jsonify({"error": "new_size_gb must be > 0"}), 400
+
+    vm = _vm_ensure(vm_name)
+    target = None
+    for d in vm["disks"]:
+        if d["key"] == disk_key:
+            target = d
+            break
+    if not target:
+        return jsonify({"error": "disk not found"}), 404
+
+    if new_size_gb < target["capacity_gb"]:
+        return jsonify({"error": "cannot shrink disk"}), 400
+    if new_size_gb == target["capacity_gb"]:
+        return jsonify({"message": "no change", "capacity_gb": new_size_gb})
+
+    target["capacity_gb"] = new_size_gb
+    return jsonify({"message": "resized", "disk_key": disk_key, "capacity_gb": new_size_gb})
+
 # =========================
 # Mock Jira API
 # =========================
-
-# 用於保存 mock 的 tickets（以便 GET 時能回傳一致資料）
-mock_jira_tickets = {}
-
 @mock_app.route('/mock/jira/rest/api/2/issue/', methods=['POST'])
 def create_jira_ticket():
     """
@@ -347,5 +575,8 @@ def get_jira_issue(issue_id):
         }
     })
 
+# =========================
+# 入口
+# =========================
 if __name__ == "__main__":
     mock_app.run(host="0.0.0.0", port=5001, debug=True)

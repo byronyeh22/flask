@@ -138,16 +138,18 @@ def init_db():
             id INT AUTO_INCREMENT PRIMARY KEY,
             vm_configuration_id INT NOT NULL,
             -- 穩定對應 vSphere 的 SCSI 位址
-            scsi_controller TINYINT NOT NULL DEFAULT 0,  -- 0..3
-            unit_number INT NOT NULL,                    -- 0..6, 8..15
+            scsi_controller TINYINT NULL DEFAULT NULL,
+            unit_number INT NULL,                    -- 0..6, 8..15
             -- UI 顯示用 Hard Disk N（可變動連號）
-            ui_disk_number INT NULL,
+            label INT NULL,
             size INT NOT NULL,
             disk_provisioning VARCHAR(50) NOT NULL,
             status VARCHAR(50) DEFAULT 'PENDING_CREATION',
             vmdk_path VARCHAR(255) NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_vm_disks_vm_config (vm_configuration_id),
+            INDEX idx_vm_disks_status (status),
             CONSTRAINT uq_vm_scsi UNIQUE (vm_configuration_id, scsi_controller, unit_number),
             FOREIGN KEY (vm_configuration_id) REFERENCES vm_configurations(id) ON DELETE CASCADE
         )
