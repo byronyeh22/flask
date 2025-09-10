@@ -403,7 +403,7 @@ def monitor_pipelines(app):
                     """
                     SELECT workflow_id, status
                       FROM workflow_runs
-                     WHERE status NOT IN ('SUCCESS','FAILED')
+                     WHERE status NOT IN ('SUCCESS','FAILED','CANCELED')
                        AND created_at >= NOW() - INTERVAL 7 DAY
                      ORDER BY workflow_id DESC
                     """
@@ -468,6 +468,13 @@ def monitor_pipelines(app):
                                     db_conn, workflow_id, "GITLAB",
                                     f"Pipeline {pipeline_id} status is failed"
                                 )
+
+                            elif fresh == "canceled":
+                                update_request_status(workflow_id, "CANCELED")
+                                set_failed_message(db_conn, workflow_id, "GITLAB",
+                                                   f"Pipeline {pipeline_id} status is canceled"
+                                )
+
                         else:
                             set_failed_message(
                                 db_conn, workflow_id, "GITLAB_API",
