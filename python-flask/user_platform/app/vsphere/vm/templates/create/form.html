@@ -245,424 +245,484 @@
 </div>
 
 <script>
-  /* --------------------- 磁碟列增減 --------------------- */
-  function relabelDisks() {
-    const rows = document.querySelectorAll('#disk-container .disk-item');
-    rows.forEach((row, i) => {
-      const labelInput = row.querySelector('.disk-label');
-      if (labelInput) labelInput.value = `New Disk ${i + 1}`;
-    });
-  }
-  function addDisk(size, provisioning) {
-    const defaultSize = 50;
-    const defaultProv  = 'thin';
-    const diskContainer = document.getElementById('disk-container');
-    const row = document.createElement('div');
-    row.className = 'disk-item mb-2 p-3 border rounded bg-light';
-    const finalSize = (typeof size !== 'undefined' && size !== null && String(size).trim() !== '') ? size : defaultSize;
-    const finalProv = (typeof provisioning !== 'undefined' && provisioning) ? provisioning : defaultProv;
-    row.innerHTML = `
-      <div class="row align-items-end g-2">
-        <div class="col-md-3">
-          <label class="form-label mb-0 small fw-bold">Label</label>
-          <input type="text" class="form-control form-control-sm disk-label" readonly>
-        </div>
-        <div class="col-md-2">
-          <label class="form-label mb-0 small fw-bold">Size (GB)</label>
-          <input type="number" name="create_vm_disk_size[]" class="form-control form-control-sm" min="1" value="${finalSize}">
-        </div>
-        <div class="col-md">
-          <label class="form-label mb-0 small fw-bold">Provisioning</label>
-          <select name="create_vm_disk_provisioning[]" class="form-select form-select-sm disk-provisioning">
-            <option value="thin" ${finalProv === 'thin' ? 'selected' : ''}>Thin Provision</option>
-            <option value="thick_lazy" ${finalProv === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
-            <option value="thick_eager" ${finalProv === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
-          </select>
-        </div>
-        <div class="col-md-auto">
-          <button type="button" class="btn btn-sm btn-remove" onclick="removeDisk(this)">
-            <i class="bi bi-trash"></i>
-          </button>
-        </div>
-      </div>`;
-    diskContainer.appendChild(row);
-    relabelDisks();
-  }
-  function removeDisk(button) {
-    const diskItem = button.closest('.disk-item');
-    if (diskItem) diskItem.remove();
-    relabelDisks();
-  }
+/* --------------------- 磁碟列增減 --------------------- */
+function relabelDisks() {
+  const rows = document.querySelectorAll('#disk-container .disk-item');
+  rows.forEach((row, i) => {
+    const labelInput = row.querySelector('.disk-label');
+    if (labelInput) labelInput.value = `New Disk ${i + 1}`;
+  });
+}
+function addDisk(size, provisioning) {
+  const defaultSize = 50;
+  const defaultProv  = 'thin';
+  const diskContainer = document.getElementById('disk-container');
+  const row = document.createElement('div');
+  row.className = 'disk-item mb-2 p-3 border rounded bg-light';
+  const finalSize = (typeof size !== 'undefined' && size !== null && String(size).trim() !== '') ? size : defaultSize;
+  const finalProv = (typeof provisioning !== 'undefined' && provisioning) ? provisioning : defaultProv;
+  row.innerHTML = `
+    <div class="row align-items-end g-2">
+      <div class="col-md-3">
+        <label class="form-label mb-0 small fw-bold">Label</label>
+        <input type="text" class="form-control form-control-sm disk-label" readonly>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-0 small fw-bold">Size (GB)</label>
+        <input type="number" name="create_vm_disk_size[]" class="form-control form-control-sm" min="1" value="${finalSize}">
+      </div>
+      <div class="col-md">
+        <label class="form-label mb-0 small fw-bold">Provisioning</label>
+        <select name="create_vm_disk_provisioning[]" class="form-select form-select-sm disk-provisioning">
+          <option value="thin" ${finalProv === 'thin' ? 'selected' : ''}>Thin Provision</option>
+          <option value="thick_lazy" ${finalProv === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
+          <option value="thick_eager" ${finalProv === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
+        </select>
+      </div>
+      <div class="col-md-auto">
+        <button type="button" class="btn btn-sm btn-remove" onclick="removeDisk(this)">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+    </div>`;
+  diskContainer.appendChild(row);
+  relabelDisks();
+}
+function removeDisk(button) {
+  const diskItem = button.closest('.disk-item');
+  if (diskItem) diskItem.remove();
+  relabelDisks();
+}
 
-  /* --------------------- 必填檢查 --------------------- */
-  function validateRequiredFields(root) {
-    root.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
-    let ok = true;
-    const musts = Array.from(root.querySelectorAll('[data-required="true"]')).filter(el => el.type !== 'radio');
-    musts.forEach(el => {
-      const v = (el.value || '').trim();
-      if (!v) { el.classList.add('is-invalid'); ok = false; }
-      if (el.type === 'number' && el.hasAttribute('min')) {
-        const min = parseFloat(el.getAttribute('min'));
-        const num = parseFloat(el.value);
-        if (isNaN(num) || num < min) { el.classList.add('is-invalid'); ok = false; }
-      }
-    });
-    const radioNames = new Set(
-      Array.from(root.querySelectorAll('input[type="radio"][data-required="true"]')).map(r => r.name)
+/* --------------------- 必填檢查 --------------------- */
+function validateRequiredFields(root) {
+  root.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+  let ok = true;
+  const musts = Array.from(root.querySelectorAll('[data-required="true"]')).filter(el => el.type !== 'radio');
+  musts.forEach(el => {
+    const v = (el.value || '').trim();
+    if (!v) { el.classList.add('is-invalid'); ok = false; }
+    if (el.type === 'number' && el.hasAttribute('min')) {
+      const min = parseFloat(el.getAttribute('min'));
+      const num = parseFloat(el.value);
+      if (isNaN(num) || num < min) { el.classList.add('is-invalid'); ok = false; }
+    }
+  });
+  const radioNames = new Set(
+    Array.from(root.querySelectorAll('input[type="radio"][data-required="true"]')).map(r => r.name)
+  );
+  radioNames.forEach(name => {
+    const group = root.querySelectorAll(`input[type="radio"][name="${name}"]`);
+    const any = Array.from(group).some(r => r.checked);
+    if (!any) { group.forEach(r => r.classList.add('is-invalid')); ok = false; }
+  });
+  if (!ok) {
+    const first = root.querySelector('.is-invalid');
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  return ok;
+}
+
+/* --------------------- VM Name 防重 --------------------- */
+const __envVmCache = {};
+async function fetchEnvVms(env) {
+  if (!env) return new Set();
+  if (__envVmCache[env]) return __envVmCache[env];
+  try {
+    const resp = await fetch(`/api/get_vms_by_environment/${encodeURIComponent(env)}`);
+    if (!resp.ok) throw new Error('fetch failed');
+    const data = await resp.json();
+    const names = new Set(
+      (Array.isArray(data) ? data : []).map(v => {
+        if (typeof v === 'string') return v.toLowerCase();
+        if (v && typeof v === 'object') return (v.vm_name_prefix || v.name || v.vm || '').toLowerCase();
+        return '';
+      }).filter(Boolean)
     );
-    radioNames.forEach(name => {
-      const group = root.querySelectorAll(`input[type="radio"][name="${name}"]`);
-      const any = Array.from(group).some(r => r.checked);
-      if (!any) { group.forEach(r => r.classList.add('is-invalid')); ok = false; }
-    });
-    if (!ok) {
-      const first = root.querySelector('.is-invalid');
-      if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    return ok;
+    __envVmCache[env] = names;
+    return names;
+  } catch (e) {
+    console.warn('Failed to load env VMs:', e);
+    __envVmCache[env] = new Set();
+    return __envVmCache[env];
   }
+}
+let __vmCheckTimer = null;
+async function checkVmPrefixDuplicate() {
+  const envSel = document.getElementById('environment');
+  const env    = (envSel?.value || '').trim().toLowerCase();
+  const input  = document.getElementById('vm_name_prefix');
+  const fb     = document.getElementById('vmPrefixFeedback');
+  if (!input) return { duplicate: false };
+  const raw = (input.value || '').trim();
+  if (!env || !raw) {
+    input.classList.remove('is-invalid');
+    if (fb) fb.style.display = 'none';
+    input.dataset.dup = '0';
+    return { duplicate: false };
+  }
+  const envSet = await fetchEnvVms(env);
+  const isDup  = envSet.has(raw.toLowerCase());
+  if (isDup) {
+    input.classList.add('is-invalid');
+    if (fb) fb.style.display = 'block';
+    input.dataset.dup = '1';
+  } else {
+    input.classList.remove('is-invalid');
+    if (fb) fb.style.display = 'none';
+    input.dataset.dup = '0';
+  }
+  return { duplicate: isDup };
+}
+async function guardDuplicateBeforeSave() {
+  const result = await checkVmPrefixDuplicate();
+  if (result.duplicate) {
+    const envText = document.getElementById('environment')?.value?.toUpperCase() || '';
+    const val = document.getElementById('vm_name_prefix')?.value || '';
+    alert(`VM "${val}" already exists in ${envText}. Please choose another name.`);
+    return false;
+  }
+  return true;
+}
 
-  /* --------------------- VM Name 防重 --------------------- */
-  const __envVmCache = {};
-  async function fetchEnvVms(env) {
-    if (!env) return new Set();
-    if (__envVmCache[env]) return __envVmCache[env];
-    try {
-      const resp = await fetch(`/api/get_vms_by_environment/${encodeURIComponent(env)}`);
-      if (!resp.ok) throw new Error('fetch failed');
-      const data = await resp.json();
-      const names = new Set(
-        (Array.isArray(data) ? data : []).map(v => {
-          if (typeof v === 'string') return v.toLowerCase();
-          if (v && typeof v === 'object') return (v.vm_name_prefix || v.name || v.vm || '').toLowerCase();
-          return '';
-        }).filter(Boolean)
-      );
-      __envVmCache[env] = names;
-      return names;
-    } catch (e) {
-      console.warn('Failed to load env VMs:', e);
-      __envVmCache[env] = new Set();
-      return __envVmCache[env];
-    }
-  }
-  let __vmCheckTimer = null;
-  async function checkVmPrefixDuplicate() {
-    const envSel = document.getElementById('environment');
-    const env    = (envSel?.value || '').trim().toLowerCase();
-    const input  = document.getElementById('vm_name_prefix');
-    const fb     = document.getElementById('vmPrefixFeedback');
-    if (!input) return { duplicate: false };
-    const raw = (input.value || '').trim();
-    if (!env || !raw) {
-      input.classList.remove('is-invalid');
-      if (fb) fb.style.display = 'none';
-      input.dataset.dup = '0';
-      return { duplicate: false };
-    }
-    const envSet = await fetchEnvVms(env);
-    const isDup  = envSet.has(raw.toLowerCase());
-    if (isDup) {
-      input.classList.add('is-invalid');
-      if (fb) fb.style.display = 'block';
-      input.dataset.dup = '1';
-    } else {
-      input.classList.remove('is-invalid');
-      if (fb) fb.style.display = 'none';
-      input.dataset.dup = '0';
-    }
-    return { duplicate: isDup };
-  }
-  async function guardDuplicateBeforeSave() {
-    const result = await checkVmPrefixDuplicate();
-    if (result.duplicate) {
-      const envText = document.getElementById('environment')?.value?.toUpperCase() || '';
-      const val = document.getElementById('vm_name_prefix')?.value || '';
-      alert(`VM "${val}" already exists in ${envText}. Please choose another name.`);
-      return false;
-    }
-    return true;
-  }
+/* --------------------- 旗標：僅載入時回填一次草稿 --------------------- */
+let __restoreInProgress = false;   // true 代表正在做初次回填
+let __applyDraftOnce    = true;    // 只允許在初次載入時回填
 
-  /* --------------------- 旗標：僅載入時回填一次草稿 --------------------- */
-  let __restoreInProgress = false;   // true 代表正在做初次回填
-  let __applyDraftOnce    = true;    // 只允許在初次載入時回填
-
-  /* --------------------- 工具：清空/載入/去重 --------------------- */
-  function setSelectPlaceholder(selectEl, text) {
-    if (!selectEl) return;
-    selectEl.innerHTML = `<option value="" disabled selected>${text}</option>`;
-    selectEl.value = '';
-  }
-  function setLoading(selectEl, loadingText) {
-    if (!selectEl) return;
-    selectEl.disabled = true;
-    selectEl.innerHTML = `<option value="__loading__" selected>${loadingText}</option>`;
-  }
-  function clearLoading(selectEl, placeholderText) {
-    if (!selectEl) return;
-    selectEl.disabled = false;
-    if (selectEl.options.length && selectEl.options[0].value === '__loading__') {
-      setSelectPlaceholder(selectEl, placeholderText || '--- Select ---');
-    }
-  }
-  function uniqueArray(arr) {
-    const seen = new Set();
-    const out = [];
-    (arr || []).forEach(v => {
-      const s = String(v ?? '').trim();
-      if (s && !seen.has(s)) { seen.add(s); out.push(s); }
-    });
-    return out;
-  }
-  function populateSelect(selectEl, options, placeholderText) {
-    if (!selectEl) return;
-    const opts = uniqueArray(options);
+/* --------------------- 工具：清空/載入/去重 --------------------- */
+function setSelectPlaceholder(selectEl, text) {
+  if (!selectEl) return;
+  selectEl.innerHTML = `<option value="" disabled selected>${text}</option>`;
+  selectEl.value = '';
+}
+function setLoading(selectEl, loadingText) {
+  if (!selectEl) return;
+  selectEl.disabled = true;
+  selectEl.innerHTML = `<option value="__loading__" selected>${loadingText}</option>`;
+}
+function clearLoading(selectEl, placeholderText) {
+  if (!selectEl) return;
+  selectEl.disabled = false;
+  if (selectEl.options.length && selectEl.options[0].value === '__loading__') {
     setSelectPlaceholder(selectEl, placeholderText || '--- Select ---');
-    opts.forEach(v => {
-      const o = document.createElement('option');
-      o.value = v;
-      o.textContent = v;
-      selectEl.appendChild(o);
+  }
+}
+function uniqueArray(arr) {
+  const seen = new Set();
+  const out = [];
+  (arr || []).forEach(v => {
+    const s = String(v ?? '').trim();
+    if (s && !seen.has(s)) { seen.add(s); out.push(s); }
+  });
+  return out;
+}
+function populateSelect(selectEl, options, placeholderText) {
+  if (!selectEl) return;
+  const opts = uniqueArray(options);
+  setSelectPlaceholder(selectEl, placeholderText || '--- Select ---');
+  opts.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = v;
+    selectEl.appendChild(o);
+  });
+  // 確保沒有「殘留舊值」
+  selectEl.value = '';
+}
+function setSelectValue(selectEl, value) {
+  if (!selectEl) return;
+  const v = (value ?? '').toString();
+  if (!v) return;
+  let opt = Array.from(selectEl.options).find(o => o.value === v);
+  if (opt) { selectEl.value = v; return; }
+  opt = Array.from(selectEl.options).find(o => (o.text || '').trim() === v);
+  if (opt) { opt.selected = true; return; }
+  const fallback = new Option(v, v, true, true);
+  selectEl.appendChild(fallback);
+}
+function resetPlacementSelects(message) {
+  const selects = [
+    document.getElementById('vsphere_datacenter'),
+    document.getElementById('vsphere_cluster'),
+    document.getElementById('vsphere_esxi_host'),
+    document.getElementById('vsphere_template'),
+    document.getElementById('vsphere_datastore'),
+    document.getElementById('vsphere_network'),
+  ];
+  selects.forEach(s => setSelectPlaceholder(s, message));
+}
+// 客製：去重 Environment 選單（若後端有重複）
+function dedupeEnvironmentOptions() {
+  const envSel = document.getElementById('environment');
+  if (!envSel) return;
+  const seen = new Set();
+  const toRemove = [];
+  Array.from(envSel.options).forEach(opt => {
+    const val = (opt.value || '').trim();
+    if (!val) return;
+    if (seen.has(val)) toRemove.push(opt);
+    else seen.add(val);
+  });
+  toRemove.forEach(o => o.remove());
+}
+
+/* --------------------- 草稿物件 --------------------- */
+const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
+
+// 存儲從後端獲取的主機-datastore映射關係
+let hostDatastoresMapping = {};
+
+/* --------------------- 載入流程：Env → Host → Objects --------------------- */
+async function onEnvironmentChanged() {
+  const envSel  = document.getElementById('environment');
+  const hostSel = document.getElementById('vsphere_host');
+  const env = (envSel?.value || '').trim();
+
+  // 先清空「主機＋所有下游」
+  setLoading(hostSel, 'Loading hosts...');
+  resetPlacementSelects('--- Select Host First ---');
+
+  if (!env) {
+    setSelectPlaceholder(hostSel, '--- Select Environment First ---');
+    return;
+  }
+
+  try {
+    const urlTpl = envSel.dataset.hostsUrl; // /api/vsphere/hosts/__ENV__
+    const url = urlTpl.replace('__ENV__', encodeURIComponent(env));
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Failed to fetch hosts (${resp.status})`);
+    const data = await resp.json();
+    const hosts = Array.isArray(data?.hosts) ? data.hosts : [];
+    populateSelect(hostSel, hosts, '--- Select Host ---');
+
+    // 僅在初次回填時設定 host
+    if (__applyDraftOnce) {
+      const draftHost = (__DRAFT__?.vsphere_host || '').trim();
+      if (draftHost) {
+        setSelectValue(hostSel, draftHost);
+        await onHostChanged();
+      }
+    }
+  } catch (e) {
+    console.error('load hosts error:', e);
+    setSelectPlaceholder(hostSel, '--- Error Loading Hosts ---');
+  } finally {
+    clearLoading(hostSel, '--- Select Host ---');
+  }
+}
+
+/* 更新 datastore 下拉選單，根據選定的 ESXi 主機 */
+function updateDatastoreOptions(esxiHost) {
+  const datastoreSelect = document.getElementById('vsphere_datastore');
+
+  // 清空 datastore 選項
+  datastoreSelect.innerHTML = '<option value="" disabled selected>--- Loading Datastores... ---</option>';
+
+  if (!esxiHost) {
+    datastoreSelect.innerHTML = '<option value="" disabled selected>--- Select ESXi Host First ---</option>';
+    return;
+  }
+
+  // 檢查映射中是否有該主機的 datastore 列表
+  if (hostDatastoresMapping && hostDatastoresMapping[esxiHost]) {
+    const datastores = hostDatastoresMapping[esxiHost];
+    let options = '<option value="" disabled selected>--- Select Datastore ---</option>';
+
+    datastores.forEach(ds => {
+      options += `<option value="${ds}">${ds}</option>`;
     });
-    // 確保沒有「殘留舊值」
-    selectEl.value = '';
-  }
-  function setSelectValue(selectEl, value) {
-    if (!selectEl) return;
-    const v = (value ?? '').toString();
-    if (!v) return;
-    let opt = Array.from(selectEl.options).find(o => o.value === v);
-    if (opt) { selectEl.value = v; return; }
-    opt = Array.from(selectEl.options).find(o => (o.text || '').trim() === v);
-    if (opt) { opt.selected = true; return; }
-    const fallback = new Option(v, v, true, true);
-    selectEl.appendChild(fallback);
-  }
-  function resetPlacementSelects(message) {
-    const selects = [
-      document.getElementById('vsphere_datacenter'),
-      document.getElementById('vsphere_cluster'),
-      document.getElementById('vsphere_esxi_host'),
-      document.getElementById('vsphere_template'),
-      document.getElementById('vsphere_datastore'),
-      document.getElementById('vsphere_network'),
-    ];
-    selects.forEach(s => setSelectPlaceholder(s, message));
-  }
-  // 客製：去重 Environment 選單（若後端有重複）
-  function dedupeEnvironmentOptions() {
-    const envSel = document.getElementById('environment');
-    if (!envSel) return;
-    const seen = new Set();
-    const toRemove = [];
-    Array.from(envSel.options).forEach(opt => {
-      const val = (opt.value || '').trim();
-      if (!val) return;
-      if (seen.has(val)) toRemove.push(opt);
-      else seen.add(val);
-    });
-    toRemove.forEach(o => o.remove());
+
+    datastoreSelect.innerHTML = options;
+  } else {
+    datastoreSelect.innerHTML = '<option value="" disabled selected>--- No datastores available for this host ---</option>';
   }
 
-  /* --------------------- 草稿物件 --------------------- */
-  const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
+  datastoreSelect.disabled = false;
+}
 
-  /* --------------------- 載入流程：Env → Host → Objects --------------------- */
-  async function onEnvironmentChanged() {
-    const envSel  = document.getElementById('environment');
-    const hostSel = document.getElementById('vsphere_host');
-    const env = (envSel?.value || '').trim();
+/* ESXi Host 變更處理函數 */
+function onEsxiHostChanged(selectedEsxiHost) {
+  updateDatastoreOptions(selectedEsxiHost);
+}
 
-    // 先清空「主機＋所有下游」
-    setLoading(hostSel, 'Loading hosts...');
+async function onHostChanged() {
+  const hostSel = document.getElementById('vsphere_host');
+  const esxiHostSel = document.getElementById('vsphere_esxi_host');
+  const host = (hostSel?.value || '').trim();
+
+  const dep = {
+    datacenters: document.getElementById('vsphere_datacenter'),
+    clusters:    document.getElementById('vsphere_cluster'),
+    esxi_hosts:  document.getElementById('vsphere_esxi_host'),
+    templates:   document.getElementById('vsphere_template'),
+    datastores:  document.getElementById('vsphere_datastore'),
+    networks:    document.getElementById('vsphere_network'),
+  };
+
+  // 切換 Host 時：先把所有下游設成 Loading（可視覺告知）且清空舊值
+  Object.values(dep).forEach(s => setLoading(s, 'Loading...'));
+
+  if (!host) {
     resetPlacementSelects('--- Select Host First ---');
-
-    if (!env) {
-      setSelectPlaceholder(hostSel, '--- Select Environment First ---');
-      return;
-    }
-
-    try {
-      const urlTpl = envSel.dataset.hostsUrl; // /api/vsphere/hosts/__ENV__
-      const url = urlTpl.replace('__ENV__', encodeURIComponent(env));
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Failed to fetch hosts (${resp.status})`);
-      const data = await resp.json();
-      const hosts = Array.isArray(data?.hosts) ? data.hosts : [];
-      populateSelect(hostSel, hosts, '--- Select Host ---');
-
-      // 僅在初次回填時設定 host
-      if (__applyDraftOnce) {
-        const draftHost = (__DRAFT__?.vsphere_host || '').trim();
-        if (draftHost) {
-          setSelectValue(hostSel, draftHost);
-          await onHostChanged();
-        }
-      }
-    } catch (e) {
-      console.error('load hosts error:', e);
-      setSelectPlaceholder(hostSel, '--- Error Loading Hosts ---');
-    } finally {
-      clearLoading(hostSel, '--- Select Host ---');
-    }
+    return;
   }
 
-  async function onHostChanged() {
-    const hostSel = document.getElementById('vsphere_host');
-    const host = (hostSel?.value || '').trim();
-
-    const dep = {
-      datacenters: document.getElementById('vsphere_datacenter'),
-      clusters:    document.getElementById('vsphere_cluster'),
-      esxi_hosts:  document.getElementById('vsphere_esxi_host'),
-      templates:   document.getElementById('vsphere_template'),
-      datastores:  document.getElementById('vsphere_datastore'),
-      networks:    document.getElementById('vsphere_network'),
-    };
-
-    // 切換 Host 時：先把所有下游設成 Loading（可視覺告知）且清空舊值
-    Object.values(dep).forEach(s => setLoading(s, 'Loading...'));
-
-    if (!host) {
-      resetPlacementSelects('--- Select Host First ---');
-      return;
+  try {
+    const urlTpl = hostSel.dataset.objectsByHostUrl; // /api/vsphere_objects/by_host/__HOST__
+    const url = urlTpl.replace('__HOST__', encodeURIComponent(host));
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.message || `Failed to fetch vSphere data (${resp.status})`);
     }
+    const data = await resp.json();
 
-    try {
-      const urlTpl = hostSel.dataset.objectsByHostUrl; // /api/vsphere_objects/by_host/__HOST__
-      const url = urlTpl.replace('__HOST__', encodeURIComponent(host));
-      const resp = await fetch(url);
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.message || `Failed to fetch vSphere data (${resp.status})`);
-      }
-      const data = await resp.json();
+    // 保存主機-datastore映射關係
+    hostDatastoresMapping = data.host_datastores || {};
 
-      populateSelect(dep.datacenters, data.datacenters, '--- Select ---');
-      populateSelect(dep.clusters,    data.clusters,    '--- Select ---');
-      populateSelect(dep.esxi_hosts,  data.esxi_hosts,  '--- Select ---');
-      populateSelect(dep.templates,   data.templates,   '--- Select ---');
-      populateSelect(dep.datastores,  data.datastores,  '--- Select ---');
-      populateSelect(dep.networks,    data.networks,    '--- Select ---');
+    populateSelect(dep.datacenters, data.datacenters, '--- Select ---');
+    populateSelect(dep.clusters,    data.clusters,    '--- Select ---');
+    populateSelect(dep.esxi_hosts,  data.esxi_hosts,  '--- Select ---');
+    populateSelect(dep.templates,   data.templates,   '--- Select ---');
+    // 暫時不填充 datastores，等用戶選擇 ESXi host 後再填充
+    setSelectPlaceholder(dep.datastores, '--- Select ESXi Host First ---');
+    populateSelect(dep.networks,    data.networks,    '--- Select ---');
 
-      // 僅首次載入時，回填 Draft 值；之後改 Host 不再覆蓋使用者選擇
-      if (__applyDraftOnce) {
-        setSelectValue(dep.datacenters, __DRAFT__?.vsphere_datacenter);
-        setSelectValue(dep.clusters,    __DRAFT__?.vsphere_cluster);
-        setSelectValue(dep.esxi_hosts,  __DRAFT__?.vsphere_esxi_host);
-        setSelectValue(dep.templates,   __DRAFT__?.vsphere_template);
-        setSelectValue(dep.datastores,  __DRAFT__?.vsphere_datastore);
-        setSelectValue(dep.networks,    __DRAFT__?.vsphere_network);
-      }
-    } catch (e) {
-      console.error('load objects by host error:', e);
-      Object.values(dep).forEach(s => setSelectPlaceholder(s, '--- Error Loading Data ---'));
-    } finally {
-      Object.values(dep).forEach(s => clearLoading(s, '--- Select ---'));
-      // 只在初次載入流程結束時，把旗標關掉
-      if (__restoreInProgress) {
-        __restoreInProgress = false;
-        __applyDraftOnce = false;
+    // 僅首次載入時，回填 Draft 值；之後改 Host 不再覆蓋使用者選擇
+    if (__applyDraftOnce) {
+      setSelectValue(dep.datacenters, __DRAFT__?.vsphere_datacenter);
+      setSelectValue(dep.clusters,    __DRAFT__?.vsphere_cluster);
+      setSelectValue(dep.esxi_hosts,  __DRAFT__?.vsphere_esxi_host);
+      setSelectValue(dep.templates,   __DRAFT__?.vsphere_template);
+      setSelectValue(dep.networks,    __DRAFT__?.vsphere_network);
+
+      // 如果 Draft 中有 ESXi host，觸發其變更事件以載入相應的 datastore
+      if (__DRAFT__?.vsphere_esxi_host) {
+        onEsxiHostChanged(__DRAFT__?.vsphere_esxi_host);
+        // 在 datastore 選項載入後設定值
+        setTimeout(() => {
+          setSelectValue(dep.datastores, __DRAFT__?.vsphere_datastore);
+        }, 100);
       }
     }
-  }
-
-  async function restoreDraftOnLoad() {
-    const envSel  = document.getElementById('environment');
-    const draftEnv  = (__DRAFT__?.environment || '').trim();
-
-    // 如果後端環境陣列有重複，前端先去重一次（避免你之前遇到的「環境選單重複」）
-    dedupeEnvironmentOptions();
-
-    __restoreInProgress = true;
-    __applyDraftOnce = true;
-
-    if (draftEnv) {
-      setSelectValue(envSel, draftEnv);
-    }
-
-    if (envSel?.value) {
-      await onEnvironmentChanged();  // 內部會連帶載入 host 與 objects，並回填一次
-    } else {
-      const hostSel = document.getElementById('vsphere_host');
-      setSelectPlaceholder(hostSel, '--- Select Environment First ---');
-      resetPlacementSelects('--- Select Host First ---');
-      // 沒環境也算流程結束
+  } catch (e) {
+    console.error('load objects by host error:', e);
+    Object.values(dep).forEach(s => setSelectPlaceholder(s, '--- Error Loading Data ---'));
+  } finally {
+    Object.values(dep).forEach(s => {
+      if (s !== dep.datastores) { // 不清除 datastore 的 loading 狀態，因為它依賴 ESXi host
+        clearLoading(s, '--- Select ---');
+      }
+    });
+    // 只在初次載入流程結束時，把旗標關掉
+    if (__restoreInProgress) {
       __restoreInProgress = false;
       __applyDraftOnce = false;
     }
   }
+}
 
-  /* --------------------- 初始化與按鈕行為 --------------------- */
-  document.addEventListener('DOMContentLoaded', () => {
-    relabelDisks();
+async function restoreDraftOnLoad() {
+  const envSel  = document.getElementById('environment');
+  const draftEnv  = (__DRAFT__?.environment || '').trim();
 
-    const wf  = document.getElementById('workflow_id');
-    const btn = document.getElementById('btn-save-draft');
-    if (wf && wf.value && btn) btn.textContent = 'Update to Draft';
+  // 如果後端環境陣列有重複，前端先去重一次（避免你之前遇到的「環境選單重複」）
+  dedupeEnvironmentOptions();
 
-    const envSel  = document.getElementById('environment');
+  __restoreInProgress = true;
+  __applyDraftOnce = true;
+
+  if (draftEnv) {
+    setSelectValue(envSel, draftEnv);
+  }
+
+  if (envSel?.value) {
+    await onEnvironmentChanged();  // 內部會連帶載入 host 與 objects，並回填一次
+  } else {
     const hostSel = document.getElementById('vsphere_host');
-    const input   = document.getElementById('vm_name_prefix');
+    setSelectPlaceholder(hostSel, '--- Select Environment First ---');
+    resetPlacementSelects('--- Select Host First ---');
+    // 沒環境也算流程結束
+    __restoreInProgress = false;
+    __applyDraftOnce = false;
+  }
+}
 
-    // 事件：Environment 變更 → 清空下游、載入 hosts、僅首次回填
-    envSel?.addEventListener('change', async () => {
-      // 清除 VM Name 防重樣式
-      input?.classList.remove('is-invalid');
-      const fb = document.getElementById('vmPrefixFeedback');
-      if (fb) fb.style.display='none';
+/* --------------------- 初始化與按鈕行為 --------------------- */
+document.addEventListener('DOMContentLoaded', () => {
+  relabelDisks();
 
-      await checkVmPrefixDuplicate();
-      // 使用者手動切換時，視為非初次回填
-      __applyDraftOnce = false;
-      await onEnvironmentChanged();
-    });
+  const wf  = document.getElementById('workflow_id');
+  const btn = document.getElementById('btn-save-draft');
+  if (wf && wf.value && btn) btn.textContent = 'Update to Draft';
 
-    // 事件：Host 變更 → 清空下游、載入 objects（非首次時不回填）
-    hostSel?.addEventListener('change', async () => {
-      __applyDraftOnce = false;
-      await onHostChanged();
-    });
+  const envSel  = document.getElementById('environment');
+  const hostSel = document.getElementById('vsphere_host');
+  const esxiHostSel = document.getElementById('vsphere_esxi_host');
+  const input   = document.getElementById('vm_name_prefix');
 
-    // VM Name 輸入，做防重 debounce
-    input?.addEventListener('input', () => {
-      clearTimeout(__vmCheckTimer);
-      __vmCheckTimer = setTimeout(checkVmPrefixDuplicate, 200);
-    });
+  // 事件：Environment 變更 → 清空下游、載入 hosts、僅首次回填
+  envSel?.addEventListener('change', async () => {
+    // 清除 VM Name 防重樣式
+    input?.classList.remove('is-invalid');
+    const fb = document.getElementById('vmPrefixFeedback');
+    if (fb) fb.style.display='none';
 
-    // 載入即回填一次（從 overview 的 Edit 進來也只會在這裡回填一次）
-    restoreDraftOnLoad();
+    await checkVmPrefixDuplicate();
+    // 使用者手動切換時，視為非初次回填
+    __applyDraftOnce = false;
+    await onEnvironmentChanged();
   });
 
-  // Save / Update to Draft
-  document.getElementById('btn-save-draft').addEventListener('click', async function () {
-    const root = document.getElementById('create-form-root');
-    if (!validateRequiredFields(root)) return;
-    if (!(await guardDuplicateBeforeSave())) return;
-
-    const fields = document.querySelectorAll(
-      '#create-form-root [name], input[name="resource"], input[name="action_type"]'
-    );
-    const fd = new FormData();
-    fields.forEach(el => {
-      const name = el.getAttribute('name');
-      if (!name) return;
-      if (el.type === 'radio') { if (el.checked) fd.append(name, el.value); }
-      else if (el.type === 'checkbox') { if (el.checked) fd.append(name, el.value); }
-      else { fd.append(name, el.value); }
-    });
-    const wfInput = document.getElementById('workflow_id');
-    if (wfInput && wfInput.value) fd.append('workflow_id', wfInput.value);
-
-    try {
-      const resp = await fetch("{{ url_for('vm.vsphere_create_vm_review') }}", { method: "POST", body: fd });
-      if (!resp.ok) { const txt = await resp.text(); alert("Save to Draft failed: " + txt); return; }
-      window.location.href = "{{ url_for('vm.overview_index') }}";
-    } catch (err) {
-      console.error(err);
-      alert("Network error while saving draft.");
-    }
+  // 事件：Host 變更 → 清空下游、載入 objects（非首次時不回填）
+  hostSel?.addEventListener('change', async () => {
+    __applyDraftOnce = false;
+    await onHostChanged();
   });
+
+  // 事件：ESXi Host 變更 → 更新 datastore 下拉選單
+  esxiHostSel?.addEventListener('change', function() {
+    onEsxiHostChanged(this.value);
+  });
+
+  // VM Name 輸入，做防重 debounce
+  input?.addEventListener('input', () => {
+    clearTimeout(__vmCheckTimer);
+    __vmCheckTimer = setTimeout(checkVmPrefixDuplicate, 200);
+  });
+
+  // 載入即回填一次（從 overview 的 Edit 進來也只會在這裡回填一次）
+  restoreDraftOnLoad();
+});
+
+// Save / Update to Draft
+document.getElementById('btn-save-draft').addEventListener('click', async function () {
+  const root = document.getElementById('create-form-root');
+  if (!validateRequiredFields(root)) return;
+  if (!(await guardDuplicateBeforeSave())) return;
+
+  const fields = document.querySelectorAll(
+    '#create-form-root [name], input[name="resource"], input[name="action_type"]'
+  );
+  const fd = new FormData();
+  fields.forEach(el => {
+    const name = el.getAttribute('name');
+    if (!name) return;
+    if (el.type === 'radio') { if (el.checked) fd.append(name, el.value); }
+    else if (el.type === 'checkbox') { if (el.checked) fd.append(name, el.value); }
+    else { fd.append(name, el.value); }
+  });
+  const wfInput = document.getElementById('workflow_id');
+  if (wfInput && wfInput.value) fd.append('workflow_id', wfInput.value);
+
+  try {
+    const resp = await fetch("{{ url_for('vm.vsphere_create_vm_review') }}", { method: "POST", body: fd });
+    if (!resp.ok) { const txt = await resp.text(); alert("Save to Draft failed: " + txt); return; }
+    window.location.href = "{{ url_for('vm.overview_index') }}";
+  } catch (err) {
+    console.error(err);
+    alert("Network error while saving draft.");
+  }
+});
 </script>
