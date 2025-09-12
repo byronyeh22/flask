@@ -419,15 +419,31 @@ function uniqueArray(arr) {
 function populateSelect(selectEl, options, placeholderText) {
   if (!selectEl) return;
   const opts = uniqueArray(options);
-  setSelectPlaceholder(selectEl, placeholderText || '--- Select ---');
+  
+  // 清空現有選項
+  selectEl.innerHTML = '';
+  
+  // 添加佔位符選項
+  const placeholderOption = document.createElement('option');
+  placeholderOption.value = '';
+  placeholderOption.disabled = true;
+  placeholderOption.selected = true;
+  placeholderOption.textContent = placeholderText || '--- Select ---';
+  selectEl.appendChild(placeholderOption);
+  
+  // 添加實際選項
   opts.forEach(v => {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = v;
-    selectEl.appendChild(o);
+    const option = document.createElement('option');
+    option.value = v;
+    option.textContent = v;
+    selectEl.appendChild(option);
   });
-  // 確保沒有「殘留舊值」
+  
+  // 【重要】確保選單被啟用
+  selectEl.disabled = false;
   selectEl.value = '';
+  
+  console.log(`Populated ${selectEl.id} with ${opts.length} options, disabled: ${selectEl.disabled}`);
 }
 function setSelectValue(selectEl, value) {
   if (!selectEl) return;
@@ -469,8 +485,106 @@ function dedupeEnvironmentOptions() {
 /* --------------------- 草稿物件 --------------------- */
 const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
 
-// 存儲從後端獲取的主機-datastore映射關係
+// 存儲從後端獲取的映射關係
 let hostDatastoresMapping = {};
+let datacenterClustersMapping = {};
+let clusterEsxiHostsMapping = {};
+
+/* --------------------- 級聯關係更新函數 --------------------- */
+
+function updateClusterOptions(datacenter) {
+  const clusterSelect = document.getElementById('vsphere_cluster');
+  const esxiHostSelect = document.getElementById('vsphere_esxi_host');
+  const datastoreSelect = document.getElementById('vsphere_datastore');
+
+  console.log('updateClusterOptions called with datacenter:', datacenter);
+
+  // 重置後續所有選單
+  setSelectPlaceholder(clusterSelect, '--- Loading Clusters... ---');
+  setSelectPlaceholder(esxiHostSelect, '--- Select Cluster First ---');
+  setSelectPlaceholder(datastoreSelect, '--- Select ESXi Host First ---');
+
+  if (!datacenter) {
+    setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+    return;
+  }
+
+  // 使用映射關係更新 cluster 選項
+  if (datacenterClustersMapping && datacenterClustersMapping[datacenter]) {
+    const clusters = datacenterClustersMapping[datacenter];
+    console.log('Found clusters for', datacenter, ':', clusters);
+    populateSelect(clusterSelect, clusters, '--- Select Cluster ---');
+    
+    // 【重要】強制確保選單被啟用
+    clusterSelect.disabled = false;
+    console.log('Cluster select disabled state:', clusterSelect.disabled);
+  } else {
+    console.log('No clusters found for datacenter:', datacenter);
+    setSelectPlaceholder(clusterSelect, '--- No clusters available for this datacenter ---');
+  }
+}
+
+/* 更新 ESXi host 下拉選單，根據選定的 cluster */
+function updateEsxiHostOptions(cluster) {
+  const esxiHostSelect = document.getElementById('vsphere_esxi_host');
+  const datastoreSelect = document.getElementById('vsphere_datastore');
+
+  // 重置後續選單
+  setSelectPlaceholder(esxiHostSelect, '--- Loading ESXi Hosts... ---');
+  setSelectPlaceholder(datastoreSelect, '--- Select ESXi Host First ---');
+
+  if (!cluster) {
+    setSelectPlaceholder(esxiHostSelect, '--- Select Cluster First ---');
+    return;
+  }
+
+  // 使用映射關係更新 ESXi host 選項
+  if (clusterEsxiHostsMapping && clusterEsxiHostsMapping[cluster]) {
+    const esxiHosts = clusterEsxiHostsMapping[cluster];
+    populateSelect(esxiHostSelect, esxiHosts, '--- Select ESXi Host ---');
+  } else {
+    setSelectPlaceholder(esxiHostSelect, '--- No hosts available for this cluster ---');
+  }
+}
+
+/* 更新 datastore 下拉選單，根據選定的 ESXi 主機 */
+function updateDatastoreOptions(esxiHost) {
+  const datastoreSelect = document.getElementById('vsphere_datastore');
+
+  setSelectPlaceholder(datastoreSelect, '--- Loading Datastores... ---');
+
+  if (!esxiHost) {
+    setSelectPlaceholder(datastoreSelect, '--- Select ESXi Host First ---');
+    return;
+  }
+
+  // 檢查映射中是否有該主機的 datastore 列表
+  if (hostDatastoresMapping && hostDatastoresMapping[esxiHost]) {
+    const datastores = hostDatastoresMapping[esxiHost];
+    populateSelect(datastoreSelect, datastores, '--- Select Datastore ---');
+  } else {
+    setSelectPlaceholder(datastoreSelect, '--- No datastores available for this host ---');
+  }
+}
+
+/* --------------------- 級聯事件處理函數 --------------------- */
+
+/* Datacenter 變更處理函數 */
+function onDatacenterChanged() {
+  const datacenter = document.getElementById('vsphere_datacenter')?.value || '';
+  updateClusterOptions(datacenter);
+}
+
+/* Cluster 變更處理函數 */
+function onClusterChanged() {
+  const cluster = document.getElementById('vsphere_cluster')?.value || '';
+  updateEsxiHostOptions(cluster);
+}
+
+/* ESXi Host 變更處理函數 */
+function onEsxiHostChanged(selectedEsxiHost) {
+  updateDatastoreOptions(selectedEsxiHost || document.getElementById('vsphere_esxi_host')?.value || '');
+}
 
 /* --------------------- 載入流程：Env → Host → Objects --------------------- */
 async function onEnvironmentChanged() {
@@ -512,43 +626,8 @@ async function onEnvironmentChanged() {
   }
 }
 
-/* 更新 datastore 下拉選單，根據選定的 ESXi 主機 */
-function updateDatastoreOptions(esxiHost) {
-  const datastoreSelect = document.getElementById('vsphere_datastore');
-
-  // 清空 datastore 選項
-  datastoreSelect.innerHTML = '<option value="" disabled selected>--- Loading Datastores... ---</option>';
-
-  if (!esxiHost) {
-    datastoreSelect.innerHTML = '<option value="" disabled selected>--- Select ESXi Host First ---</option>';
-    return;
-  }
-
-  // 檢查映射中是否有該主機的 datastore 列表
-  if (hostDatastoresMapping && hostDatastoresMapping[esxiHost]) {
-    const datastores = hostDatastoresMapping[esxiHost];
-    let options = '<option value="" disabled selected>--- Select Datastore ---</option>';
-
-    datastores.forEach(ds => {
-      options += `<option value="${ds}">${ds}</option>`;
-    });
-
-    datastoreSelect.innerHTML = options;
-  } else {
-    datastoreSelect.innerHTML = '<option value="" disabled selected>--- No datastores available for this host ---</option>';
-  }
-
-  datastoreSelect.disabled = false;
-}
-
-/* ESXi Host 變更處理函數 */
-function onEsxiHostChanged(selectedEsxiHost) {
-  updateDatastoreOptions(selectedEsxiHost);
-}
-
 async function onHostChanged() {
   const hostSel = document.getElementById('vsphere_host');
-  const esxiHostSel = document.getElementById('vsphere_esxi_host');
   const host = (hostSel?.value || '').trim();
 
   const dep = {
@@ -560,7 +639,7 @@ async function onHostChanged() {
     networks:    document.getElementById('vsphere_network'),
   };
 
-  // 切換 Host 時：先把所有下游設成 Loading（可視覺告知）且清空舊值
+  // 切換 Host 時：先把所有下游設成 Loading
   Object.values(dep).forEach(s => setLoading(s, 'Loading...'));
 
   if (!host) {
@@ -569,7 +648,7 @@ async function onHostChanged() {
   }
 
   try {
-    const urlTpl = hostSel.dataset.objectsByHostUrl; // /api/vsphere_objects/by_host/__HOST__
+    const urlTpl = hostSel.dataset.objectsByHostUrl;
     const url = urlTpl.replace('__HOST__', encodeURIComponent(host));
     const resp = await fetch(url);
     if (!resp.ok) {
@@ -578,32 +657,64 @@ async function onHostChanged() {
     }
     const data = await resp.json();
 
-    // 保存主機-datastore映射關係
+    // 【修正】先保存所有映射關係，再進行任何級聯操作
     hostDatastoresMapping = data.host_datastores || {};
+    datacenterClustersMapping = data.datacenter_clusters || {};
+    clusterEsxiHostsMapping = data.cluster_esxi_hosts || {};
 
-    populateSelect(dep.datacenters, data.datacenters, '--- Select ---');
-    populateSelect(dep.clusters,    data.clusters,    '--- Select ---');
-    populateSelect(dep.esxi_hosts,  data.esxi_hosts,  '--- Select ---');
-    populateSelect(dep.templates,   data.templates,   '--- Select ---');
-    // 暫時不填充 datastores，等用戶選擇 ESXi host 後再填充
+    console.log('Mappings saved:', {
+      datacenterClustersMapping,
+      clusterEsxiHostsMapping, 
+      hostDatastoresMapping
+    });
+
+    // 填充基本選項
+    populateSelect(dep.datacenters, data.datacenters, '--- Select Datacenter ---');
+    populateSelect(dep.templates,   data.templates,   '--- Select Template ---');
+    populateSelect(dep.networks,    data.networks,    '--- Select Network ---');
+    
+    // 級聯選單初始狀態
+    setSelectPlaceholder(dep.clusters, '--- Select Datacenter First ---');
+    setSelectPlaceholder(dep.esxi_hosts, '--- Select Cluster First ---');
     setSelectPlaceholder(dep.datastores, '--- Select ESXi Host First ---');
-    populateSelect(dep.networks,    data.networks,    '--- Select ---');
 
-    // 僅首次載入時，回填 Draft 值；之後改 Host 不再覆蓋使用者選擇
+    // 僅首次載入時，回填 Draft 值
     if (__applyDraftOnce) {
       setSelectValue(dep.datacenters, __DRAFT__?.vsphere_datacenter);
-      setSelectValue(dep.clusters,    __DRAFT__?.vsphere_cluster);
-      setSelectValue(dep.esxi_hosts,  __DRAFT__?.vsphere_esxi_host);
       setSelectValue(dep.templates,   __DRAFT__?.vsphere_template);
       setSelectValue(dep.networks,    __DRAFT__?.vsphere_network);
 
-      // 如果 Draft 中有 ESXi host，觸發其變更事件以載入相應的 datastore
-      if (__DRAFT__?.vsphere_esxi_host) {
-        onEsxiHostChanged(__DRAFT__?.vsphere_esxi_host);
-        // 在 datastore 選項載入後設定值
-        setTimeout(() => {
-          setSelectValue(dep.datastores, __DRAFT__?.vsphere_datastore);
-        }, 100);
+      // 【修正】確保映射數據已保存後再進行級聯回填
+      const datacenter = __DRAFT__?.vsphere_datacenter;
+      if (datacenter) {
+        console.log('Starting cascade restore with datacenter:', datacenter);
+        updateClusterOptions(datacenter);
+        
+        const cluster = __DRAFT__?.vsphere_cluster;
+        if (cluster) {
+          setTimeout(() => {
+            console.log('Setting cluster value:', cluster);
+            setSelectValue(dep.clusters, cluster);
+            updateEsxiHostOptions(cluster);
+            
+            const esxiHost = __DRAFT__?.vsphere_esxi_host;
+            if (esxiHost) {
+              setTimeout(() => {
+                console.log('Setting ESXi host value:', esxiHost);
+                setSelectValue(dep.esxi_hosts, esxiHost);
+                updateDatastoreOptions(esxiHost);
+                
+                const datastore = __DRAFT__?.vsphere_datastore;
+                if (datastore) {
+                  setTimeout(() => {
+                    console.log('Setting datastore value:', datastore);
+                    setSelectValue(dep.datastores, datastore);
+                  }, 100);
+                }
+              }, 100);
+            }
+          }, 100);
+        }
       }
     }
   } catch (e) {
@@ -611,11 +722,11 @@ async function onHostChanged() {
     Object.values(dep).forEach(s => setSelectPlaceholder(s, '--- Error Loading Data ---'));
   } finally {
     Object.values(dep).forEach(s => {
-      if (s !== dep.datastores) { // 不清除 datastore 的 loading 狀態，因為它依賴 ESXi host
+      if (s !== dep.datastores && s !== dep.clusters && s !== dep.esxi_hosts) {
         clearLoading(s, '--- Select ---');
       }
     });
-    // 只在初次載入流程結束時，把旗標關掉
+    
     if (__restoreInProgress) {
       __restoreInProgress = false;
       __applyDraftOnce = false;
@@ -659,6 +770,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const envSel  = document.getElementById('environment');
   const hostSel = document.getElementById('vsphere_host');
+  const datacenterSel = document.getElementById('vsphere_datacenter');
+  const clusterSel = document.getElementById('vsphere_cluster');
   const esxiHostSel = document.getElementById('vsphere_esxi_host');
   const input   = document.getElementById('vm_name_prefix');
 
@@ -680,6 +793,12 @@ document.addEventListener('DOMContentLoaded', () => {
     __applyDraftOnce = false;
     await onHostChanged();
   });
+
+  // 事件：Datacenter 變更 → 更新 cluster 下拉選單
+  datacenterSel?.addEventListener('change', onDatacenterChanged);
+
+  // 事件：Cluster 變更 → 更新 ESXi host 下拉選單
+  clusterSel?.addEventListener('change', onClusterChanged);
 
   // 事件：ESXi Host 變更 → 更新 datastore 下拉選單
   esxiHostSel?.addEventListener('change', function() {
