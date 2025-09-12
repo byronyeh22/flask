@@ -37,7 +37,7 @@ def init_db():
             approved_by VARCHAR(100) NULL,
             approved_at TIMESTAMP NULL,
             updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-            status ENUM('DRAFT','PENDING_APPROVAL','RETURNED','IN_PROGRESS','DEPLOYING','SUCCESS','FAILED')
+            status ENUM('DRAFT','PENDING_APPROVAL','RETURNED','IN_PROGRESS','DEPLOYING','SUCCESS','FAILED','CANCELED')
                 DEFAULT 'DRAFT',
             returned_by VARCHAR(100) NULL,
             returned_reason TEXT,
