@@ -419,10 +419,10 @@ function uniqueArray(arr) {
 function populateSelect(selectEl, options, placeholderText) {
   if (!selectEl) return;
   const opts = uniqueArray(options);
-  
+
   // 清空現有選項
   selectEl.innerHTML = '';
-  
+
   // 添加佔位符選項
   const placeholderOption = document.createElement('option');
   placeholderOption.value = '';
@@ -430,7 +430,7 @@ function populateSelect(selectEl, options, placeholderText) {
   placeholderOption.selected = true;
   placeholderOption.textContent = placeholderText || '--- Select ---';
   selectEl.appendChild(placeholderOption);
-  
+
   // 添加實際選項
   opts.forEach(v => {
     const option = document.createElement('option');
@@ -438,11 +438,11 @@ function populateSelect(selectEl, options, placeholderText) {
     option.textContent = v;
     selectEl.appendChild(option);
   });
-  
+
   // 【重要】確保選單被啟用
   selectEl.disabled = false;
   selectEl.value = '';
-  
+
   console.log(`Populated ${selectEl.id} with ${opts.length} options, disabled: ${selectEl.disabled}`);
 }
 function setSelectValue(selectEl, value) {
@@ -514,7 +514,7 @@ function updateClusterOptions(datacenter) {
     const clusters = datacenterClustersMapping[datacenter];
     console.log('Found clusters for', datacenter, ':', clusters);
     populateSelect(clusterSelect, clusters, '--- Select Cluster ---');
-    
+
     // 【重要】強制確保選單被啟用
     clusterSelect.disabled = false;
     console.log('Cluster select disabled state:', clusterSelect.disabled);
@@ -672,7 +672,7 @@ async function onHostChanged() {
     populateSelect(dep.datacenters, data.datacenters, '--- Select Datacenter ---');
     populateSelect(dep.templates,   data.templates,   '--- Select Template ---');
     populateSelect(dep.networks,    data.networks,    '--- Select Network ---');
-    
+
     // 級聯選單初始狀態
     setSelectPlaceholder(dep.clusters, '--- Select Datacenter First ---');
     setSelectPlaceholder(dep.esxi_hosts, '--- Select Cluster First ---');
@@ -689,21 +689,21 @@ async function onHostChanged() {
       if (datacenter) {
         console.log('Starting cascade restore with datacenter:', datacenter);
         updateClusterOptions(datacenter);
-        
+
         const cluster = __DRAFT__?.vsphere_cluster;
         if (cluster) {
           setTimeout(() => {
             console.log('Setting cluster value:', cluster);
             setSelectValue(dep.clusters, cluster);
             updateEsxiHostOptions(cluster);
-            
+
             const esxiHost = __DRAFT__?.vsphere_esxi_host;
             if (esxiHost) {
               setTimeout(() => {
                 console.log('Setting ESXi host value:', esxiHost);
                 setSelectValue(dep.esxi_hosts, esxiHost);
                 updateDatastoreOptions(esxiHost);
-                
+
                 const datastore = __DRAFT__?.vsphere_datastore;
                 if (datastore) {
                   setTimeout(() => {
@@ -726,7 +726,7 @@ async function onHostChanged() {
         clearLoading(s, '--- Select ---');
       }
     });
-    
+
     if (__restoreInProgress) {
       __restoreInProgress = false;
       __applyDraftOnce = false;
