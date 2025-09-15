@@ -6,6 +6,9 @@
 
 <input type="hidden" name="resource" value="vm">
 <input type="hidden" name="action_type" value="update">
+{% if workflow_id %}
+  <input type="hidden" id="workflow_id" name="workflow_id" value="{{ workflow_id }}">
+{% endif %}
 
 <style>
   /* Custom styles for the comparison layout */
@@ -71,44 +74,112 @@
 </style>
 
 <div class="card mb-4 shadow-sm">
-  <div class="card-header bg-primary text-white fw-bold">Select VM to Update</div>
+  <div class="card-header bg-primary text-white fw-bold">選擇目標 VM</div>
   <div class="card-body">
     <div class="row g-3">
-      <div class="col-md-6">
-        <label for="environment-select" class="form-label">Environment</label>
+      <div class="col-12">
+        <label class="form-label">Environment</label>
         <select
           id="environment-select"
           name="environment"
           class="form-select"
+          data-hosts-url="{{ url_for('vm.get_hosts_by_environment_api', environment='__ENV__') }}"
           data-required="true"
-          data-vms-url="{{ url_for('vm.get_vms_by_environment_api', environment='PLACEHOLDER') }}"
         >
-          <option value="" disabled {% if not session.update_vm_form_data %}selected{% endif %}>--- Select Environment ---</option>
+          <option value="" disabled selected>--- Select Environment ---</option>
           {% for env in environment %}
-          <option value="{{ env }}" {% if session.update_vm_form_data and session.update_vm_form_data.environment == env %}selected{% endif %}>{{ env }}</option>
+          <option value="{{ env }}">{{ env }}</option>
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-6">
-        <label for="vm-name-prefix-select" class="form-label">VM Name Prefix</label>
+    </div>
+
+    <div class="row g-3 mt-2">
+      <div class="col-12">
+        <label class="form-label">vSphere Host</label>
         <select
-          id="vm-name-prefix-select"
-          name="vm_name_prefix"
+          id="vsphere-host-select"
+          name="vsphere_host"
           class="form-select"
-          data-required="true"
           disabled
-          data-config-url="{{ url_for('vm.get_vm_config_api', environment='ENV_PLACEHOLDER', vm_name_prefix='VM_PLACEHOLDER') }}"
+          data-objects-by-host-url="{{ url_for('vm.get_vsphere_objects_by_host_api', host='__HOST__') }}"
+          data-required="true"
         >
           <option value="" disabled selected>--- Select Environment First ---</option>
         </select>
       </div>
     </div>
+
+    <div class="row g-3 mt-2">
+      <div class="col-12">
+        <label class="form-label">Datacenter</label>
+        <select
+          id="datacenter-select"
+          name="vsphere_datacenter"
+          class="form-select"
+          disabled
+          data-required="true"
+        >
+          <option value="" disabled selected>--- Select vSphere Host First ---</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-2">
+      <div class="col-12">
+        <label class="form-label">Cluster</label>
+        <select
+          id="cluster-select"
+          name="vsphere_cluster"
+          class="form-select"
+          disabled
+          data-required="true"
+        >
+          <option value="" disabled selected>--- Select Datacenter First ---</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-2">
+      <div class="col-12">
+        <label class="form-label">ESXi Host</label>
+        <select
+          id="esxi-select"
+          name="vsphere_esxi_host"
+          class="form-select"
+          disabled
+          data-required="true"
+        >
+          <option value="" disabled selected>--- Select Cluster First ---</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-2">
+      <div class="col-12">
+        <label class="form-label">VM</label>
+        <select
+          id="vm-prefix-select"
+          name="vm_name_prefix"
+          class="form-select"
+          disabled
+          data-vms-by-env-url="{{ url_for('vm.get_vms_by_environment_api', environment='__ENV__') }}"
+          data-config-url="{{ url_for('vm.get_vm_config_api', environment='__ENV__', vm_name_prefix='__PREFIX__') }}"
+          data-required="true"
+        >
+          <option value="" disabled selected>--- Select ESXi Host First ---</option>
+        </select>
+        <div class="muted mt-1">
+          依序選擇 Environment → vSphere Host → Datacenter → Cluster → ESXi，再選擇目標 VM。
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
-<div id="configuration-form" style="display: none;">
+<div id="configuration-form" style="display:none;">
   <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-success text-white fw-bold">Review and Modify VM Configuration</div>
+    <div class="card-header bg-success text-white fw-bold">檢視與修改 VM 設定</div>
     <div class="card-body">
 
       <div class="row mb-3">
@@ -143,21 +214,35 @@
         </div>
         <div class="col-md-6">
           <div id="new-disk-container"></div>
+
           <div class="alert alert-warning d-flex align-items-center py-2 px-3 mt-3" role="alert">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2 flex-shrink-0" viewBox="0 0 16 16" role="img" aria-label="Warning:"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.708c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>
             NOTE: Hard Disk 1 uses the disk configuration from the template.
           </div>
-          <button type="button" class="btn btn-sm btn-add" onclick="addNewDisk()">
+
+          <button type="button" class="btn btn-sm btn-add" id="btn-add-disk" onclick="addNewDisk()">
             <i class="bi bi-plus-circle"></i> Add New Disk
           </button>
+
+          <div class="form-actions">
+            <button type="button" id="btn-save-draft" class="btn-draft" onclick="saveDraft()">
+              {% if workflow_id %}
+                Update to Draft
+              {% else %}
+                Save to Draft
+              {% endif %}
+            </button>
+
+            <a href="{{ url_for('vm.overview_index') }}" class="btn-cancel-link">Cancel</a>
+          </div>
         </div>
       </div>
 
+      <div id="removed-disks"></div>
     </div>
   </div>
 </div>
 
-<!-- Toast for one-operation-at-a-time message -->
 <div class="position-fixed top-0 end-0 p-3" style="z-index:1080">
   <div id="opToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
     <div class="d-flex">
@@ -170,506 +255,664 @@
 </div>
 
 <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    // --- 變數與 DOM ---
-    const vm_update_form_data = {{ session.vm_update_form_data | default(none) | tojson | safe }};
-    const envSelect = document.getElementById('environment-select');
-    const vmPrefixSelect = document.getElementById('vm-name-prefix-select');
-    const configForm = document.getElementById('configuration-form');
-    const reviewBtn = document.getElementById('review-btn');
-    const newDiskContainer = document.getElementById('new-disk-container');
+document.addEventListener('DOMContentLoaded', function() {
+  // --- 變數與 DOM ---
+  const envSelect = document.getElementById('environment-select');
+  const hostSelect = document.getElementById('vsphere-host-select');
+  const datacenterSelect = document.getElementById('datacenter-select');
+  const clusterSelect = document.getElementById('cluster-select');
+  const esxiSelect = document.getElementById('esxi-select');
+  const vmPrefixSelect = document.getElementById('vm-prefix-select');
+  const configForm = document.getElementById('configuration-form');
+  const btnAdd = document.getElementById('btn-add-disk');
+  const btnSave = document.getElementById('btn-save-draft');
+  const newDiskContainer = document.getElementById('new-disk-container');
+  const removedDisksContainer = document.getElementById('removed-disks');
+  const currentCpu = document.getElementById('current-cpu');
+  const currentMemory = document.getElementById('current-memory');
+  const currentDiskContainer = document.getElementById('current-disk-container');
 
-    let initialVMConfig = {};
-    let originalById = {}; // id -> disk (from DB)
-    let newDiskCounter = 1; // 新增硬碟計數器
+  let initialVMConfig = {};
+  let originalById = {};
+  let newDiskCounter = 1;
+  let placementObjects = null;
 
-    // vSphere SCSI 常數（僅用於現有硬碟的顯示）
-    const MAX_SCSI_CONTROLLER = 3;
-    const VALID_UNITS = [0,1,2,3,4,5,6,8,9,10,11,12,13,14,15];
+  // --- Helpers ---
+  const asArray = (v) => Array.isArray(v) ? v : (v != null && v !== '' ? [v] : []);
+  const fetchJSON = async (url) => {
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) { console.warn('[HTTP]', r.status, url); throw new Error('HTTP ' + r.status); }
+    try { return await r.json(); } catch (e) { console.warn('[JSON parse error]', url); throw e; }
+  };
+  const repl = (url, value, key = '__ENV__') => url.replace(key, encodeURIComponent(value));
+  const replHost = (url, value) => url.replace('__HOST__', encodeURIComponent(value));
+  const replPrefix = (url, value) => url.replace('__PREFIX__', encodeURIComponent(value));
 
-    // ---------- 小工具 ----------
-    const asArray = (v) => Array.isArray(v) ? v : (v != null && v !== '' ? [v] : []);
+  // --- UI Helpers ---
+  function setSelectPlaceholder(selectEl, text) {
+    if (!selectEl) return;
+    selectEl.innerHTML = `<option value="" disabled selected>${text}</option>`;
+    selectEl.value = '';
+    selectEl.disabled = true;
+  }
 
-    function showToast(msg) {
-      const el = document.getElementById('opToast');
-      const body = document.getElementById('opToastMsg');
-      if (body) body.textContent = msg;
-      const t = bootstrap.Toast.getOrCreateInstance(el, { delay: 3500, autohide: true });
-      t.show();
+  function populateSelect(selectEl, options, placeholderText) {
+    if (!selectEl) return;
+    const opts = [...new Set(options)].filter(Boolean);
+    selectEl.innerHTML = `<option value="" disabled selected>${placeholderText}</option>` +
+      opts.map(v => `<option value="${v}">${v}</option>`).join('');
+    selectEl.disabled = false;
+  }
+
+  function setSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    const opt = selectEl.querySelector(`option[value="${value}"]`);
+    if (opt) {
+      opt.selected = true;
+      selectEl.dispatchEvent(new Event('change'));
     }
+  }
+  
+  function showToast(msg) {
+    const el = document.getElementById('opToast');
+    const body = document.getElementById('opToastMsg');
+    if (body) body.textContent = msg;
+    const t = bootstrap.Toast.getOrCreateInstance(el, { delay: 3500, autohide: true });
+    t.show();
+  }
 
-    // 還原到載入該 VM 當下的配置（不動環境/VM 選擇，且不吃 session 回填）
-    function revertToInitialVmConfig() {
-      if (!initialVMConfig || !initialVMConfig.vm_name_prefix) return;
-      populateForm(initialVMConfig, null);
-      updateReviewButtonState();
+  // --- 硬碟相關 Helpers ---
+  function normalizedLabelFromConfig(d) {
+    return (d && d.ui_disk_number != null)
+      ? `Hard Disk ${parseInt(d.ui_disk_number, 10)}`
+      : (d.label || `Hard Disk ${d.id || 'Unknown'}`);
+  }
+
+  function getNewAddedDiskCount() {
+    const idInputs = newDiskContainer.querySelectorAll('input[name="update_disk_db_id[]"]');
+    let count = 0;
+    idInputs.forEach(inp => { if (!inp.value) count++; });
+    return count;
+  }
+
+  // --- 變更偵測 ---
+  function getCurrentDisksFromForm() {
+    const ids    = Array.from(configForm.querySelectorAll('input[name="update_disk_db_id[]"]')).map(i => (i.value || '').trim());
+    const labels = Array.from(configForm.querySelectorAll('input[name="update_disk_label[]"]')).map(i => (i.value || '').trim());
+    const sizes  = Array.from(configForm.querySelectorAll('input[name="update_vm_disk_size[]"]')).map(i => (i.value || '').trim());
+    const provs  = Array.from(configForm.querySelectorAll('select[name="update_vm_disk_provisioning[]"]')).map(i => (i.value || '').trim());
+
+    const n = Math.max(ids.length, labels.length, sizes.length, provs.length);
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      arr.push({
+        id:     ids[i] || null,
+        label:  labels[i] || null,
+        size:   sizes[i] || null,
+        prov:   provs[i] || 'thin'
+      });
     }
+    return arr.filter(d => d.size !== null || d.prov !== null || d.id !== null || (d.label && d.label !== ''));
+  }
 
-    // 計算目前表單中「新加入」的硬碟數量（沒有 id 的 row）
-    function getNewAddedDiskCount() {
-      const idInputs = newDiskContainer.querySelectorAll('input[name="update_disk_db_id[]"]');
-      let count = 0;
-      idInputs.forEach(inp => { if (!inp.value) count++; });
-      return count;
-    }
+  function getInitialDisksFromConfig() {
+    const src = initialVMConfig && Array.isArray(initialVMConfig.additional_disks)
+      ? initialVMConfig.additional_disks : [];
+    return src.map(d => ({
+      id:    (d.id != null ? String(d.id) : null),
+      label: normalizedLabelFromConfig(d),
+      size:  (d.size != null ? String(d.size) : null),
+      prov:  (d.disk_provisioning || 'thin')
+    }));
+  }
 
-    // SCSI slot 顯示工具（僅用於現有硬碟的 tooltip）
-    function scsiTitle(controller, unit) { 
-      return `scsi(${controller}:${unit})`; 
-    }
+  function computeChangeSummary() {
+    const summary = { cpuChanged: false, memChanged: false, added: 0, removed: 0, modified: 0, hasChanges: false };
+    if (!initialVMConfig || !initialVMConfig.vm_name_prefix) return summary;
 
-    function ensureTooltip(el, title) {
-      el.setAttribute('title', title);
-      const tip = bootstrap.Tooltip.getOrCreateInstance(el);
-      tip.setContent({ '.tooltip-inner': title });
-    }
+    const cpuVal = (configForm.querySelector('input[name="vm_num_cpus"]').value || '').trim();
+    const memVal = (configForm.querySelector('input[name="vm_memory"]').value || '').trim();
+    summary.cpuChanged = String(cpuVal) !== String(initialVMConfig.vm_num_cpus);
+    summary.memChanged = String(memVal) !== String(initialVMConfig.vm_memory);
 
-    // 正確的 label 顯示函數（現有硬碟用 ui_disk_number）
-    function normalizedLabelFromConfig(d) {
-      return (d && d.ui_disk_number != null)
-        ? `Hard Disk ${parseInt(d.ui_disk_number, 10)}`
-        : (d.label || null);
-    }
+    const initDisks = getInitialDisksFromConfig();
+    const curDisks  = getCurrentDisksFromForm();
 
-    // ---------- 變更偵測 ----------
-    function getCurrentDisksFromForm() {
-      const ids    = Array.from(configForm.querySelectorAll('input[name="update_disk_db_id[]"]')).map(i => (i.value || '').trim());
-      const labels = Array.from(configForm.querySelectorAll('input[name="update_disk_label[]"]')).map(i => (i.value || '').trim());
-      const sizes  = Array.from(configForm.querySelectorAll('input[name="update_vm_disk_size[]"]')).map(i => (i.value || '').trim());
-      const provs  = Array.from(configForm.querySelectorAll('select[name="update_vm_disk_provisioning[]"]')).map(i => (i.value || '').trim());
+    const initIds = new Set(initDisks.map(d => d.id).filter(Boolean));
+    const curIds  = new Set(curDisks.map(d => d.id).filter(Boolean));
 
-      const n = Math.max(ids.length, labels.length, sizes.length, provs.length);
-      const arr = [];
-      for (let i = 0; i < n; i++) {
-        arr.push({
-          id:     ids[i] || null,
-          label:  labels[i] || null,
-          size:   sizes[i] || null,
-          prov:   provs[i] || 'thin'
-        });
+    // 刪除
+    summary.removed = [...initIds].filter(id => !curIds.has(id)).length;
+    // 新增
+    summary.added = curDisks.filter(d => !d.id).length;
+
+    // 修改
+    const initById = new Map(initDisks.filter(d => d.id).map(d => [d.id, d]));
+    for (const d of curDisks) {
+      if (!d.id) continue;
+      const od = initById.get(d.id);
+      if (!od) continue;
+      if (String(od.size) !== String(d.size) ||
+          (od.prov || 'thin') !== (d.prov || 'thin') ||
+          (od.label || '').trim() !== (d.label || '').trim()) {
+        summary.modified++;
       }
-      return arr.filter(d => d.size !== null || d.prov !== null || d.id !== null || (d.label && d.label !== ''));
     }
 
-    function getInitialDisksFromConfig() {
-      const src = initialVMConfig && Array.isArray(initialVMConfig.additional_disks)
-        ? initialVMConfig.additional_disks : [];
-      return src.map(d => ({
-        id:    (d.id != null ? String(d.id) : null),
-        label: normalizedLabelFromConfig(d), // 與表單一致
-        size:  (d.size != null ? String(d.size) : null),
-        prov:  (d.disk_provisioning || 'thin')
-      }));
+    summary.hasChanges = summary.cpuChanged || summary.memChanged ||
+                         summary.added > 0 || summary.removed > 0 || summary.modified > 0;
+    return summary;
+  }
+
+  function handleAddRemoveConflictIfAny() {
+    const s = computeChangeSummary();
+    if (s.added > 0 && s.removed > 0) {
+      showToast('Only one operation at a time: either add or remove disks. Please submit them separately.');
+      revertToInitialVmConfig();
+      return true;
+    }
+    return false;
+  }
+
+  function revertToInitialVmConfig() {
+    if (!initialVMConfig || !initialVMConfig.vm_name_prefix) return;
+    populateForm(initialVMConfig);
+    updateReviewButtonState();
+  }
+  
+  function updateReviewButtonState() {
+    const s = computeChangeSummary();
+    // 這裡可以根據需要更新 Review 按鈕狀態
+    console.log("updateReviewButtonState called, hasChanges:", s.hasChanges);
+  }
+
+  // --- 硬碟 UI 函數 ---
+  function addExistingDisk(disk) {
+    const id    = disk.id || '';
+    const size  = (disk.size != null ? disk.size : 50);
+    const prov  = disk.disk_provisioning || 'thin';
+
+    let labelText = normalizedLabelFromConfig(disk);
+    if (!labelText) {
+      labelText = `Hard Disk ${disk.id || 'Unknown'}`;
     }
 
-    function computeChangeSummary() {
-      const summary = { cpuChanged: false, memChanged: false, added: 0, removed: 0, modified: 0, hasChanges: false };
-      if (!initialVMConfig || !initialVMConfig.vm_name_prefix) return summary;
+    const isThin  = (prov === 'thin') ? 'true' : 'false';
+    const isEager = (prov === 'thick_eager') ? 'true' : 'false';
 
-      const cpuVal = (configForm.querySelector('input[name="vm_num_cpus"]').value || '').trim();
-      const memVal = (configForm.querySelector('input[name="vm_memory"]').value || '').trim();
-      summary.cpuChanged = String(cpuVal) !== String(initialVMConfig.vm_num_cpus);
-      summary.memChanged = String(memVal) !== String(initialVMConfig.vm_memory);
+    const sizeMinAttr = `min="${size}"`;
+    const provDisabledAttr = 'disabled';
+    const provTip = 'Existing disk provisioning cannot be changed.';
 
-      const initDisks = getInitialDisksFromConfig();   // [{id,label,size,prov}]
-      const curDisks  = getCurrentDisksFromForm();     // [{id,label,size,prov}]
-
-      const initIds = new Set(initDisks.map(d => d.id).filter(Boolean));
-      const curIds  = new Set(curDisks.map(d => d.id).filter(Boolean));
-
-      // 刪除
-      summary.removed = [...initIds].filter(id => !curIds.has(id)).length;
-      // 新增
-      summary.added = curDisks.filter(d => !d.id).length;
-
-      // 修改
-      const initById = new Map(initDisks.filter(d => d.id).map(d => [d.id, d]));
-      for (const d of curDisks) {
-        if (!d.id) continue;
-        const od = initById.get(d.id);
-        if (!od) continue;
-        if (String(od.size) !== String(d.size) ||
-            (od.prov || 'thin') !== (d.prov || 'thin') ||
-            (od.label || '').trim() !== (d.label || '').trim()) {
-          summary.modified++;
-        }
-      }
-
-      summary.hasChanges = summary.cpuChanged || summary.memChanged ||
-                           summary.added > 0 || summary.removed > 0 || summary.modified > 0;
-      return summary;
-    }
-
-    // 衝突（同時新增與刪除）偵測與處理：Toast + 還原
-    function handleAddRemoveConflictIfAny() {
-      const s = computeChangeSummary();
-      if (s.added > 0 && s.removed > 0) {
-        showToast('Only one operation at a time: either add or remove disks. Please submit them separately.');
-        revertToInitialVmConfig();
-        return true;
-      }
-      return false;
-    }
-
-    // Review 按鈕狀態（僅依是否有變更）
-    function updateReviewButtonState() {
-      if (!reviewBtn) return;
-      const s = computeChangeSummary();
-      reviewBtn.disabled = !s.hasChanges;
-      reviewBtn.textContent = s.hasChanges ? 'Review' : 'No Changes to Review';
-    }
-
-    // ---------- 建立磁碟表單項 ----------
-    // 現有硬碟（從資料庫載入）
-    function addExistingDisk(disk) {
-      const isExisting = true;
-      const id    = disk.id || '';
-      const size  = (disk.size != null ? disk.size : 50);
-      const prov  = disk.disk_provisioning || 'thin';
-
-      // Label：使用正確的 ui_disk_number 或 label
-      let labelText = normalizedLabelFromConfig(disk);
-      if (!labelText) {
-        labelText = `Hard Disk ${disk.id || 'Unknown'}`;
-      }
-
-      // SCSI 資訊用於 tooltip（現有硬碟應該有這個資訊）
-      let scsiController = '';
-      let unitNumber = '';
-      let tipTitle = '';
-
-      if (disk.scsi_controller != null && disk.unit_number != null) {
-        scsiController = String(disk.scsi_controller);
-        unitNumber = String(disk.unit_number);
-        tipTitle = scsiTitle(scsiController, unitNumber);
-      } else {
-        tipTitle = 'SCSI info not available';
-      }
-
-      const isThin  = (prov === 'thin') ? 'true' : 'false';
-      const isEager = (prov === 'thick_eager') ? 'true' : 'false';
-
-      // 既有磁碟限制：min=原始大小；Provisioning disabled
-      const sizeMinAttr = `min="${size}"`;
-      const provDisabledAttr = 'disabled';
-      const provTip = 'Existing disk provisioning cannot be changed.';
-
-      const html = `
-        <div class="disk-item mb-2 p-3 border rounded bg-light">
-          <input type="hidden" name="update_disk_db_id[]" value="${id}">
-          <input type="hidden" name="update_disk_label[]" value="${labelText}">
-          <input type="hidden" name="update_scsi_controller[]" value="${scsiController}">
-          <input type="hidden" name="update_unit_number[]" value="${unitNumber}">
-          <div class="row align-items-end g-2">
-            <div class="col-4 col-md-3">
-              <label class="form-label mb-0">
-                Label
-                <i class="bi bi-info-circle ms-1 text-secondary scsi-tip"
-                   data-bs-toggle="tooltip" data-bs-placement="top"
-                   title="${tipTitle}"></i>
-              </label>
-              <input type="text" class="form-control disk-label" value="${labelText}" disabled>
-            </div>
-            <div class="col-4 col-md-2">
-              <label class="form-label mb-0">Size (GB)</label>
-              <input type="number" name="update_vm_disk_size[]" class="form-control" ${sizeMinAttr} value="${size}" data-required="true">
-            </div>
-            <div class="col-8 col-md-5">
-              <label class="form-label mb-0">Disk Provisioning</label>
-              <select name="update_vm_disk_provisioning[]" class="form-select disk-provisioning" ${provDisabledAttr} title="${provTip}">
-                <option value="thin" ${prov === 'thin' ? 'selected' : ''}>Thin Provision</option>
-                <option value="thick_lazy" ${prov === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
-                <option value="thick_eager" ${prov === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
-              </select>
-              <input type="hidden" name="update_vm_disk_provisioning[]" value="${prov}">
-              <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
-              <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
-            </div>
-            <div class="col-4 col-md-2 d-flex align-items-center">
-              <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
-                <i class="bi bi-trash"></i> Remove
-              </button>
-            </div>
+    const html = `
+      <div class="disk-item mb-2 p-3 border rounded bg-light">
+        <input type="hidden" name="update_disk_db_id[]" value="${id}">
+        <input type="hidden" name="update_disk_label[]" value="${labelText}">
+        <div class="row align-items-end g-2">
+          <div class="col-4 col-md-3">
+            <label class="form-label mb-0">Label</label>
+            <input type="text" class="form-control disk-label" value="${labelText}" disabled>
           </div>
-        </div>`;
-
-      newDiskContainer.insertAdjacentHTML('beforeend', html);
-
-      // 初始化 tooltip
-      const tipIcon = newDiskContainer.lastElementChild.querySelector('.scsi-tip');
-      if (tipIcon) {
-        bootstrap.Tooltip.getOrCreateInstance(tipIcon);
-        ensureTooltip(tipIcon, tipTitle);
-      }
-    }
-
-    // 新增硬碟（簡化版本）
-    function addNewDisk() {
-      // 新增硬碟上限檢查
-      const curNew = getNewAddedDiskCount();
-      if (curNew >= 5) {
-        showToast('You can add at most 5 disks per request.');
-        return;
-      }
-
-      const labelText = `New Disk ${newDiskCounter++}`;
-      const size = 50;
-      const prov = 'thin';
-
-      const isThin = 'true';
-      const isEager = 'false';
-
-      const html = `
-        <div class="disk-item mb-2 p-3 border rounded bg-light">
-          <input type="hidden" name="update_disk_db_id[]" value="">
-          <input type="hidden" name="update_disk_label[]" value="${labelText}">
-          <input type="hidden" name="update_scsi_controller[]" value="">
-          <input type="hidden" name="update_unit_number[]" value="">
-          <div class="row align-items-end g-2">
-            <div class="col-4 col-md-3">
-              <label class="form-label mb-0">Label</label>
-              <input type="text" class="form-control disk-label" value="${labelText}" disabled>
-            </div>
-            <div class="col-4 col-md-2">
-              <label class="form-label mb-0">Size (GB)</label>
-              <input type="number" name="update_vm_disk_size[]" class="form-control" min="1" value="${size}" data-required="true">
-            </div>
-            <div class="col-8 col-md-5">
-              <label class="form-label mb-0">Disk Provisioning</label>
-              <select name="update_vm_disk_provisioning[]" class="form-select disk-provisioning">
-                <option value="thin" selected>Thin Provision</option>
-                <option value="thick_lazy">Thick Provision Lazy Zeroed</option>
-                <option value="thick_eager">Thick Provision Eager Zeroed</option>
-              </select>
-              <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
-              <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
-            </div>
-            <div class="col-4 col-md-2 d-flex align-items-center">
-              <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
-                <i class="bi bi-trash"></i> Remove
-              </button>
-            </div>
+          <div class="col-4 col-md-2">
+            <label class="form-label mb-0">Size (GB)</label>
+            <input type="number" name="update_vm_disk_size[]" class="form-control" ${sizeMinAttr} value="${size}" data-required="true">
           </div>
-        </div>`;
+          <div class="col-8 col-md-5">
+            <label class="form-label mb-0">Disk Provisioning</label>
+            <select name="update_vm_disk_provisioning[]" class="form-select disk-provisioning" ${provDisabledAttr} title="${provTip}">
+              <option value="thin" ${prov === 'thin' ? 'selected' : ''}>Thin Provision</option>
+              <option value="thick_lazy" ${prov === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
+              <option value="thick_eager" ${prov === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
+            </select>
+            <input type="hidden" name="update_vm_disk_provisioning[]" value="${prov}">
+            <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
+            <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
+          </div>
+          <div class="col-4 col-md-2 d-flex align-items-center">
+            <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
+              <i class="bi bi-trash"></i> Remove
+            </button>
+          </div>
+        </div>
+      </div>`;
 
-      newDiskContainer.insertAdjacentHTML('beforeend', html);
+    newDiskContainer.insertAdjacentHTML('beforeend', html);
+  }
 
-      // 若同時有新增與刪除 → Toast + 還原
-      if (handleAddRemoveConflictIfAny()) return;
-      updateReviewButtonState();
+  function addNewDisk() {
+    const curNew = getNewAddedDiskCount();
+    if (curNew >= 5) {
+      showToast('You can add at most 5 disks per request.');
+      return;
     }
 
-    function removeDisk(btn) {
-      btn.closest('.disk-item').remove();
+    const row = document.createElement('div');
+    row.className = 'disk-item mb-2 p-3 border rounded bg-light';
+    const id = '';
+    const label = `New Disk ${newDiskCounter++}`;
+    const size = 50;
+    const prov = 'thin';
 
-      // 若同時有新增與刪除 → Toast + 還原
-      if (handleAddRemoveConflictIfAny()) return;
-      updateReviewButtonState();
+    row.innerHTML = `
+      <input type="hidden" name="update_disk_db_id[]" value="${id}">
+      <input type="hidden" name="update_disk_label[]" value="${label}">
+      <div class="row align-items-end g-2">
+        <div class="col-4 col-md-3">
+          <label class="form-label mb-0">Label</label>
+          <input type="text" class="form-control disk-label" value="${label}" disabled>
+        </div>
+        <div class="col-4 col-md-2">
+          <label class="form-label mb-0">Size (GB)</label>
+          <input type="number" name="update_vm_disk_size[]" class="form-control" min="1" value="${size}" data-required="true">
+        </div>
+        <div class="col-8 col-md-5">
+          <label class="form-label mb-0">Disk Provisioning</label>
+          <select name="update_vm_disk_provisioning[]" class="form-select disk-provisioning">
+            <option value="thin" selected>Thin Provision</option>
+            <option value="thick_lazy">Thick Provision Lazy Zeroed</option>
+            <option value="thick_eager">Thick Provision Eager Zeroed</option>
+          </select>
+          <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="true">
+          <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="false">
+        </div>
+        <div class="col-4 col-md-2 d-flex align-items-center">
+          <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
+            <i class="bi bi-trash"></i> Remove
+          </button>
+        </div>
+      </div>
+    `;
+
+    // 為新的刪除按鈕添加事件監聽器
+    row.querySelector('.remove-disk-btn').addEventListener('click', function() {
+      removeDisk(this);
+    });
+
+    // 為新的 provisioning 選擇器添加事件監聽器
+    const provSelect = row.querySelector('.disk-provisioning');
+    provSelect.addEventListener('change', function() {
+      updateProvisioningValues(this);
+    });
+
+    newDiskContainer.appendChild(row);
+
+    if (handleAddRemoveConflictIfAny()) return;
+    updateReviewButtonState();
+  }
+
+  function removeDisk(btn) {
+    btn.closest('.disk-item').remove();
+    if (handleAddRemoveConflictIfAny()) return;
+    updateReviewButtonState();
+  }
+
+  function updateProvisioningValues(selectEl) {
+    const diskItem = selectEl.closest('.disk-item');
+    const thinVal = diskItem.querySelector('.thin-provisioned-value');
+    const eagerVal = diskItem.querySelector('.eagerly-scrub-value');
+    const v = selectEl.value;
+    if (v === 'thin') { 
+      thinVal.value = 'true';  
+      eagerVal.value = 'false'; 
+    } else if (v === 'thick_lazy') { 
+      thinVal.value = 'false'; 
+      eagerVal.value = 'false'; 
+    } else { 
+      thinVal.value = 'false'; 
+      eagerVal.value = 'true';
     }
+  }
 
-    function updateProvisioningValues(selectEl) {
-      const diskItem = selectEl.closest('.disk-item');
-      const thinVal = diskItem.querySelector('.thin-provisioned-value');
-      const eagerVal = diskItem.querySelector('.eagerly-scrub-value');
-      const v = selectEl.value;
-      if (v === 'thin') { 
-        thinVal.value = 'true';  
-        eagerVal.value = 'false'; 
-      } else if (v === 'thick_lazy') { 
-        thinVal.value = 'false'; 
-        eagerVal.value = 'false'; 
-      } else { 
-        thinVal.value = 'false'; 
-        eagerVal.value = 'true'; // thick_eager
-      }
-    }
-
-    // ---------- 畫面渲染 ----------
-    function populateCurrentDiskConfig(config) {
-      const container = document.getElementById('current-disk-container');
-      container.innerHTML = '';
-      const raw = config.additional_disks || [];
-
-      // 按 ui_disk_number 排序顯示
-      const disks = [...raw].sort((a,b) => {
+  // --- Disk UI Helpers ---
+  function populateCurrentDiskConfig(config) {
+    const disks = config.additional_disks || [];
+    currentDiskContainer.innerHTML = '';
+    
+    if (disks.length > 0) {
+      const sorted = [...disks].sort((a,b) => {
         const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
         const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
         return ua - ub;
       });
-
-      if (disks.length > 0) {
-        disks.forEach(d => {
-          const prov = (d.disk_provisioning || 'thin').replace(/_/g, ' ');
-          const label = normalizedLabelFromConfig(d) || 'Hard Disk';
-          container.insertAdjacentHTML(
-            'beforeend',
-            `<div class="mb-2"><strong>${label}:</strong> ${d.size} GB, ${prov}</div>`
-          );
-        });
-      } else {
-        container.innerHTML = '<p class="text-muted">No additional disks</p>';
-      }
-    }
-
-    function populateNewDiskConfig(config) {
-      newDiskContainer.innerHTML = '';
-      newDiskCounter = 1; // 重置計數器
-      originalById = {};
-
-      // 儲存原始硬碟資訊
-      (config.additional_disks || []).forEach(d => { 
-        originalById[String(d.id)] = d; 
+      
+      sorted.forEach(d => {
+        const prov = (d.disk_provisioning || 'thin').replace(/_/g, ' ');
+        const label = normalizedLabelFromConfig(d);
+        currentDiskContainer.insertAdjacentHTML(
+          'beforeend',
+          `<div class="mb-2"><strong>${label}:</strong> ${d.size} GB, ${prov}</div>`
+        );
       });
-
-      const s = (vm_update_form_data && vm_update_form_data.new_config) ? vm_update_form_data.new_config : null;
-      let ids    = asArray(s && s['update_disk_db_id[]']);
-      let sizes  = asArray(s && s['update_vm_disk_size[]']);
-      let provs  = asArray(s && s['update_vm_disk_provisioning[]']);
-      let labels = asArray(s && s['update_disk_label[]']);
-
-      // 第一次載入（尚無 session 值）- 載入現有硬碟
-      if (ids.length === 0 && config.additional_disks && config.additional_disks.length > 0) {
-        const sorted = [...config.additional_disks].sort((a,b) => {
-          const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
-          const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
-          return ua - ub;
-        });
-        sorted.forEach(d => {
-          addExistingDisk(d);
-        });
-        return;
-      }
-
-      // 有 session 值時的回填
-      const len = Math.max(ids.length, sizes.length, provs.length, labels.length);
-      for (let i = 0; i < len; i++) {
-        const id = ids[i] != null ? String(ids[i]) : '';
-
-        if (id && originalById[id]) {
-          // 現有硬碟
-          addExistingDisk(originalById[id]);
-        } else {
-          // 新增硬碟 - 使用簡化版本
-          addNewDisk();
-        }
-      }
+    } else {
+      currentDiskContainer.innerHTML = `<p class="text-muted">No additional disks</p>`;
     }
+  }
 
-    function populateForm(current_config, session_data_to_restore) {
-      const cfg = (session_data_to_restore && session_data_to_restore.new_config)
-        ? session_data_to_restore.new_config
-        : current_config;
+  function populateNewDiskConfig(config) {
+    newDiskContainer.innerHTML = '';
+    newDiskCounter = 1;
+    originalById = {};
 
-      document.getElementById('current-cpu').textContent = current_config.vm_num_cpus || 'N/A';
-      document.getElementById('current-memory').textContent = current_config.vm_memory || 'N/A';
-      populateCurrentDiskConfig(current_config);
-
-      configForm.querySelector('input[name="vm_num_cpus"]').value = cfg.vm_num_cpus || '';
-      configForm.querySelector('input[name="vm_memory"]').value = cfg.vm_memory || '';
-      populateNewDiskConfig(cfg);
-    }
-
-    // ---------- API 載入 ----------
-    async function fetchVmList(selectedEnv) {
-      vmPrefixSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
-      vmPrefixSelect.disabled = true;
-      configForm.style.display = 'none';
-      if (!selectedEnv) {
-        vmPrefixSelect.innerHTML = '<option value="" disabled selected>--- Select Environment First ---</option>';
-        return;
-      }
-      try {
-        const urlTemplate = envSelect.dataset.vmsUrl;
-        const fetchUrl = urlTemplate.replace('PLACEHOLDER', selectedEnv);
-        const res = await fetch(fetchUrl);
-        if (!res.ok) throw new Error('Failed to fetch VM list');
-        const vms = await res.json();
-        let options = '<option value="" disabled selected>--- Select VM ---</option>';
-        vms.forEach(vm => options += `<option value="${vm}">${vm}</option>`);
-        vmPrefixSelect.innerHTML = options;
-        vmPrefixSelect.disabled = false;
-      } catch (e) {
-        console.error(e);
-        vmPrefixSelect.innerHTML = '<option value="" disabled selected>--- Error Loading VMs ---</option>';
-      }
-    }
-
-// ---------- 事件綁定 ----------
-    envSelect.addEventListener('change', async function() {
-      await fetchVmList(this.value);
-      if (vm_update_form_data && vm_update_form_data.new_config && this.value === vm_update_form_data.new_config.environment) {
-        vmPrefixSelect.value = vm_update_form_data.new_config.vm_name_prefix;
-        vmPrefixSelect.dispatchEvent(new Event('change'));
-      }
+    (config.additional_disks || []).forEach(d => { 
+      originalById[String(d.id)] = d; 
     });
 
-    vmPrefixSelect.addEventListener('change', async function() {
-      const selectedEnv = envSelect.value;
-      const selectedVm = this.value;
-      if (!selectedEnv || !selectedVm) {
-        configForm.style.display = 'none';
-        return;
-      }
-      try {
-        const urlTemplate = this.dataset.configUrl;
-        const fetchUrl = urlTemplate.replace('ENV_PLACEHOLDER', selectedEnv).replace('VM_PLACEHOLDER', selectedVm);
-        const res = await fetch(fetchUrl);
-        if (!res.ok) throw new Error('Failed to fetch VM configuration');
-        const cfg = await res.json();
-        initialVMConfig = JSON.parse(JSON.stringify(cfg));
+    // 直接使用 current config 的 additional_disks
+    if (config.additional_disks && config.additional_disks.length > 0) {
+      const sorted = [...config.additional_disks].sort((a,b) => {
+        const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
+        const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
+        return ua - ub;
+      });
+      sorted.forEach(d => {
+        addExistingDisk(d);
+      });
+    }
+  }
 
-        let session_to_use = null;
-        if (vm_update_form_data && vm_update_form_data.new_config &&
-            vm_update_form_data.new_config.environment === selectedEnv &&
-            vm_update_form_data.new_config.vm_name_prefix === selectedVm) {
-          session_to_use = vm_update_form_data;
-        }
+  function populateForm(current_config) {
+    currentCpu.textContent = current_config.vm_num_cpus || 'N/A';
+    currentMemory.textContent = current_config.vm_memory || 'N/A';
+    populateCurrentDiskConfig(current_config);
 
-        populateForm(cfg, session_to_use);
-        configForm.style.display = 'block';
+    configForm.querySelector('input[name="vm_num_cpus"]').value = current_config.vm_num_cpus || '';
+    configForm.querySelector('input[name="vm_memory"]').value = current_config.vm_memory || '';
+    populateNewDiskConfig(current_config);
+  }
 
-        configForm.querySelector('input[name="vm_num_cpus"]').addEventListener('input', updateReviewButtonState);
-        configForm.querySelector('input[name="vm_memory"]').addEventListener('input', updateReviewButtonState);
-        updateReviewButtonState();
-      } catch (e) {
-        console.error(e);
-        alert('Could not load VM configuration.');
-        configForm.style.display = 'none';
-      }
-    });
+  // --- Main Logic ---
+  async function onEnvironmentChange() {
+    setSelectPlaceholder(hostSelect, '--- Loading Hosts... ---');
+    setSelectPlaceholder(datacenterSelect, '--- Select vSphere Host First ---');
+    setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+    setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    configForm.style.display = 'none';
 
-    // 硬碟相關事件
-    newDiskContainer.addEventListener('change', function(e) {
-      if (e.target.classList.contains('disk-provisioning')) {
-        updateProvisioningValues(e.target);
-      }
+    const env = envSelect.value;
+    if (!env) {
+      setSelectPlaceholder(hostSelect, '--- Select Environment First ---');
+      return;
+    }
+
+    try {
+      const url = repl(envSelect.dataset.hostsUrl, env, '__ENV__');
+      const data = await fetchJSON(url);
+      populateSelect(hostSelect, data.hosts, '--- Select vSphere Host ---');
+    } catch (e) {
+      setSelectPlaceholder(hostSelect, '--- Error Loading Hosts ---');
+    }
+  }
+
+  async function onHostChange() {
+    setSelectPlaceholder(datacenterSelect, '--- Loading Datacenters... ---');
+    setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+    setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    configForm.style.display = 'none';
+
+    const host = hostSelect.value;
+    if (!host) {
+      setSelectPlaceholder(datacenterSelect, '--- Select vSphere Host First ---');
+      return;
+    }
+
+    try {
+      const url = replHost(hostSelect.dataset.objectsByHostUrl, host);
+      placementObjects = await fetchJSON(url);
+      populateSelect(datacenterSelect, placementObjects.datacenters, '--- Select Datacenter ---');
+    } catch (e) {
+      setSelectPlaceholder(datacenterSelect, '--- Error Loading Datacenters ---');
+    }
+  }
+
+  async function onDatacenterChange() {
+    setSelectPlaceholder(clusterSelect, '--- Loading Clusters... ---');
+    setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    configForm.style.display = 'none';
+
+    const dc = datacenterSelect.value;
+    if (!dc || !placementObjects) {
+      setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+      return;
+    }
+    populateSelect(clusterSelect, placementObjects.datacenter_clusters[dc], '--- Select Cluster ---');
+  }
+
+  async function onClusterChange() {
+    setSelectPlaceholder(esxiSelect, '--- Loading ESXi Hosts... ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    configForm.style.display = 'none';
+
+    const cluster = clusterSelect.value;
+    if (!cluster || !placementObjects) {
+      setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+      return;
+    }
+    populateSelect(esxiSelect, placementObjects.cluster_esxi_hosts[cluster], '--- Select ESXi Host ---');
+  }
+
+  async function onEsxiChange() {
+    setSelectPlaceholder(vmPrefixSelect, '--- Loading VMs... ---');
+    configForm.style.display = 'none';
+
+    const env = envSelect.value;
+    const esxi = esxiSelect.value;
+    if (!esxi || !env) {
+      setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+      return;
+    }
+
+    try {
+      // 1. 產生基本 URL，只包含環境篩選
+      const baseUrl = repl(vmPrefixSelect.dataset.vmsByEnvUrl, env, '__ENV__');
+      // 2. 建立 URLSearchParams 物件以處理查詢參數
+      const params = new URLSearchParams();
+      // 3. 添加 vsphere_esxi_host 參數
+      params.append('vsphere_esxi_host', esxi);
+      // 4. 合併 URL 和查詢參數
+      const url = `${baseUrl}?${params.toString()}`;
+
+      const vms = await fetchJSON(url);
+      populateSelect(vmPrefixSelect, vms, '--- Select VM ---');
+    } catch (e) {
+      setSelectPlaceholder(vmPrefixSelect, '--- Error Loading VMs ---');
+    }
+  }
+
+  async function onVmChange() {
+    const env = envSelect.value;
+    const vm = vmPrefixSelect.value;
+    if (!env || !vm) return;
+
+    configForm.style.display = 'none';
+    currentCpu.textContent = 'Loading...';
+    currentMemory.textContent = 'Loading...';
+    currentDiskContainer.innerHTML = `<p class="text-muted">Loading...</p>`;
+    newDiskContainer.innerHTML = '';
+
+    try {
+      let url = repl(vmPrefixSelect.dataset.configUrl, env, '__ENV__');
+      url = replPrefix(url, vm);
+      const config = await fetchJSON(url);
+      initialVMConfig = config;
+
+      populateForm(config);
+      configForm.style.display = 'block';
+
+      configForm.querySelector('input[name="vm_num_cpus"]').addEventListener('input', updateReviewButtonState);
+      configForm.querySelector('input[name="vm_memory"]').addEventListener('input', updateReviewButtonState);
       updateReviewButtonState();
-    });
+    } catch (e) {
+      alert('載入 VM 設定失敗：' + e.message);
+    }
+  }
 
-    // 防止既有磁碟容量被調小（小於 min 時自動拉回 min）
-    newDiskContainer.addEventListener('input', function(e) {
-      if (e.target && e.target.name === 'update_vm_disk_size[]') {
-        const min = parseInt(e.target.getAttribute('min') || '1', 10);
-        const val = parseInt(e.target.value || '0', 10);
-        if (!Number.isNaN(min) && !Number.isNaN(val) && val < min) {
-          e.target.value = String(min);
+  // --- Event Listeners ---
+  envSelect.addEventListener('change', onEnvironmentChange);
+  hostSelect.addEventListener('change', onHostChange);
+  datacenterSelect.addEventListener('change', onDatacenterChange);
+  clusterSelect.addEventListener('change', onClusterChange);
+  esxiSelect.addEventListener('change', onEsxiChange);
+  vmPrefixSelect.addEventListener('change', onVmChange);
+
+  btnAdd.addEventListener('click', addNewDisk);
+
+  // 硬碟相關事件
+  newDiskContainer.addEventListener('change', function(e) {
+    if (e.target.classList.contains('disk-provisioning')) {
+      updateProvisioningValues(e.target);
+    }
+    updateReviewButtonState();
+  });
+
+  newDiskContainer.addEventListener('input', function(e) {
+    if (e.target && e.target.name === 'update_vm_disk_size[]') {
+      const min = parseInt(e.target.getAttribute('min') || '1', 10);
+      const val = parseInt(e.target.value || '0', 10);
+      if (!Number.isNaN(min) && !Number.isNaN(val) && val < min) {
+        e.target.value = String(min);
+      }
+    }
+    updateReviewButtonState();
+  });
+
+  newDiskContainer.addEventListener('click', function(e) {
+    const btn = e.target.closest('.remove-disk-btn');
+    if (btn) removeDisk(btn);
+  });
+
+
+
+  // --- Initial Load ---
+  (function init() {
+    onEnvironmentChange();
+  })();
+
+  // 將 addNewDisk 函數暴露到全域，讓 HTML onclick 可以使用
+  window.addNewDisk = addNewDisk;
+
+  window.saveDraft = function() {
+    // 觸發按鈕的 click 事件，重用現有的事件監聽器
+    document.getElementById('btn-save-draft').dispatchEvent(new Event('click'));
+  };
+
+  // 驗證表單函數
+  function validateRequiredFields() {
+    document.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+    let ok = true;
+    
+    // 檢查所有必填欄位
+    const musts = Array.from(document.querySelectorAll('[data-required="true"]'));
+    musts.forEach(el => {
+      // 跳過未啟用的選單
+      if (el.disabled) return;
+      
+      const v = (el.value || '').trim();
+      if (!v) { 
+        el.classList.add('is-invalid'); 
+        ok = false; 
+      }
+      
+      // 檢查數字輸入是否符合最小值要求
+      if (el.type === 'number' && el.hasAttribute('min')) {
+        const min = parseFloat(el.getAttribute('min'));
+        const num = parseFloat(el.value);
+        if (isNaN(num) || num < min) { 
+          el.classList.add('is-invalid'); 
+          ok = false; 
         }
       }
-      updateReviewButtonState();
     });
-
-    newDiskContainer.addEventListener('click', function(e) {
-      const btn = e.target.closest('.remove-disk-btn');
-      if (btn) removeDisk(btn);
+    
+    // 檢查磁碟大小是否有效
+    const diskSizes = document.querySelectorAll('input[name="update_vm_disk_size[]"]');
+    diskSizes.forEach(el => {
+      const size = parseInt(el.value, 10);
+      const min = parseInt(el.getAttribute('min') || '1', 10);
+      if (isNaN(size) || size < min) {
+        el.classList.add('is-invalid');
+        ok = false;
+      }
     });
+    
+    // 如果有錯誤，捲動到第一個錯誤欄位
+    if (!ok) {
+      const first = document.querySelector('.is-invalid');
+      if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    
+    return ok;
+  }
 
-    // 將原本的全域函數改為事件監聽器
-    window.addNewDisk = addNewDisk;
+  // 替換原有的 btnSave 事件監聽器
+  btnSave.addEventListener('click', async function() {
+    // 檢查必填欄位
+    if (!validateRequiredFields()) return;
+    const cpuValue = document.querySelector('input[name="vm_num_cpus"]').value;
+    const memoryValue = document.querySelector('input[name="vm_memory"]').value;
+    console.log("Before submitting - CPU:", cpuValue, "Memory:", memoryValue);
 
-    // 初始載入
-    if (vm_update_form_data && vm_update_form_data.new_config && vm_update_form_data.new_config.environment) {
-      envSelect.value = vm_update_form_data.new_config.environment;
-      envSelect.dispatchEvent(new Event('change'));
+    // 收集所有表單欄位數據
+    const fd = new FormData();
+    
+    // 基本信息
+    fd.append('resource', 'vm');
+    fd.append('action_type', 'update');
+    fd.append('environment', envSelect.value);
+    fd.append('vsphere_host', hostSelect.value);
+    fd.append('vsphere_datacenter', datacenterSelect.value);
+    fd.append('vsphere_cluster', clusterSelect.value);
+    fd.append('vsphere_esxi_host', esxiSelect.value);
+    fd.append('vm_name_prefix', vmPrefixSelect.value);
+    
+    // CPU 和 Memory
+    fd.append('vm_num_cpus', document.querySelector('input[name="vm_num_cpus"]').value);
+    fd.append('vm_memory', document.querySelector('input[name="vm_memory"]').value);
+    
+    // 磁碟信息 - 遍歷所有磁碟欄位
+    const diskIds = Array.from(document.querySelectorAll('input[name="update_disk_db_id[]"]'));
+    const diskLabels = Array.from(document.querySelectorAll('input[name="update_disk_label[]"]'));
+    const diskSizes = Array.from(document.querySelectorAll('input[name="update_vm_disk_size[]"]'));
+    const diskProvs = Array.from(document.querySelectorAll('select[name="update_vm_disk_provisioning[]"], input[name="update_vm_disk_provisioning[]"][type="hidden"]'));
+    const thinProvs = Array.from(document.querySelectorAll('input.thin-provisioned-value'));
+    const eagerScrubs = Array.from(document.querySelectorAll('input.eagerly-scrub-value'));
+    
+    // 添加所有磁碟欄位
+    for (let i = 0; i < diskIds.length; i++) {
+      if (diskIds[i]) fd.append('update_disk_db_id[]', diskIds[i].value);
+      if (diskLabels[i]) fd.append('update_disk_label[]', diskLabels[i].value);
+      if (diskSizes[i]) fd.append('update_vm_disk_size[]', diskSizes[i].value);
+      if (diskProvs[i]) fd.append('update_vm_disk_provisioning[]', diskProvs[i].value);
+      if (i < thinProvs.length) fd.append('update_vm_disk_thin_provisioned[]', thinProvs[i].value);
+      if (i < eagerScrubs.length) fd.append('update_vm_disk_eagerly_scrub[]', eagerScrubs[i].value);
+    }
+    
+    // 如果存在 workflow_id，則添加
+    const wfInput = document.getElementById('workflow_id');
+    if (wfInput && wfInput.value) fd.append('workflow_id', wfInput.value);
+    
+    console.log("Form data:", Object.fromEntries(fd.entries()));
+    try {
+      const resp = await fetch("{{ url_for('vm.vsphere_update_vm_review') }}", { 
+        method: "POST", 
+        body: fd 
+      });
+      
+      if (!resp.ok) { 
+        const txt = await resp.text(); 
+        alert("Save to Draft failed: " + txt); 
+        return; 
+      }
+      
+      alert('草稿已成功儲存！');
+      window.location.href = "{{ url_for('vm.overview_index') }}";
+    } catch (err) {
+      console.error(err);
+      alert("Network error while saving draft.");
     }
   });
+
+});
 </script>

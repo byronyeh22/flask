@@ -27,58 +27,37 @@ def get_environment():
             db_conn.close()
 
 
-def get_vms_by_environment(environment):
+# 修正：將兩個同名函式合併成一個，並增加新的過濾條件
+def get_vms_by_filters(environment, vsphere_esxi_host=None):
     """
-    根據 environment 獲取所有對應的 vm_name_prefix。
-    - 自行建立/關閉連線
+    根據 environment 和可選的 vsphere_esxi_host 獲取 VM 名稱前綴。
     """
-    db_conn = get_db_connection()
     vms = []
+    db_conn = get_db_connection()
     try:
         with db_conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT vm_name_prefix
-                FROM vm_configurations
-                WHERE environment = %s
-                ORDER BY vm_name_prefix
-                """,
-                (environment,)
-            )
+            sql = "SELECT vm_name_prefix FROM vm_configurations WHERE environment = %s"
+            params = [environment]
+
+            if vsphere_esxi_host:
+                sql += " AND vsphere_esxi_host = %s"
+                params.append(vsphere_esxi_host)
+
+            sql += " ORDER BY vm_name_prefix"
+
+            cursor.execute(sql, tuple(params))
             rows = cursor.fetchall() or []
             vms = [item[0] for item in rows]
     except Error as e:
-        logging.error(f"[get_vms_by_environment] DB error: {e}")
+        logging.error(f"[get_vms_by_filters] DB error: {e}")
         return []
     except Exception as e:
-        logging.error(f"[get_vms_by_environment] Unexpected error: {e}")
+        logging.error(f"[get_vms_by_filters] Unexpected error: {e}")
         return []
     finally:
         if db_conn:
             db_conn.close()
     return vms
-
-
-def get_vms_by_environment(environment):
-    """
-    根據 environment 獲取所有對應的 vm_name_prefix。
-    """
-    try:
-        db_conn = get_db_connection()
-        with db_conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT vm_name_prefix
-                FROM vm_configurations
-                WHERE environment = %s
-                ORDER BY vm_name_prefix
-            """, (environment,))
-            return [row[0] for row in cursor.fetchall()]
-    except Exception as e:
-        logging.error(f"[get_vms_by_environment] DB error: {e}")
-        return []
-    finally:
-        if db_conn:
-            db_conn.close()
 
 def get_vm_config(environment, vm_name_prefix):
     """

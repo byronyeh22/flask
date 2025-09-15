@@ -15,7 +15,7 @@ from ..db.workflow_manager import (
 )
 from ..db.vm_provisioning_manager import apply_request_to_db
 
-from ..db.get_vm_configurations import get_vms_by_environment, get_vm_config
+from ..db.get_vm_configurations import get_vms_by_filters, get_vm_config
 from ..db.get_gitlab_pipeline_detail_and_stats import get_pipeline_details_by_workflow_id
 from ..db.get_jira_tickets_and_stats import get_jira_ticket_by_workflow_id
 from ..db.vsphere_connections_manager import get_active_vsphere_connections
@@ -313,7 +313,6 @@ def vsphere_create_vm_review():
 def vsphere_update_vm_review():
     """
     Handles saving an update request as a draft.
-    （Route 不處理 DB；由 helper 自行建/關連線）
     """
     # 1) 取表單並正規化
     new_config = request.form.to_dict(flat=False)
@@ -326,33 +325,58 @@ def vsphere_update_vm_review():
     prefix = processed_new_config.get('vm_name_prefix')
 
     try:
-        # 2) 讀原始設定（helper 內部處理連線）
+        # 2) 讀原始設定
         original_config = get_vm_config(env, prefix) or {}
+        
+        # 在序列化之前處理 datetime 對象
+        def serialize_datetime(obj):
+            from datetime import datetime
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+        
+        # 先將原始配置轉換為 JSON 字符串，然後再解析回 Python 對象
+        # 這樣可以確保所有嵌套的 datetime 對象都被轉換為字符串
+        original_config_json = json.dumps(original_config, default=serialize_datetime)
+        original_config = json.loads(original_config_json)
 
-        # 3) 組 payload（頂層帶 action_type=update，給 review 用）
+        # 3) 組 payload
         payload = {
             'original_config': original_config,
             'new_config': processed_new_config,
             'action_type': 'update',
+            'resource': 'vm'
         }
 
-        # 4) 建立草稿（helper 內部處理連線）
+        # 4) 建立草稿
         created_by = _current_username()
+        workflow_id = processed_new_config.get("workflow_id")
+        
+        logging.info(f"[vsphere_update_vm_review] username={created_by}, wf_id(raw)={workflow_id!r}")
 
         # 使用 save_or_update_draft 來處理
         final_wf_id, action = save_or_update_draft(
             processed_form_data=payload,
             created_by=created_by,
-            workflow_id=None  # 新建立的 update draft
+            workflow_id=workflow_id
         )
+        
+        logging.info(f"[vsphere_update_vm_review] save_or_update_draft returned: wf_id={final_wf_id}, action={action}")
 
-        flash(f"New update draft #{final_wf_id} for {prefix} has been created.", "success")
+        if action == "updated":
+            flash(f"Draft #{final_wf_id} updated successfully.", "success")
+        else:
+            flash(f"New draft #{final_wf_id} created successfully.", "success")
+
+        # 與 vsphere_create_vm_review 一致的回應方式
+        redirect_url = url_for('vm.overview_index')
+        return f'<script>window.top.location="{redirect_url}"</script>'
 
     except Exception as e:
-        logging.exception(f"[vsphere_update_vm_review] save draft failed: {e}")
-        flash(f"Failed to save update draft: {e}", "danger")
-
-    return redirect(url_for('vm.overview_index'))
+        logging.error(f"[vsphere_update_vm_review] Failed to save draft: {e}", exc_info=True)
+        flash(f"Failed to save draft: {e}", "danger")
+        redirect_url = url_for('vm.overview_index')
+        return f'<script>window.top.location="{redirect_url}"</script>'
 
 @vm_bp.route("/vsphere/vm/cancel")
 def vsphere_cancel_vm_form():

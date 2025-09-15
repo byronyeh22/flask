@@ -1,5 +1,5 @@
 from .. import vm_bp
-from flask import render_template, jsonify
+from flask import render_template, jsonify, request
 import logging
 import traceback
 
@@ -8,7 +8,7 @@ from ..db.vsphere_connections_manager import (
     get_hosts_by_environment,
     get_vsphere_connection_by_host
 )
-from ..db.get_vm_configurations import get_vms_by_environment, get_vm_config, get_validate_vm_exists
+from ..db.get_vm_configurations import get_vms_by_filters, get_vm_config, get_validate_vm_exists
 
 # --- API 函式 ---
 from ..vsphere_api.get_vsphere_objects import get_vsphere_objects
@@ -60,16 +60,16 @@ def get_vsphere_objects_by_host_api(host):
 
 @vm_bp.route('/api/get_vms_by_environment/<string:environment>')
 def get_vms_by_environment_api(environment):
-   """
-   API endpoint to fetch VMs for a given environment.
-   給 create/form.html 檢查相同環境下有沒有重複的 VM Name
-   """
-   try:
-       vms = get_vms_by_environment(environment)
-       return jsonify(vms)
-   except Exception as e:
-       logging.error(f"Error in get_vms_by_environment_api: {e}")
-       return jsonify({"error": "Internal server error"}), 500
+    """
+    API endpoint to fetch VMs for a given environment, optionally filtered by host.
+    """
+    try:
+        vsphere_esxi_host = request.args.get('vsphere_esxi_host')
+        vms = get_vms_by_filters(environment, vsphere_esxi_host)
+        return jsonify(vms)
+    except Exception as e:
+        logging.error(f"Error in get_vms_by_environment_api: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @vm_bp.route('/api/get_vm_config/<string:environment>/<string:vm_name_prefix>')
 def get_vm_config_api(environment, vm_name_prefix):
