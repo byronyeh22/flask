@@ -34,6 +34,7 @@
                 <option value="{{ env }}" {{ 'selected' if d.get('environment') == env else '' }}>{{ env }}</option>
             {% endfor %}
           </select>
+          <div class="muted mt-1">Choose the environment that contains your VM connection(s).</div>
         </div>
 
         <!-- vSphere Host：由 Environment 動態載入 -->
@@ -44,6 +45,7 @@
                   required>
             <option value="" disabled {{ '' if d.get('vsphere_host') else 'selected' }}>--- Select Environment First ---</option>
           </select>
+          <div class="muted mt-1">Pick the vSphere host connection used to browse placement objects.</div>
         </div>
 
         <div class="mb-3">
