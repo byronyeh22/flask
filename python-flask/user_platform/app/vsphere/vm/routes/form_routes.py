@@ -8,7 +8,7 @@ from ..db.vsphere_connections_manager import (
     get_hosts_by_environment,
     get_vsphere_connection_by_host
 )
-from ..db.get_vm_configurations import get_vms_by_environment, get_vm_config
+from ..db.get_vm_configurations import get_vms_by_environment, get_vm_config, get_validate_vm_exists
 
 # --- API 函式 ---
 from ..vsphere_api.get_vsphere_objects import get_vsphere_objects
@@ -71,18 +71,32 @@ def get_vms_by_environment_api(environment):
        logging.error(f"Error in get_vms_by_environment_api: {e}")
        return jsonify({"error": "Internal server error"}), 500
 
-# --- app/vsphere/vm/templates/update/form.html ---
 @vm_bp.route('/api/get_vm_config/<string:environment>/<string:vm_name_prefix>')
 def get_vm_config_api(environment, vm_name_prefix):
-   """
-   API endpoint to fetch a specific VM's configuration.
-   再 update/form.html 選了某個 VM 後，需要把現有設定抓回來顯示
-   """
-   try:
-       config = get_vm_config(environment, vm_name_prefix)
-       if not config:
-           return jsonify({"error": "Configuration not found"}), 404
-       return jsonify(config)
-   except Exception as e:
-       logging.error(f"Error in get_vm_config_api: {e}")
-       return jsonify({"error": "Internal server error"}), 500
+    """
+    API endpoint to fetch a specific VM's configuration.
+    """
+    try:
+        logging.info(f"API called with env={environment}, vm={vm_name_prefix}")
+
+        # 驗證 VM 是否存在
+        validation_result = get_validate_vm_exists(environment, vm_name_prefix)
+        if not validation_result['exists']:
+            logging.warning(f"VM not found: {vm_name_prefix} in {environment}")
+            logging.info(f"Available VMs in {environment}: {validation_result['available_vms']}")
+            return jsonify({
+                "error": f"Configuration not found for VM '{vm_name_prefix}' in environment '{environment}'"
+            }), 404
+
+        # 獲取 VM 配置
+        config = get_vm_config(environment, vm_name_prefix)
+        if not config:
+            return jsonify({
+                "error": f"Configuration not found for VM '{vm_name_prefix}' in environment '{environment}'"
+            }), 404
+
+        return jsonify(config)
+
+    except Exception as e:
+        logging.error(f"Error in get_vm_config_api: {e}", exc_info=True)
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500

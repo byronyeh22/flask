@@ -100,23 +100,31 @@ def get_vm_config(environment, vm_name_prefix):
 
         vm_id = config["id"]
 
-        # 查磁碟
+        # 查磁碟 - 修正欄位名稱
         with db_conn.cursor(dictionary=True) as disk_cursor:
             disk_cursor.execute("""
                 SELECT
                     id,
                     scsi_controller,
                     unit_number,
-                    ui_disk_number,
+                    label,                    -- 改為 label
                     size,
                     disk_provisioning,
-                    thin_provisioned,
-                    eagerly_scrub
+                    status,
+                    vmdk_path,
+                    created_at,
+                    updated_at
                 FROM vm_disks
                 WHERE vm_configuration_id = %s
                 ORDER BY scsi_controller ASC, unit_number ASC
             """, (vm_id,))
-            config["additional_disks"] = disk_cursor.fetchall()
+            disks = disk_cursor.fetchall()
+
+            # 為了向後兼容，將 label 映射為 ui_disk_number
+            for disk in disks:
+                disk['ui_disk_number'] = disk['label']
+
+            config["additional_disks"] = disks
 
         return config
 
@@ -125,4 +133,55 @@ def get_vm_config(environment, vm_name_prefix):
         return None
     finally:
         if db_conn:
-            db_conn.close()
+            db_conn.close
+
+def get_validate_vm_exists(environment, vm_name_prefix):
+    """
+    驗證指定的 VM 是否存在於指定環境中
+
+    Args:
+        environment (str): 環境名稱
+        vm_name_prefix (str): VM 名稱前綴
+
+    Returns:
+        dict: {
+            'exists': bool,
+            'environment_count': int,
+            'available_vms': list
+        }
+    """
+    try:
+        from app.mysql.db import get_db_connection
+
+        with get_db_connection() as db_conn:
+            with db_conn.cursor(dictionary=True) as cursor:
+                # 檢查環境中的 VM 總數
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM vm_configurations WHERE environment = %s",
+                    (environment,)
+                )
+                env_count = cursor.fetchone()['count']
+
+                # 獲取該環境中所有 VM 名稱
+                cursor.execute(
+                    "SELECT vm_name_prefix FROM vm_configurations WHERE environment = %s",
+                    (environment,)
+                )
+                all_vms = [vm['vm_name_prefix'] for vm in cursor.fetchall()]
+
+                # 檢查指定的 VM 是否存在
+                vm_exists = vm_name_prefix in all_vms
+
+                return {
+                    'exists': vm_exists,
+                    'environment_count': env_count,
+                    'available_vms': all_vms
+                }
+
+    except Exception as e:
+        logging.error(f"Error validating VM existence: {e}", exc_info=True)
+        return {
+            'exists': False,
+            'environment_count': 0,
+            'available_vms': []
+        }

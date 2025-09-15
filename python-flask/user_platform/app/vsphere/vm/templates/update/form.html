@@ -60,6 +60,14 @@
     opacity: 1;
     cursor: not-allowed;
   }
+
+  /* Disk provisioning 欄位反灰（不可編輯） */
+  .disk-provisioning[disabled] {
+    background-color: #e9ecef !important;
+    opacity: 1;
+    cursor: not-allowed;
+    color: #6c757d;
+  }
 </style>
 
 <div class="card mb-4 shadow-sm">
@@ -139,8 +147,8 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2 flex-shrink-0" viewBox="0 0 16 16" role="img" aria-label="Warning:"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.708c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>
             NOTE: Hard Disk 1 uses the disk configuration from the template.
           </div>
-          <button type="button" class="btn btn-sm btn-add" onclick="addDisk_for_update_form()">
-            <i class="bi bi-plus-circle"></i> Add Disk
+          <button type="button" class="btn btn-sm btn-add" onclick="addNewDisk()">
+            <i class="bi bi-plus-circle"></i> Add New Disk
           </button>
         </div>
       </div>
@@ -173,11 +181,11 @@
 
     let initialVMConfig = {};
     let originalById = {}; // id -> disk (from DB)
+    let newDiskCounter = 1; // 新增硬碟計數器
 
-    // vSphere SCSI 常數
-    const MAX_SCSI_CONTROLLER = 3; // controllers 0..3
-    const VALID_UNITS = [0,1,2,3,4,5,6,8,9,10,11,12,13,14,15]; // skip 7
-    const RESERVED = new Set(['0:0']); // 系統碟保留 (0:0)
+    // vSphere SCSI 常數（僅用於現有硬碟的顯示）
+    const MAX_SCSI_CONTROLLER = 3;
+    const VALID_UNITS = [0,1,2,3,4,5,6,8,9,10,11,12,13,14,15];
 
     // ---------- 小工具 ----------
     const asArray = (v) => Array.isArray(v) ? v : (v != null && v !== '' ? [v] : []);
@@ -197,54 +205,18 @@
       updateReviewButtonState();
     }
 
-    function parseLabelNumber(label) {
-      const m = String(label || '').match(/hard\s*disk\s*(\d+)/i);
-      return m ? parseInt(m[1], 10) : null;
+    // 計算目前表單中「新加入」的硬碟數量（沒有 id 的 row）
+    function getNewAddedDiskCount() {
+      const idInputs = newDiskContainer.querySelectorAll('input[name="update_disk_db_id[]"]');
+      let count = 0;
+      idInputs.forEach(inp => { if (!inp.value) count++; });
+      return count;
     }
 
-    function getUsedLabelNumbers() {
-      const inputs = newDiskContainer.querySelectorAll('input[name="update_disk_label[]"]');
-      const used = new Set();
-      inputs.forEach(inp => {
-        const n = parseLabelNumber(inp.value);
-        if (n) used.add(n);
-      });
-      return used;
+    // SCSI slot 顯示工具（僅用於現有硬碟的 tooltip）
+    function scsiTitle(controller, unit) { 
+      return `scsi(${controller}:${unit})`; 
     }
-
-    function nextFreeLabel() {
-      // 取「最小可用」Hard Disk N（從 2 起）
-      const used = getUsedLabelNumbers();
-      let n = 2;
-      while (used.has(n)) n++;
-      return `Hard Disk ${n}`;
-    }
-
-    function getUsedSlotsFromRows() {
-      const used = new Set(Array.from(newDiskContainer.querySelectorAll('.disk-item')).map(row => {
-        const c = row.querySelector('input[name="update_scsi_controller[]"]')?.value;
-        const u = row.querySelector('input[name="update_unit_number[]"]')?.value;
-        if (c === '' || u === '' || c == null || u == null) return null;
-        return `${parseInt(c,10)}:${parseInt(u,10)}`;
-      }).filter(Boolean));
-      RESERVED.forEach(x => used.add(x));
-      return used;
-    }
-
-    function nextFreeScsiSlot() {
-      const used = getUsedSlotsFromRows();
-      for (let bus = 0; bus <= MAX_SCSI_CONTROLLER; bus++) {
-        for (let i = 0; i < VALID_UNITS.length; i++) {
-          const unit = VALID_UNITS[i];
-          if (bus === 0 && unit === 0) continue; // 0:0 保留
-          const key = `${bus}:${unit}`;
-          if (!used.has(key)) return { controller: bus, unit: unit };
-        }
-      }
-      return null; // 沒空位
-    }
-
-    function scsiTitle(controller, unit) { return `scsi(${controller}:${unit})`; }
 
     function ensureTooltip(el, title) {
       el.setAttribute('title', title);
@@ -252,30 +224,11 @@
       tip.setContent({ '.tooltip-inner': title });
     }
 
-    function sortNewDiskRowsByLabel() {
-      const rows = Array.from(newDiskContainer.querySelectorAll('.disk-item'));
-      rows.sort((a, b) => {
-        const la = parseLabelNumber(a.querySelector('input[name="update_disk_label[]"]').value);
-        const lb = parseLabelNumber(b.querySelector('input[name="update_disk_label[]"]').value);
-        const va = (la == null ? 9999 : la);
-        const vb = (lb == null ? 9999 : lb);
-        return va - vb;
-      });
-      rows.forEach(r => newDiskContainer.appendChild(r));
-    }
-
+    // 正確的 label 顯示函數（現有硬碟用 ui_disk_number）
     function normalizedLabelFromConfig(d) {
       return (d && d.ui_disk_number != null)
         ? `Hard Disk ${parseInt(d.ui_disk_number, 10)}`
         : (d.label || null);
-    }
-
-    // 計算目前表單中「新加入」的硬碟數量（沒有 id 的 row）
-    function getNewAddedDiskCount() {
-      const idInputs = newDiskContainer.querySelectorAll('input[name="update_disk_db_id[]"]');
-      let count = 0;
-      idInputs.forEach(inp => { if (!inp.value) count++; });
-      return count;
     }
 
     // ---------- 變更偵測 ----------
@@ -366,61 +319,40 @@
       reviewBtn.textContent = s.hasChanges ? 'Review' : 'No Changes to Review';
     }
 
-    // ---------- 建立一個磁碟表單項（舊碟固定 SCSI；新碟自動分配；不自動重新連號） ----------
-    function addDisk_for_update_form(disk = {}) {
-      const isExisting = !!disk.id;
+    // ---------- 建立磁碟表單項 ----------
+    // 現有硬碟（從資料庫載入）
+    function addExistingDisk(disk) {
+      const isExisting = true;
       const id    = disk.id || '';
       const size  = (disk.size != null ? disk.size : 50);
       const prov  = disk.disk_provisioning || 'thin';
-      const fromRestore = !!disk._internalFromRestore;
 
-      // 新增硬碟上限（同次操作）
-      if (!isExisting && !fromRestore) {
-        const curNew = getNewAddedDiskCount();
-        if (curNew >= 5) {
-          showToast('You can add at most 5 disks per request.');
-          return;
-        }
+      // Label：使用正確的 ui_disk_number 或 label
+      let labelText = normalizedLabelFromConfig(disk);
+      if (!labelText) {
+        labelText = `Hard Disk ${disk.id || 'Unknown'}`;
       }
 
-      // Label：既有用 ui_disk_number → "Hard Disk N"；新增拿最小可用 N
-      let labelText = '';
-      if (isExisting) {
-        if (disk.ui_disk_number != null) {
-          labelText = `Hard Disk ${parseInt(disk.ui_disk_number,10)}`;
-        } else if (disk.label) {
-          labelText = disk.label;
-        } else {
-          labelText = nextFreeLabel();
-        }
-      } else {
-        labelText = nextFreeLabel();
-      }
-
-      // SCSI：舊碟用 DB；新碟找下一個可用 slot
+      // SCSI 資訊用於 tooltip（現有硬碟應該有這個資訊）
       let scsiController = '';
       let unitNumber = '';
-      if (isExisting && (disk.scsi_controller != null) && (disk.unit_number != null)) {
+      let tipTitle = '';
+
+      if (disk.scsi_controller != null && disk.unit_number != null) {
         scsiController = String(disk.scsi_controller);
         unitNumber = String(disk.unit_number);
+        tipTitle = scsiTitle(scsiController, unitNumber);
       } else {
-        const slot = nextFreeScsiSlot();
-        if (!slot) {
-          alert('No free SCSI slot available (controllers 0–3, units 0..15 except 7).');
-          return;
-        }
-        scsiController = String(slot.controller);
-        unitNumber = String(slot.unit);
+        tipTitle = 'SCSI info not available';
       }
 
       const isThin  = (prov === 'thin') ? 'true' : 'false';
       const isEager = (prov === 'thick_eager') ? 'true' : 'false';
-      const tipTitle = scsiTitle(scsiController, unitNumber);
 
-      // 既有磁碟限制：min=原始大小；Provisioning disabled（並用 hidden 同步值以便送出）
-      const sizeMinAttr = isExisting ? `min="${size}"` : `min="1"`;
-      const provDisabledAttr = isExisting ? 'disabled' : '';
-      const provTip = isExisting ? 'Existing disk provisioning cannot be changed.' : '';
+      // 既有磁碟限制：min=原始大小；Provisioning disabled
+      const sizeMinAttr = `min="${size}"`;
+      const provDisabledAttr = 'disabled';
+      const provTip = 'Existing disk provisioning cannot be changed.';
 
       const html = `
         <div class="disk-item mb-2 p-3 border rounded bg-light">
@@ -449,7 +381,7 @@
                 <option value="thick_lazy" ${prov === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
                 <option value="thick_eager" ${prov === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
               </select>
-              ${isExisting ? `<input type="hidden" name="update_vm_disk_provisioning[]" value="${prov}">` : ''}
+              <input type="hidden" name="update_vm_disk_provisioning[]" value="${prov}">
               <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
               <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
             </div>
@@ -460,41 +392,96 @@
             </div>
           </div>
         </div>`;
+
       newDiskContainer.insertAdjacentHTML('beforeend', html);
 
-      // 初始化 / 更新 tooltip
+      // 初始化 tooltip
       const tipIcon = newDiskContainer.lastElementChild.querySelector('.scsi-tip');
       if (tipIcon) {
         bootstrap.Tooltip.getOrCreateInstance(tipIcon);
         ensureTooltip(tipIcon, tipTitle);
       }
+    }
 
-      sortNewDiskRowsByLabel();
+    // 新增硬碟（簡化版本）
+    function addNewDisk() {
+      // 新增硬碟上限檢查
+      const curNew = getNewAddedDiskCount();
+      if (curNew >= 5) {
+        showToast('You can add at most 5 disks per request.');
+        return;
+      }
 
-      // 若同時有新增與刪除 → Toast + 還原（與 Review 無關）
+      const labelText = `New Disk ${newDiskCounter++}`;
+      const size = 50;
+      const prov = 'thin';
+
+      const isThin = 'true';
+      const isEager = 'false';
+
+      const html = `
+        <div class="disk-item mb-2 p-3 border rounded bg-light">
+          <input type="hidden" name="update_disk_db_id[]" value="">
+          <input type="hidden" name="update_disk_label[]" value="${labelText}">
+          <input type="hidden" name="update_scsi_controller[]" value="">
+          <input type="hidden" name="update_unit_number[]" value="">
+          <div class="row align-items-end g-2">
+            <div class="col-4 col-md-3">
+              <label class="form-label mb-0">Label</label>
+              <input type="text" class="form-control disk-label" value="${labelText}" disabled>
+            </div>
+            <div class="col-4 col-md-2">
+              <label class="form-label mb-0">Size (GB)</label>
+              <input type="number" name="update_vm_disk_size[]" class="form-control" min="1" value="${size}" data-required="true">
+            </div>
+            <div class="col-8 col-md-5">
+              <label class="form-label mb-0">Disk Provisioning</label>
+              <select name="update_vm_disk_provisioning[]" class="form-select disk-provisioning">
+                <option value="thin" selected>Thin Provision</option>
+                <option value="thick_lazy">Thick Provision Lazy Zeroed</option>
+                <option value="thick_eager">Thick Provision Eager Zeroed</option>
+              </select>
+              <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
+              <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
+            </div>
+            <div class="col-4 col-md-2 d-flex align-items-center">
+              <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
+                <i class="bi bi-trash"></i> Remove
+              </button>
+            </div>
+          </div>
+        </div>`;
+
+      newDiskContainer.insertAdjacentHTML('beforeend', html);
+
+      // 若同時有新增與刪除 → Toast + 還原
       if (handleAddRemoveConflictIfAny()) return;
-
       updateReviewButtonState();
     }
 
-    function removeDisk_for_update_form(btn) {
+    function removeDisk(btn) {
       btn.closest('.disk-item').remove();
-      sortNewDiskRowsByLabel();
 
-      // 若同時有新增與刪除 → Toast + 還原（與 Review 無關）
+      // 若同時有新增與刪除 → Toast + 還原
       if (handleAddRemoveConflictIfAny()) return;
-
       updateReviewButtonState();
     }
 
-    function updateProvisioningValues_for_update_form(selectEl) {
+    function updateProvisioningValues(selectEl) {
       const diskItem = selectEl.closest('.disk-item');
       const thinVal = diskItem.querySelector('.thin-provisioned-value');
       const eagerVal = diskItem.querySelector('.eagerly-scrub-value');
       const v = selectEl.value;
-      if (v === 'thin') { thinVal.value = 'true';  eagerVal.value = 'false'; }
-      else if (v === 'thick_lazy') { thinVal.value = 'false'; eagerVal.value = 'false'; }
-      else { thinVal.value = 'false'; eagerVal.value = 'true'; } // thick_eager
+      if (v === 'thin') { 
+        thinVal.value = 'true';  
+        eagerVal.value = 'false'; 
+      } else if (v === 'thick_lazy') { 
+        thinVal.value = 'false'; 
+        eagerVal.value = 'false'; 
+      } else { 
+        thinVal.value = 'false'; 
+        eagerVal.value = 'true'; // thick_eager
+      }
     }
 
     // ---------- 畫面渲染 ----------
@@ -502,6 +489,8 @@
       const container = document.getElementById('current-disk-container');
       container.innerHTML = '';
       const raw = config.additional_disks || [];
+
+      // 按 ui_disk_number 排序顯示
       const disks = [...raw].sort((a,b) => {
         const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
         const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
@@ -511,9 +500,7 @@
       if (disks.length > 0) {
         disks.forEach(d => {
           const prov = (d.disk_provisioning || 'thin').replace(/_/g, ' ');
-          const label = (d.ui_disk_number != null)
-            ? `Hard Disk ${d.ui_disk_number}`
-            : (d.label || 'Hard Disk');
+          const label = normalizedLabelFromConfig(d) || 'Hard Disk';
           container.insertAdjacentHTML(
             'beforeend',
             `<div class="mb-2"><strong>${label}:</strong> ${d.size} GB, ${prov}</div>`
@@ -526,18 +513,21 @@
 
     function populateNewDiskConfig(config) {
       newDiskContainer.innerHTML = '';
+      newDiskCounter = 1; // 重置計數器
       originalById = {};
-      (config.additional_disks || []).forEach(d => { originalById[String(d.id)] = d; });
+
+      // 儲存原始硬碟資訊
+      (config.additional_disks || []).forEach(d => { 
+        originalById[String(d.id)] = d; 
+      });
 
       const s = (vm_update_form_data && vm_update_form_data.new_config) ? vm_update_form_data.new_config : null;
       let ids    = asArray(s && s['update_disk_db_id[]']);
       let sizes  = asArray(s && s['update_vm_disk_size[]']);
       let provs  = asArray(s && s['update_vm_disk_provisioning[]']);
       let labels = asArray(s && s['update_disk_label[]']);
-      let ctrls  = asArray(s && s['update_scsi_controller[]']);
-      let units  = asArray(s && s['update_unit_number[]']);
 
-      // 第一次載入（尚無 session 值）
+      // 第一次載入（尚無 session 值）- 載入現有硬碟
       if (ids.length === 0 && config.additional_disks && config.additional_disks.length > 0) {
         const sorted = [...config.additional_disks].sort((a,b) => {
           const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
@@ -545,55 +535,23 @@
           return ua - ub;
         });
         sorted.forEach(d => {
-          addDisk_for_update_form({
-            id: d.id,
-            ui_disk_number: d.ui_disk_number,
-            label: (d.ui_disk_number != null) ? `Hard Disk ${d.ui_disk_number}` : (d.label || ''),
-            size: d.size,
-            disk_provisioning: d.disk_provisioning || 'thin',
-            scsi_controller: d.scsi_controller,
-            unit_number: d.unit_number
-          });
+          addExistingDisk(d);
         });
-        sortNewDiskRowsByLabel();
         return;
       }
 
-      // session 有值就逐項建立；舊碟沿用提供的 SCSI，沒有則用 DB；新碟如果沒 SCSI 就現場分配。
-      const len = Math.max(ids.length, sizes.length, provs.length, labels.length, ctrls.length, units.length);
+      // 有 session 值時的回填
+      const len = Math.max(ids.length, sizes.length, provs.length, labels.length);
       for (let i = 0; i < len; i++) {
-        const id    = ids[i] != null ? String(ids[i]) : '';
-        const size  = sizes[i] != null ? sizes[i] : '';
-        const prov  = provs[i] || 'thin';
+        const id = ids[i] != null ? String(ids[i]) : '';
 
-        let label = labels[i];
-        if (!label) {
-          if (id && originalById[id]?.ui_disk_number != null) {
-            label = `Hard Disk ${originalById[id].ui_disk_number}`;
-          } else if (id && originalById[id]?.label) {
-            label = originalById[id].label;
-          } else {
-            label = nextFreeLabel();
-          }
+        if (id && originalById[id]) {
+          // 現有硬碟
+          addExistingDisk(originalById[id]);
+        } else {
+          // 新增硬碟 - 使用簡化版本
+          addNewDisk();
         }
-
-        let ctrl = ctrls[i];
-        let unit = units[i];
-        if (id && originalById[id] && (ctrl == null || ctrl === '') && (unit == null || unit === '')) {
-          ctrl = String(originalById[id].scsi_controller);
-          unit = String(originalById[id].unit_number);
-        }
-
-        addDisk_for_update_form({
-          id,
-          size,
-          disk_provisioning: prov,
-          label,
-          scsi_controller: (ctrl !== undefined ? ctrl : undefined),
-          unit_number: (unit !== undefined ? unit : undefined),
-          ui_disk_number: originalById[id]?.ui_disk_number,
-          _internalFromRestore: true // ← 避免 session 回填觸發 15 顆上限
-        });
       }
     }
 
@@ -636,7 +594,7 @@
       }
     }
 
-    // ---------- 事件 ----------
+// ---------- 事件綁定 ----------
     envSelect.addEventListener('change', async function() {
       await fetchVmList(this.value);
       if (vm_update_form_data && vm_update_form_data.new_config && this.value === vm_update_form_data.new_config.environment) {
@@ -680,9 +638,10 @@
       }
     });
 
+    // 硬碟相關事件
     newDiskContainer.addEventListener('change', function(e) {
       if (e.target.classList.contains('disk-provisioning')) {
-        updateProvisioningValues_for_update_form(e.target);
+        updateProvisioningValues(e.target);
       }
       updateReviewButtonState();
     });
@@ -701,10 +660,11 @@
 
     newDiskContainer.addEventListener('click', function(e) {
       const btn = e.target.closest('.remove-disk-btn');
-      if (btn) removeDisk_for_update_form(btn);
+      if (btn) removeDisk(btn);
     });
 
-    document.querySelector('#configuration-form button.btn-add').addEventListener('click', () => addDisk_for_update_form());
+    // 將原本的全域函數改為事件監聽器
+    window.addNewDisk = addNewDisk;
 
     // 初始載入
     if (vm_update_form_data && vm_update_form_data.new_config && vm_update_form_data.new_config.environment) {
