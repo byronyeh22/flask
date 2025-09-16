@@ -615,8 +615,39 @@ document.addEventListener('DOMContentLoaded', function() {
     currentMemory.textContent = current_config.vm_memory || 'N/A';
     populateCurrentDiskConfig(current_config);
 
-    configForm.querySelector('input[name="vm_num_cpus"]').value = current_config.vm_num_cpus || '';
-    configForm.querySelector('input[name="vm_memory"]').value = current_config.vm_memory || '';
+    // 只在第一次載入時設定值，避免覆蓋用戶修改
+    const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
+    const memoryInput = configForm.querySelector('input[name="vm_memory"]');
+    
+    // 檢查是否為全新載入（輸入欄位不存在值或為空）
+    const isFirstLoad = !cpuInput.hasAttribute('data-user-modified');
+    
+    if (cpuInput && isFirstLoad) {
+      cpuInput.value = current_config.vm_num_cpus || '';
+      // 標記為已初始化
+      cpuInput.setAttribute('data-user-modified', 'false');
+    }
+    if (memoryInput && isFirstLoad) {
+      memoryInput.value = current_config.vm_memory || '';
+      // 標記為已初始化
+      memoryInput.setAttribute('data-user-modified', 'false');
+    }
+    
+    // 當用戶修改值時，標記為已修改
+    if (cpuInput && !cpuInput.hasAttribute('data-input-listener')) {
+      cpuInput.addEventListener('input', function() {
+        this.setAttribute('data-user-modified', 'true');
+      });
+      cpuInput.setAttribute('data-input-listener', 'true');
+    }
+    
+    if (memoryInput && !memoryInput.hasAttribute('data-input-listener')) {
+      memoryInput.addEventListener('input', function() {
+        this.setAttribute('data-user-modified', 'true');
+      });
+      memoryInput.setAttribute('data-input-listener', 'true');
+    }
+    
     populateNewDiskConfig(current_config);
   }
 
@@ -744,6 +775,17 @@ document.addEventListener('DOMContentLoaded', function() {
       configForm.querySelector('input[name="vm_num_cpus"]').addEventListener('input', updateReviewButtonState);
       configForm.querySelector('input[name="vm_memory"]').addEventListener('input', updateReviewButtonState);
       updateReviewButtonState();
+      const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
+      const memoryInput = configForm.querySelector('input[name="vm_memory"]');
+      
+      if (cpuInput) {
+        cpuInput.disabled = false;
+        console.log("CPU input enabled");
+      }
+      if (memoryInput) {
+        memoryInput.disabled = false;
+        console.log("Memory input enabled");
+      }
     } catch (e) {
       alert('載入 VM 設定失敗：' + e.message);
     }
@@ -850,9 +892,30 @@ document.addEventListener('DOMContentLoaded', function() {
   btnSave.addEventListener('click', async function() {
     // 檢查必填欄位
     if (!validateRequiredFields()) return;
-    const cpuValue = document.querySelector('input[name="vm_num_cpus"]').value;
-    const memoryValue = document.querySelector('input[name="vm_memory"]').value;
-    console.log("Before submitting - CPU:", cpuValue, "Memory:", memoryValue);
+    
+    // 添加詳細調試
+    const cpuInput = document.querySelector('input[name="vm_num_cpus"]');
+    const memoryInput = document.querySelector('input[name="vm_memory"]');
+    
+    console.log("=== Debug Info ===");
+    console.log("CPU Input Element:", cpuInput);
+    console.log("Memory Input Element:", memoryInput);
+    console.log("CPU Value:", cpuInput?.value);
+    console.log("Memory Value:", memoryInput?.value);
+    console.log("Initial VM Config:", initialVMConfig);
+    
+    // 確保元素存在且有值
+    if (!cpuInput || !memoryInput) {
+      console.error("CPU or Memory input not found!");
+      alert("找不到 CPU 或 Memory 輸入欄位");
+      return;
+    }
+    
+    if (!cpuInput.value || !memoryInput.value) {
+      console.error("CPU or Memory value is empty!");
+      alert("CPU 或 Memory 值為空");
+      return;
+    }
 
     // 收集所有表單欄位數據
     const fd = new FormData();
@@ -867,9 +930,56 @@ document.addEventListener('DOMContentLoaded', function() {
     fd.append('vsphere_esxi_host', esxiSelect.value);
     fd.append('vm_name_prefix', vmPrefixSelect.value);
     
-    // CPU 和 Memory
-    fd.append('vm_num_cpus', document.querySelector('input[name="vm_num_cpus"]').value);
-    fd.append('vm_memory', document.querySelector('input[name="vm_memory"]').value);
+    // CPU 和 Memory - 確保數值有效
+    const allCpuInputs = document.querySelectorAll('input[name="vm_num_cpus"]');
+    const allMemoryInputs = document.querySelectorAll('input[name="vm_memory"]');
+    
+    console.log("Found CPU inputs:", allCpuInputs.length);
+    console.log("Found Memory inputs:", allMemoryInputs.length);
+    
+    // 找到可見且未被 disabled 的輸入欄位
+    let activeCpuInput = null;
+    let activeMemoryInput = null;
+    
+    for (let input of allCpuInputs) {
+      console.log("CPU input:", input, "value:", input.value, "disabled:", input.disabled, "style.display:", input.style.display);
+      if (!input.disabled && input.style.display !== 'none' && input.offsetParent !== null) {
+        activeCpuInput = input;
+        break;
+      }
+    }
+    
+    for (let input of allMemoryInputs) {
+      console.log("Memory input:", input, "value:", input.value, "disabled:", input.disabled, "style.display:", input.style.display);
+      if (!input.disabled && input.style.display !== 'none' && input.offsetParent !== null) {
+        activeMemoryInput = input;
+        break;
+      }
+    }
+    
+    if (!activeCpuInput || !activeMemoryInput) {
+      console.error("Could not find active CPU or Memory input!");
+      alert("無法找到有效的 CPU 或 Memory 輸入欄位");
+      return;
+    }
+    
+    const cpuValue = parseInt(activeCpuInput.value, 10);
+    const memoryValue = parseInt(activeMemoryInput.value, 10);
+    
+    console.log("Active CPU input value:", activeCpuInput.value);
+    console.log("Active Memory input value:", activeMemoryInput.value);
+    console.log("Parsed CPU:", cpuValue);
+    console.log("Parsed Memory:", memoryValue)
+
+    
+    if (isNaN(cpuValue) || isNaN(memoryValue)) {
+      console.error("Invalid CPU or Memory value");
+      alert("CPU 或 Memory 值無效");
+      return;
+    }
+    
+    fd.append('vm_num_cpus', cpuValue);
+    fd.append('vm_memory', memoryValue);
     
     // 磁碟信息 - 遍歷所有磁碟欄位
     const diskIds = Array.from(document.querySelectorAll('input[name="update_disk_db_id[]"]'));
