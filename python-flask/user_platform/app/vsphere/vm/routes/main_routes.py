@@ -9,7 +9,7 @@ from ..db.get_jira_tickets_and_stats import get_jira_tickets_and_stats
 from ..db.get_gitlab_pipeline_detail_and_stats import get_gitlab_pipeline_detail_and_stats
 
 # --- API 函式 ---
-from ..jira_api.create_jira_ticket import _generate_create_summary
+from ..jira_api.create_jira_ticket import _generate_create_summary, _generate_update_summary
 
 @vm_bp.route("/vsphere/vm")
 def vm_index():
@@ -74,6 +74,82 @@ def overview_index():
         workflow_status_map = {row["workflow_id"]: row["status"] for row in all_workflows}
         workflow_created_by_map = {row["workflow_id"]: row.get("created_by") for row in all_workflows}
 
+        # 3) 統一解析每個 workflow 的 payload 資訊 - 支援 create/update/delete
+        workflow_details_map = {}
+        for workflow in all_workflows:
+            workflow_id = workflow["workflow_id"]
+            
+            try:
+                request_payload = json.loads(workflow.get("request_payload") or "{}")
+                
+                # 統一處理不同 action 類型
+                action_type = request_payload.get("action_type", "create")
+                
+                if action_type == "create":
+                    # Create: 直接從 payload 根層取得資料
+                    form_data = request_payload
+                    env = form_data.get("environment", "")
+                    vm_prefix = form_data.get("vm_name_prefix", "")
+                    os_type = form_data.get("os_type", form_data.get("vm_os_type", ""))
+                    
+                    # 使用與 Jira 相同的 summary 生成函數
+                    try:
+                        summary_text = _generate_create_summary(form_data) if form_data else "Create VM"
+                    except Exception:
+                        summary_text = f"[VM Provisioning] {env} - Create {vm_prefix}" if env and vm_prefix else "Create VM"
+                    
+                elif action_type == "update" and 'new_config' in request_payload:
+                    # Update: 從 new_config 中取得資料
+                    form_data = request_payload.get("new_config", {})
+                    env = form_data.get("environment", "")
+                    vm_prefix = form_data.get("vm_name_prefix", "")
+                    os_type = form_data.get("os_type", "")
+                    
+                    # 使用與 Jira 相同的 summary 生成函數
+                    try:
+                        summary_text = _generate_update_summary(request_payload) if request_payload else "Update VM"
+                    except Exception:
+                        summary_text = f"[VM Provisioning] {env} - Update {vm_prefix}" if env and vm_prefix else "Update VM"
+                    
+                # elif action_type == "delete":
+                #     # Delete: 從 target_config 中取得資料（為未來擴展準備）
+                #     form_data = request_payload.get("target_config", request_payload)
+                #     env = form_data.get("environment", "")
+                #     vm_prefix = form_data.get("vm_name_prefix", "")
+                #     os_type = form_data.get("os_type", "")
+                    
+                #     # Delete 目前使用簡單格式，未來可以創建 _generate_delete_summary
+                #     summary_text = f"[VM Provisioning] {env} - Delete {vm_prefix}" if env and vm_prefix else "Delete VM"
+                    
+                else:
+                    # 未知類型：使用預設處理
+                    form_data = request_payload
+                    env = form_data.get("environment", "")
+                    vm_prefix = form_data.get("vm_name_prefix", "")
+                    os_type = form_data.get("os_type", form_data.get("vm_os_type", ""))
+                    summary_text = f"[VM Provisioning] {env} - {action_type.title()} {vm_prefix}" if env and vm_prefix else f"{action_type.title()} VM"
+                
+                # 解析共同欄位
+                workflow_details_map[workflow_id] = {
+                    "environment": env,
+                    "vm_name_prefix": vm_prefix,
+                    "os_type": os_type,
+                    "action_type": action_type,
+                    "summary": summary_text,
+                    "resource": form_data.get("resource", "vm"),
+                }
+                    
+            except Exception as e:
+                logging.error(f"Error parsing workflow {workflow_id}: {e}")
+                workflow_details_map[workflow_id] = {
+                    "environment": "",
+                    "vm_name_prefix": "",
+                    "os_type": "",
+                    "action_type": "",
+                    "summary": "-",
+                    "resource": "vm",
+                }
+
         # A) 先把已有的 JIRA tickets 收成 map（key=workflow_id）
         jira_by_workflow_id = {
             row["workflow_id"]: dict(row) for row in jira_ticket_rows if row.get("workflow_id")
@@ -92,12 +168,9 @@ def overview_index():
             if workflow_id in jira_by_workflow_id:
                 continue
 
-            # 產生 fallback 的 summary（沿用 Draft 的做法）
-            try:
-                request_payload = json.loads(workflow.get("request_payload") or "{}")
-                summary_text = _generate_create_summary(request_payload) if request_payload else "-"
-            except Exception:
-                summary_text = "-"
+            # 使用統一解析出的 summary
+            workflow_details = workflow_details_map.get(workflow_id, {})
+            summary_text = workflow_details.get("summary", "-")
 
             jira_by_workflow_id[workflow_id] = {
                 "workflow_id": workflow_id,
@@ -114,6 +187,8 @@ def overview_index():
         for workflow in all_workflows:
             workflow_id = workflow["workflow_id"]
             if workflow_id not in pipeline_existing_workflow_ids:
+                workflow_details = workflow_details_map.get(workflow_id, {})
+                
                 pipeline_rows.insert(0, {
                     "workflow_id": workflow_id,
                     "pipeline_id": None,
@@ -122,6 +197,12 @@ def overview_index():
                     "finished_at": None,
                     "duration": None,
                     "created_by": workflow.get("created_by"),
+                    # 添加從 payload 統一解析的欄位
+                    "environment": workflow_details.get("environment", ""),
+                    "vm_name_prefix": workflow_details.get("vm_name_prefix", ""),
+                    "os_type": workflow_details.get("os_type", ""),
+                    "action_type": workflow_details.get("action_type", ""),
+                    "resource": workflow_details.get("resource", "vm"),
                 })
                 pipeline_existing_workflow_ids.add(workflow_id)
 
@@ -131,6 +212,15 @@ def overview_index():
             if workflow_id in workflow_status_map:
                 row["status"] = workflow_status_map[workflow_id]
             row["created_by"] = workflow_created_by_map.get(workflow_id, row.get("created_by"))
+            
+            # 確保所有 pipeline_rows 都有完整的 workflow 詳細資訊
+            if workflow_id in workflow_details_map:
+                workflow_details = workflow_details_map[workflow_id]
+                row["environment"] = workflow_details.get("environment", row.get("environment", ""))
+                row["vm_name_prefix"] = workflow_details.get("vm_name_prefix", row.get("vm_name_prefix", ""))
+                row["os_type"] = workflow_details.get("os_type", row.get("os_type", ""))
+                row["action_type"] = workflow_details.get("action_type", row.get("action_type", ""))
+                row["resource"] = workflow_details.get("resource", row.get("resource", "vm"))
 
         # 最後把 Jira map 轉回 list 給模板
         jira_ticket_rows = list(jira_by_workflow_id.values())

@@ -7,19 +7,24 @@ from flask import current_app # 導入 current_app
 def _generate_create_summary(data):
     """為 Create 操作產生 Jira 標題"""
     env = data.get('environment', 'N/A')
-    action = data.get('action_type', 'Create')
+    action = data.get('action_type', 'create')
     prefix = data.get('vm_name_prefix', 'N/A')
-    os_type = data.get('os_type', data.get('vm_os_type', 'N/A')).capitalize()
+    os_type = data.get('os_type')
     instance = data.get('vm_instance_type', 'N/A')
     return f"[VM Provisioning] {env} - {action} {prefix} - {os_type} ({instance})"
 
 def _generate_update_summary(data):
     """為 Update 操作產生 Jira 標題"""
-    config = data.get('new_config', {})
-    env = config.get('environment', 'N/A')
-    action = config.get('action_type', 'Update')
-    prefix = config.get('vm_name_prefix', 'N/A')
-    return f"[VM Provisioning] {env} - {action} {prefix}"
+    original_config = data.get('original_config', {})
+    new_config = data.get('new_config', {})
+
+    env = original_config.get('environment', 'N/A')
+    action = data.get('action_type', 'update')
+    prefix = original_config.get('vm_name_prefix', 'N/A')
+    os_type = original_config.get('os_type', 'N/A')
+    instance = original_config.get('vm_instance_type', 'N/A')
+
+    return f"[VM Provisioning] {env} - {action} {prefix} - {os_type} ({instance})"
 
 def _generate_update_description(data):
     """為 Update 操作產生詳細的 Jira 描述 (使用 Jira Wiki Markup)"""
