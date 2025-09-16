@@ -277,6 +277,42 @@ document.addEventListener('DOMContentLoaded', function() {
   let newDiskCounter = 1;
   let placementObjects = null;
 
+
+  // 使用事件委派來處理磁碟操作
+  newDiskContainer.addEventListener('click', function(e) {
+    const removeBtn = e.target.closest('.remove-disk-btn');
+    if (removeBtn) {
+      removeDisk(removeBtn);
+    }
+  });
+
+  newDiskContainer.addEventListener('change', function(e) {
+    const select = e.target.closest('.disk-provisioning');
+    if (select) {
+      updateProvisioningValues(select);
+      updateReviewButtonState();
+    }
+  });
+
+  // 更新 CPU 和 Memory 的事件監聽
+  const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
+  const memoryInput = configForm.querySelector('input[name="vm_memory"]');
+
+  if (cpuInput) {
+    cpuInput.addEventListener('input', function() {
+      this.classList.remove('is-invalid');
+      updateReviewButtonState();
+    });
+  }
+
+  if (memoryInput) {
+    memoryInput.addEventListener('input', function() {
+      this.classList.remove('is-invalid');
+      updateReviewButtonState();
+    });
+  }
+
+
   // --- Helpers ---
   const asArray = (v) => Array.isArray(v) ? v : (v != null && v !== '' ? [v] : []);
   const fetchJSON = async (url) => {
@@ -459,7 +495,7 @@ document.addEventListener('DOMContentLoaded', function() {
           </div>
           <div class="col-8 col-md-5">
             <label class="form-label mb-0">Disk Provisioning</label>
-            <select name="update_vm_disk_provisioning[]" class="form-select disk-provisioning" ${provDisabledAttr} title="${provTip}">
+            <select class="form-select disk-provisioning-display" ${provDisabledAttr} title="${provTip}">
               <option value="thin" ${prov === 'thin' ? 'selected' : ''}>Thin Provision</option>
               <option value="thick_lazy" ${prov === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
               <option value="thick_eager" ${prov === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
@@ -492,6 +528,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const label = `New Disk ${newDiskCounter++}`;
     const size = 50;
     const prov = 'thin';
+    const isThin = 'true';
+    const isEager = 'false';
 
     row.innerHTML = `
       <input type="hidden" name="update_disk_db_id[]" value="${id}">
@@ -512,8 +550,8 @@ document.addEventListener('DOMContentLoaded', function() {
             <option value="thick_lazy">Thick Provision Lazy Zeroed</option>
             <option value="thick_eager">Thick Provision Eager Zeroed</option>
           </select>
-          <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="true">
-          <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="false">
+          <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
+          <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
         </div>
         <div class="col-4 col-md-2 d-flex align-items-center">
           <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
@@ -523,19 +561,9 @@ document.addEventListener('DOMContentLoaded', function() {
       </div>
     `;
 
-    // 為新的刪除按鈕添加事件監聽器
-    row.querySelector('.remove-disk-btn').addEventListener('click', function() {
-      removeDisk(this);
-    });
-
-    // 為新的 provisioning 選擇器添加事件監聽器
-    const provSelect = row.querySelector('.disk-provisioning');
-    provSelect.addEventListener('change', function() {
-      updateProvisioningValues(this);
-    });
-
     newDiskContainer.appendChild(row);
 
+    // 將事件處理器移到全域事件委派，以避免重複綁定
     if (handleAddRemoveConflictIfAny()) return;
     updateReviewButtonState();
   }
@@ -547,20 +575,43 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function updateProvisioningValues(selectEl) {
+    if (!selectEl) return;
+    
     const diskItem = selectEl.closest('.disk-item');
+    if (!diskItem) {
+      console.error('無法找到磁碟項目容器');
+      return;
+    }
+    
     const thinVal = diskItem.querySelector('.thin-provisioned-value');
     const eagerVal = diskItem.querySelector('.eagerly-scrub-value');
+    const hiddenProv = diskItem.querySelector('input[name="update_vm_disk_provisioning[]"][type="hidden"]');
+    
+    if (!thinVal || !eagerVal) {
+      console.error('無法找到佈建值輸入欄位');
+      return;
+    }
+    
     const v = selectEl.value;
+    
+    // 更新隱藏欄位的值
+    if (hiddenProv) {
+      hiddenProv.value = v;
+    }
+    
+    // 更新 thin 和 eager 屬性
     if (v === 'thin') { 
       thinVal.value = 'true';  
       eagerVal.value = 'false'; 
     } else if (v === 'thick_lazy') { 
       thinVal.value = 'false'; 
       eagerVal.value = 'false'; 
-    } else { 
+    } else { // thick_eager
       thinVal.value = 'false'; 
       eagerVal.value = 'true';
     }
+    
+    console.log(`更新磁碟佈建: ${v}, thin=${thinVal.value}, eager=${eagerVal.value}`);
   }
 
   // --- Disk UI Helpers ---
@@ -724,33 +775,42 @@ document.addEventListener('DOMContentLoaded', function() {
     populateSelect(esxiSelect, placementObjects.cluster_esxi_hosts[cluster], '--- Select ESXi Host ---');
   }
 
-  async function onEsxiChange() {
-    setSelectPlaceholder(vmPrefixSelect, '--- Loading VMs... ---');
-    configForm.style.display = 'none';
+  async function onEsxiChange() {
+    setSelectPlaceholder(vmPrefixSelect, '--- Loading VMs... ---');
+    configForm.style.display = 'none';
 
-    const env = envSelect.value;
-    const esxi = esxiSelect.value;
-    if (!esxi || !env) {
-      setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
-      return;
-    }
+    const env = envSelect.value;
+    const esxi = esxiSelect.value;
+    if (!esxi || !env) {
+      setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+      return;
+    }
 
-    try {
-      // 1. 產生基本 URL，只包含環境篩選
-      const baseUrl = repl(vmPrefixSelect.dataset.vmsByEnvUrl, env, '__ENV__');
-      // 2. 建立 URLSearchParams 物件以處理查詢參數
-      const params = new URLSearchParams();
-      // 3. 添加 vsphere_esxi_host 參數
-      params.append('vsphere_esxi_host', esxi);
-      // 4. 合併 URL 和查詢參數
-      const url = `${baseUrl}?${params.toString()}`;
+    try {
+      // 產生基本 URL，只包含環境篩選
+      const baseUrl = repl(vmPrefixSelect.dataset.vmsByEnvUrl, env, '__ENV__');
+      // 建立 URLSearchParams 物件以處理查詢參數
+      const params = new URLSearchParams();
+      // 添加 vsphere_esxi_host 參數
+      params.append('vsphere_esxi_host', esxi);
+      // 合併 URL 和查詢參數
+      const url = `${baseUrl}?${params.toString()}`;
 
-      const vms = await fetchJSON(url);
-      populateSelect(vmPrefixSelect, vms, '--- Select VM ---');
-    } catch (e) {
-      setSelectPlaceholder(vmPrefixSelect, '--- Error Loading VMs ---');
-    }
-  }
+      console.log('Loading VMs from URL:', url);
+      const data = await fetchJSON(url);
+      const vms = Array.isArray(data) ? data : [];
+      console.log('Loaded VMs:', vms);
+      
+      if (vms.length === 0) {
+        setSelectPlaceholder(vmPrefixSelect, '--- No VMs found on this ESXi host ---');
+      } else {
+        populateSelect(vmPrefixSelect, vms, '--- Select VM ---');
+      }
+    } catch (e) {
+      console.error('Error loading VMs:', e);
+      setSelectPlaceholder(vmPrefixSelect, '--- Error Loading VMs ---');
+    }
+  }
 
   async function onVmChange() {
     const env = envSelect.value;
@@ -844,45 +904,84 @@ document.addEventListener('DOMContentLoaded', function() {
   function validateRequiredFields() {
     document.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
     let ok = true;
+    let firstInvalidEl = null;
     
-    // 檢查所有必填欄位
-    const musts = Array.from(document.querySelectorAll('[data-required="true"]'));
-    musts.forEach(el => {
-      // 跳過未啟用的選單
-      if (el.disabled) return;
-      
-      const v = (el.value || '').trim();
-      if (!v) { 
-        el.classList.add('is-invalid'); 
-        ok = false; 
+    // 檢查每一個選擇階段是否完成
+    const selectionSteps = [
+      { el: envSelect, name: '環境' },
+      { el: hostSelect, name: 'vSphere 主機' },
+      { el: datacenterSelect, name: '數據中心' },
+      { el: clusterSelect, name: '叢集' },
+      { el: esxiSelect, name: 'ESXi 主機' },
+      { el: vmPrefixSelect, name: '虛擬機器' }
+    ];
+    
+    for (const step of selectionSteps) {
+      if (!step.el.value) {
+        step.el.classList.add('is-invalid');
+        if (!firstInvalidEl) firstInvalidEl = step.el;
+        ok = false;
+        console.error(`未選擇 ${step.name}`);
       }
-      
-      // 檢查數字輸入是否符合最小值要求
-      if (el.type === 'number' && el.hasAttribute('min')) {
-        const min = parseFloat(el.getAttribute('min'));
-        const num = parseFloat(el.value);
-        if (isNaN(num) || num < min) { 
-          el.classList.add('is-invalid'); 
-          ok = false; 
-        }
-      }
-    });
+    }
+    
+    // 如果選擇階段有錯誤，則立即報告，不繼續檢查
+    if (!ok) {
+      if (firstInvalidEl) firstInvalidEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      alert('請先完成虛擬機器的選擇階段');
+      return false;
+    }
+    
+    // 確認配置表單是否顯示
+    if (configForm.style.display === 'none') {
+      alert('請先選擇一個虛擬機器');
+      return false;
+    }
+    
+    // 檢查 CPU 和記憶體
+    const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
+    const memoryInput = configForm.querySelector('input[name="vm_memory"]');
+    
+    if (!cpuInput || !memoryInput) {
+      console.error('無法找到 CPU 或記憶體輸入欄位');
+      alert('表單結構錯誤：無法找到 CPU 或記憶體輸入欄位');
+      return false;
+    }
+    
+    const cpuVal = parseInt(cpuInput.value, 10);
+    const memVal = parseInt(memoryInput.value, 10);
+    
+    if (isNaN(cpuVal) || cpuVal < 1) {
+      cpuInput.classList.add('is-invalid');
+      if (!firstInvalidEl) firstInvalidEl = cpuInput;
+      ok = false;
+      console.error('CPU 值無效');
+    }
+    
+    if (isNaN(memVal) || memVal < 512) {
+      memoryInput.classList.add('is-invalid');
+      if (!firstInvalidEl) firstInvalidEl = memoryInput;
+      ok = false;
+      console.error('記憶體值無效');
+    }
     
     // 檢查磁碟大小是否有效
     const diskSizes = document.querySelectorAll('input[name="update_vm_disk_size[]"]');
-    diskSizes.forEach(el => {
+    diskSizes.forEach((el, idx) => {
       const size = parseInt(el.value, 10);
       const min = parseInt(el.getAttribute('min') || '1', 10);
       if (isNaN(size) || size < min) {
         el.classList.add('is-invalid');
+        if (!firstInvalidEl) firstInvalidEl = el;
         ok = false;
+        console.error(`磁碟 ${idx+1} 大小無效`);
       }
     });
     
     // 如果有錯誤，捲動到第一個錯誤欄位
     if (!ok) {
-      const first = document.querySelector('.is-invalid');
-      if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (firstInvalidEl) firstInvalidEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      alert('請修正表單中標記為紅色的錯誤欄位');
     }
     
     return ok;
@@ -893,9 +992,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // 檢查必填欄位
     if (!validateRequiredFields()) return;
     
+    // 檢查是否有任何更改
+    const changes = computeChangeSummary();
+    if (!changes.hasChanges) {
+      alert('沒有任何修改需要儲存。如需更改，請調整 CPU、記憶體或硬碟設定。');
+      return;
+    }
+    
     // 添加詳細調試
-    const cpuInput = document.querySelector('input[name="vm_num_cpus"]');
-    const memoryInput = document.querySelector('input[name="vm_memory"]');
+    const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
+    const memoryInput = configForm.querySelector('input[name="vm_memory"]');
     
     console.log("=== Debug Info ===");
     console.log("CPU Input Element:", cpuInput);
@@ -903,6 +1009,7 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log("CPU Value:", cpuInput?.value);
     console.log("Memory Value:", memoryInput?.value);
     console.log("Initial VM Config:", initialVMConfig);
+    console.log("Changes:", changes);
     
     // 確保元素存在且有值
     if (!cpuInput || !memoryInput) {
@@ -930,51 +1037,23 @@ document.addEventListener('DOMContentLoaded', function() {
     fd.append('vsphere_esxi_host', esxiSelect.value);
     fd.append('vm_name_prefix', vmPrefixSelect.value);
     
-    // CPU 和 Memory - 確保數值有效
-    const allCpuInputs = document.querySelectorAll('input[name="vm_num_cpus"]');
-    const allMemoryInputs = document.querySelectorAll('input[name="vm_memory"]');
-    
-    console.log("Found CPU inputs:", allCpuInputs.length);
-    console.log("Found Memory inputs:", allMemoryInputs.length);
-    
-    // 找到可見且未被 disabled 的輸入欄位
-    let activeCpuInput = null;
-    let activeMemoryInput = null;
-    
-    for (let input of allCpuInputs) {
-      console.log("CPU input:", input, "value:", input.value, "disabled:", input.disabled, "style.display:", input.style.display);
-      if (!input.disabled && input.style.display !== 'none' && input.offsetParent !== null) {
-        activeCpuInput = input;
-        break;
-      }
-    }
-    
-    for (let input of allMemoryInputs) {
-      console.log("Memory input:", input, "value:", input.value, "disabled:", input.disabled, "style.display:", input.style.display);
-      if (!input.disabled && input.style.display !== 'none' && input.offsetParent !== null) {
-        activeMemoryInput = input;
-        break;
-      }
-    }
-    
-    if (!activeCpuInput || !activeMemoryInput) {
-      console.error("Could not find active CPU or Memory input!");
-      alert("無法找到有效的 CPU 或 Memory 輸入欄位");
-      return;
-    }
-    
-    const cpuValue = parseInt(activeCpuInput.value, 10);
-    const memoryValue = parseInt(activeMemoryInput.value, 10);
-    
-    console.log("Active CPU input value:", activeCpuInput.value);
-    console.log("Active Memory input value:", activeMemoryInput.value);
-    console.log("Parsed CPU:", cpuValue);
-    console.log("Parsed Memory:", memoryValue)
-
+    // CPU 和 Memory - 直接使用找到的元素
+    const cpuValue = parseInt(cpuInput.value, 10);
+    const memoryValue = parseInt(memoryInput.value, 10);
     
     if (isNaN(cpuValue) || isNaN(memoryValue)) {
       console.error("Invalid CPU or Memory value");
       alert("CPU 或 Memory 值無效");
+      return;
+    }
+    
+    if (cpuValue < 1) {
+      alert("CPU 值必須大於或等於 1");
+      return;
+    }
+    
+    if (memoryValue < 512) {
+      alert("記憶體值必須大於或等於 512 MB");
       return;
     }
     
@@ -985,18 +1064,51 @@ document.addEventListener('DOMContentLoaded', function() {
     const diskIds = Array.from(document.querySelectorAll('input[name="update_disk_db_id[]"]'));
     const diskLabels = Array.from(document.querySelectorAll('input[name="update_disk_label[]"]'));
     const diskSizes = Array.from(document.querySelectorAll('input[name="update_vm_disk_size[]"]'));
-    const diskProvs = Array.from(document.querySelectorAll('select[name="update_vm_disk_provisioning[]"], input[name="update_vm_disk_provisioning[]"][type="hidden"]'));
+    const diskProvs = Array.from(document.querySelectorAll('input[name="update_vm_disk_provisioning[]"], select[name="update_vm_disk_provisioning[]"]')).filter(el => !el.disabled);
     const thinProvs = Array.from(document.querySelectorAll('input.thin-provisioned-value'));
     const eagerScrubs = Array.from(document.querySelectorAll('input.eagerly-scrub-value'));
+    
+    console.log("Disk counts:", {
+      ids: diskIds.length,
+      labels: diskLabels.length,
+      sizes: diskSizes.length,
+      provs: diskProvs.length,
+      thins: thinProvs.length,
+      eagers: eagerScrubs.length
+    });
     
     // 添加所有磁碟欄位
     for (let i = 0; i < diskIds.length; i++) {
       if (diskIds[i]) fd.append('update_disk_db_id[]', diskIds[i].value);
       if (diskLabels[i]) fd.append('update_disk_label[]', diskLabels[i].value);
-      if (diskSizes[i]) fd.append('update_vm_disk_size[]', diskSizes[i].value);
-      if (diskProvs[i]) fd.append('update_vm_disk_provisioning[]', diskProvs[i].value);
+      
+      // 檢查並添加 size
+      if (diskSizes[i]) {
+        const size = parseInt(diskSizes[i].value, 10);
+        if (isNaN(size) || size < 1) {
+          alert(`磁碟 ${i+1} 的大小無效：必須是大於或等於 1 的數字`);
+          return;
+        }
+        fd.append('update_vm_disk_size[]', size);
+      }
+      
+      // 檢查並添加 provisioning
+      let provValue = '';
+      if (diskProvs[i]) {
+        provValue = diskProvs[i].value;
+      } else if (i < diskProvs.length) {
+        provValue = diskProvs[i].value;
+      } else {
+        provValue = 'thin'; // 預設值
+      }
+      fd.append('update_vm_disk_provisioning[]', provValue);
+      
+      // 添加 thin_provisioned 和 eagerly_scrub
       if (i < thinProvs.length) fd.append('update_vm_disk_thin_provisioned[]', thinProvs[i].value);
+      else fd.append('update_vm_disk_thin_provisioned[]', provValue === 'thin' ? 'true' : 'false');
+      
       if (i < eagerScrubs.length) fd.append('update_vm_disk_eagerly_scrub[]', eagerScrubs[i].value);
+      else fd.append('update_vm_disk_eagerly_scrub[]', provValue === 'thick_eager' ? 'true' : 'false');
     }
     
     // 如果存在 workflow_id，則添加
@@ -1012,17 +1124,51 @@ document.addEventListener('DOMContentLoaded', function() {
       
       if (!resp.ok) { 
         const txt = await resp.text(); 
-        alert("Save to Draft failed: " + txt); 
+        alert("儲存草稿失敗: " + txt); 
         return; 
       }
-      
-      alert('草稿已成功儲存！');
-      window.location.href = "{{ url_for('vm.overview_index') }}";
-    } catch (err) {
-      console.error(err);
-      alert("Network error while saving draft.");
+          
+        alert('草稿已成功儲存！');
+        window.location.href = "{{ url_for('vm.overview_index') }}";
+      } catch (err) {
+        console.error(err);
+        alert("Network error while saving draft.");
+      }
+    });
+
+  // 為 CPU 和 Memory 輸入欄位添加數值限制
+  function setupNumericInputs() {
+    const cpuInput = document.querySelector('input[name="vm_num_cpus"]');
+    const memoryInput = document.querySelector('input[name="vm_memory"]');
+    
+    if (cpuInput) {
+      cpuInput.addEventListener('input', function() {
+        let val = parseInt(this.value, 10);
+        if (isNaN(val) || val < 1) {
+          this.dataset.invalid = 'true';
+        } else {
+          this.dataset.invalid = 'false';
+          this.value = val;
+        }
+      });
     }
-  });
+    
+    if (memoryInput) {
+      memoryInput.addEventListener('input', function() {
+        let val = parseInt(this.value, 10);
+        if (isNaN(val) || val < 512) {
+          this.dataset.invalid = 'true';
+        } else {
+          this.dataset.invalid = 'false';
+          this.value = val;
+        }
+      });
+    }
+  }
+
+  // 初始化設置
+  setupNumericInputs();
+  console.log('VM Update Form 初始化完成');
 
 });
 </script>
