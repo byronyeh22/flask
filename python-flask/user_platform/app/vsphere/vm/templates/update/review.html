@@ -216,27 +216,27 @@
               <td>
                 {# 處理磁碟變更邏輯 #}
                 {% set original_disks = original.get('additional_disks', []) %}
-                
+
                 {# 建立原始磁碟的 mapping (by id) #}
                 {% set orig_disk_map = {} %}
                 {% for d in original_disks %}
                   {% set _ = orig_disk_map.update({d.id|string: d}) %}
                 {% endfor %}
-                
+
                 {# 從 new_config 取得表單資料 #}
                 {% set disk_ids = new_config.get('update_disk_db_id[]', new_config.get('update_disk_db_id', [])) %}
                 {% set disk_sizes = new_config.get('update_vm_disk_size[]', new_config.get('update_vm_disk_size', [])) %}
                 {% set disk_provs = new_config.get('update_vm_disk_provisioning[]', new_config.get('update_vm_disk_provisioning', [])) %}
-                
+
                 {# 確保都是 list 格式 #}
                 {% if disk_ids is string %}{% set disk_ids = [disk_ids] %}{% endif %}
                 {% if disk_sizes is string %}{% set disk_sizes = [disk_sizes] %}{% endif %}
                 {% if disk_provs is string %}{% set disk_provs = [disk_provs] %}{% endif %}
-                
-                {% set new_disk_counter = 1 %}
+
+
                 {% set form_disk_ids = [] %}
                 {% set has_any_disk_info = false %}
-                
+
                 {# 處理表單中存在的磁碟 #}
                 {% if disk_ids and disk_sizes %}
                   {% set has_any_disk_info = true %}
@@ -244,12 +244,12 @@
                     {% set disk_id = disk_ids[i] if i < disk_ids|length else '' %}
                     {% set disk_size = disk_sizes[i] if i < disk_sizes|length else '' %}
                     {% set disk_prov = disk_provs[i] if i < disk_provs|length else 'thin' %}
-                    
+
                     {% if disk_size and disk_size.strip() != '' %}
                       {% if disk_id and disk_id.strip() != '' %}
                         {# 記錄這個磁碟 ID 存在於表單中 #}
                         {% set _ = form_disk_ids.append(disk_id.strip()) %}
-                        
+
                         {# 現有磁碟的修改 #}
                         {% set orig_disk = orig_disk_map.get(disk_id.strip()) %}
                         {% if orig_disk %}
@@ -257,7 +257,7 @@
                           {% set orig_size = orig_disk.size|string %}
                           {% set orig_prov = (orig_disk.disk_provisioning or 'thin')|replace('_',' ')|title %}
                           {% set new_prov = disk_prov|replace('_',' ')|title %}
-                          
+
                           {# 檢查是否有變更 #}
                           {% if orig_size != disk_size or orig_prov != new_prov %}
                             <div class="disk-line">
@@ -272,17 +272,24 @@
                           {% endif %}
                         {% endif %}
                       {% else %}
-                        {# 新增磁碟 #}
+                        {# 新增磁碟 - 使用不同方法計算編號 #}
+                        {% set new_disk_count_before_current = [] %}
+                        {% for j in range(i) %}
+                          {% set prev_id = disk_ids[j] if j < disk_ids|length else '' %}
+                          {% set prev_size = disk_sizes[j] if j < disk_sizes|length else '' %}
+                          {% if prev_size and prev_size.strip() != '' and (not prev_id or prev_id.strip() == '') %}
+                            {% set _ = new_disk_count_before_current.append(1) %}
+                          {% endif %}
+                        {% endfor %}
                         {% set new_prov = disk_prov|replace('_',' ')|title %}
                         <div class="disk-line">
-                          <span class="disk-badge new">New Disk {{ new_disk_counter }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                          <span class="disk-badge new">New Disk {{ new_disk_count_before_current|length + 1 }}: {{ disk_size }} GB, {{ new_prov }}</span>
                         </div>
-                        {% set new_disk_counter = new_disk_counter + 1 %}
                       {% endif %}
                     {% endif %}
                   {% endfor %}
                 {% endif %}
-                
+
                 {# 檢查是否有磁碟被刪除（原有磁碟不在表單中） #}
                 {% for orig_disk in original_disks %}
                   {% if orig_disk.id|string not in form_disk_ids %}
@@ -294,7 +301,7 @@
                     </div>
                   {% endif %}
                 {% endfor %}
-                
+
                 {# 如果完全沒有磁碟資訊 #}
                 {% if not has_any_disk_info %}
                   <span class="text-muted">No disk changes</span>
