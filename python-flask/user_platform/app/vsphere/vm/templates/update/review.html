@@ -1,87 +1,356 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Review VM Update Request</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    .kv { display: grid; grid-template-columns: 220px 1fr; gap: .5rem 1rem; }
+    .kv .k { color: #6c757d; font-weight: 600; }
+    .kv .v { word-break: break-word; }
+    .table-disks th, .table-disks td { vertical-align: middle; }
+    .bg-returned { background-color: #9b59b6 !important; color: #fff !important; }
+    .change-highlight { 
+      color: #dc3545; 
+      font-weight: normal;
+      font-size: 0.9rem;
+    }
+    .no-change { 
+      color: #6c757d; 
+      font-size: 0.85rem;
+    }
+    .disk-change { 
+      margin-bottom: 0.25rem; 
+      font-size: 0.85rem;
+      line-height: 1.3;
+    }
+    .new-disk { 
+      color: #28a745; 
+      font-weight: normal;
+      font-size: 0.85rem;
+    }
+    /* 調整表格寬度 - 改為兩欄 */
+    .config-table {
+      table-layout: fixed;
+      width: 100%;
+      min-width: 600px;
+    }
+    .config-table th:nth-child(1) { width: 20%; }
+    .config-table th:nth-child(2) { width: 80%; }
+    .config-table td {
+      font-size: 0.9rem;
+      padding: 0.75rem 0.6rem;
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
+    }
+    .config-table th {
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.75rem 0.6rem;
+    }
+    /* 磁碟 badge 風格 */
+    .disk-badge {
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: normal;
+      margin: 0.1rem 0.2rem 0.1rem 0;
+      display: inline-block;
+    }
+    .disk-badge.unchanged {
+      background-color: #6c757d;
+      color: white;
+    }
+    .disk-badge.changed {
+      background-color: #dc3545;
+      color: white;
+    }
+    .disk-badge.removed {
+      background-color: #dc3545;
+      color: white;
+      text-decoration: line-through;
+    }
+    .disk-badge.new {
+      background-color: #28a745;
+      color: white;
+    }
+    .disk-line {
+      display: block;
+      margin-bottom: 0.3rem;
+      line-height: 1.4;
+    }
+    .arrow {
+      color: #dc3545;
+      font-weight: bold;
+      margin: 0 0.3rem;
+    }
+  </style>
+</head>
+<body>
+<div class="container-fluid py-3">
 
-{% block content %}
+  <h4 class="mb-3 d-flex align-items-center gap-2">
+    Review VM Update Request
+    {% if workflow and workflow.status %}
+      <span class="badge
+        {% if workflow.status == 'SUCCESS' %} bg-success
+        {% elif workflow.status == 'PENDING_APPROVAL' %} bg-warning text-dark
+        {% elif workflow.status == 'FAILED' %} bg-danger
+        {% elif workflow.status == 'RETURNED' %} bg-returned
+        {% elif workflow.status == 'DRAFT' %} bg-secondary
+        {% else %} bg-info
+        {% endif %}
+      ">
+        {{ workflow.status }}
+      </span>
+    {% endif %}
+  </h4>
 
-<form method="post" action="{{ url_for('vm.vsphere_submit_request') }}" onsubmit="return confirm('Are you sure you want to submit this VM UPDATE request?');">
-  <h2 class="fw-bold fs-3 mb-4">Review VM Update</h2>
-  <p class="text-primary fw-bold">Current Action: {{ data.new_config.action_type }} {{ data.new_config.resource }}</p>
-  <p class="text-primary fw-bold">
-      Updating VM: <strong>{{ data.new_config.vm_name_prefix }}</strong> in <strong>{{ data.new_config.environment }}</strong> environment
-  </p>
+  {% set original = data.get('original_config', {}) %}
+  {% set new_config = data.get('new_config', {}) %}
 
-  <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-light text-dark fw-bold">Configuration Changes</div>
+  {% if workflow and workflow.status == 'RETURNED' %}
+  <div class="alert alert-danger d-flex align-items-start gap-3 mt-3" role="alert">
+    <i class="bi bi-x-octagon fs-4"></i>
+    <div>
+      <div class="fw-bold">This request was returned</div>
+      <div class="small text-muted">
+        by <span class="fw-semibold">{{ workflow.returned_by or 'unknown' }}</span>
+        {% if workflow.updated_at %} at <span>{{ workflow.updated_at }}</span>{% endif %}
+      </div>
+      <div class="mt-2">
+        <div class="fw-semibold mb-1">Reason</div>
+        <pre class="mb-0" style="white-space:pre-wrap">{{ workflow.returned_reason or '-' }}</pre>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Workflow Info -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Workflow Info</div>
     <div class="card-body">
-        <table class="table table-bordered align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th style="width: 25%;">Field</th>
-                    <th style="width: 37.5%;">Original Value</th>
-                    <th style="width: 37.5%;">New Value</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><strong>vCPU</strong></td>
-                    <td>{{ data.original_config.vm_num_cpus }}</td>
-                    <td>
-                        {% if data.original_config.vm_num_cpus|string != data.new_config.vm_num_cpus %}
-                            <span class="text-danger fw-bold">{{ data.new_config.vm_num_cpus }} <i class="bi bi-arrow-left-right"></i></span>
-                        {% else %}
-                            {{ data.new_config.vm_num_cpus }}
-                        {% endif %}
-                    </td>
-                </tr>
+      <div class="kv">
+        <div class="k">Created By</div>
+        <div class="v">{{ workflow.created_by or '-' }}</div>
 
-                <tr>
-                    <td><strong>Memory (MB)</strong></td>
-                    <td>{{ data.original_config.vm_memory }}</td>
-                    <td>
-                        {% if data.original_config.vm_memory|string != data.new_config.vm_memory %}
-                            <span class="text-danger fw-bold">{{ data.new_config.vm_memory }} <i class="bi bi-arrow-left-right"></i></span>
-                        {% else %}
-                            {{ data.new_config.vm_memory }}
-                        {% endif %}
-                    </td>
-                </tr>
+        <div class="k">Created At</div>
+        <div class="v">{{ (workflow.created_at or '-')|replace('T',' ') }}</div>
 
-                <tr>
-                    <td><strong>Additional Disks</strong></td>
+        <div class="k">Submitted At</div>
+        <div class="v">{{ (workflow.submitted_at or '-')|replace('T',' ') }}</div>
 
-                    {# -------------------- Original Value（以 DB 為準，不顯示 SCSI） -------------------- #}
-                    <td>
-                        {% set original_disks = data.original_config.additional_disks or [] %}
-                        {% if original_disks and original_disks|length > 0 %}
-                            {% for d in original_disks %}
-                                {% set label_txt = ('Hard Disk ' ~ d.ui_disk_number) if d.ui_disk_number is not none else (d.label or 'Hard Disk') %}
-                                {% set prov_txt  = (d.disk_provisioning or 'thin')|replace('_',' ')|title %}
-                                <div class="mb-1">
-                                    <span class="badge bg-secondary">
-                                        {{ label_txt }}: {{ d.size }} GB, {{ prov_txt }}
-                                    </span>
-                                </div>
-                            {% endfor %}
-                        {% else %}
-                            <span class="text-muted">No additional disks</span>
-                        {% endif %}
-                    </td>
+        <div class="k">Approved By</div>
+        <div class="v">{{ workflow.approved_by or '-' }}</div>
 
-                    {# -------------------- New Value（依表單 session 值顯示） -------------------- #}
-                    <td>
-                        {# 此處的邏輯可能需要根據您 update form 的最終設計來調整 #}
-                        <span class="text-info">Changes will be processed upon approval.</span>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+        <div class="k">Approved At</div>
+        <div class="v">{{ (workflow.approved_at or '-')|replace('T',' ') }}</div>
+
+        <div class="k">Finished At</div>
+        <div class="v">{{ (workflow.finished_at or '-')|replace('T',' ') }}</div>
+      </div>
     </div>
   </div>
 
-  <div class="d-flex justify-content-end mt-4">
-    <a href="{{ url_for('vm.vsphere_cancel_vm_form') }}" class="btn btn-outline-danger me-2">Cancel</a>
-    <a href="{{ url_for('vm.vm_index', active_tab='update') }}" class="btn btn-outline-secondary me-2">Previous</a>
-    <button type="submit" class="btn btn-primary px-5">Confirm & Submit Update</button>
+  <!-- Target VM Info -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Target VM</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Action</div><div class="v">{{ new_config.get('action_type', 'update') }}</div>
+        <div class="k">Resource</div><div class="v">{{ new_config.get('resource', 'vm') }}</div>
+        <div class="k">Environment</div><div class="v">{{ new_config.get('environment', '-') }}</div>
+        <div class="k">vSphere Host</div><div class="v">{{ new_config.get('vsphere_host', '-') }}</div>
+        <div class="k">VM Name</div><div class="v"><strong>{{ new_config.get('vm_name_prefix', '-') }}</strong></div>
+      </div>
+    </div>
   </div>
-</form>
 
-{% endblock %}
+  <!-- Configuration Changes -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Configuration Changes</div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle config-table">
+          <thead class="table-light">
+            <tr>
+              <th>Field</th>
+              <th>Changes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>vCPU</td>
+              <td>
+                {% set orig_cpu = original.get('vm_num_cpus')|string %}
+                {% set new_cpu = new_config.get('vm_num_cpus')|string %}
+                {% if orig_cpu != new_cpu %}
+                  <span class="change-highlight">
+                    {{ original.get('vm_num_cpus', 'N/A') }} → {{ new_config.get('vm_num_cpus', 'N/A') }}
+                  </span>
+                {% else %}
+                  <span class="no-change">{{ new_config.get('vm_num_cpus', 'N/A') }} (unchanged)</span>
+                {% endif %}
+              </td>
+            </tr>
+
+            <tr>
+              <td>Memory (MB)</td>
+              <td>
+                {% set orig_mem = original.get('vm_memory')|string %}
+                {% set new_mem = new_config.get('vm_memory')|string %}
+                {% if orig_mem != new_mem %}
+                  <span class="change-highlight">
+                    {{ original.get('vm_memory', 'N/A') }} → {{ new_config.get('vm_memory', 'N/A') }}
+                  </span>
+                {% else %}
+                  <span class="no-change">{{ new_config.get('vm_memory', 'N/A') }} (unchanged)</span>
+                {% endif %}
+              </td>
+            </tr>
+
+            <tr>
+              <td>Additional Disks</td>
+              <td>
+                {# 處理磁碟變更邏輯 #}
+                {% set original_disks = original.get('additional_disks', []) %}
+                
+                {# 建立原始磁碟的 mapping (by id) #}
+                {% set orig_disk_map = {} %}
+                {% for d in original_disks %}
+                  {% set _ = orig_disk_map.update({d.id|string: d}) %}
+                {% endfor %}
+                
+                {# 從 new_config 取得表單資料 #}
+                {% set disk_ids = new_config.get('update_disk_db_id[]', new_config.get('update_disk_db_id', [])) %}
+                {% set disk_sizes = new_config.get('update_vm_disk_size[]', new_config.get('update_vm_disk_size', [])) %}
+                {% set disk_provs = new_config.get('update_vm_disk_provisioning[]', new_config.get('update_vm_disk_provisioning', [])) %}
+                
+                {# 確保都是 list 格式 #}
+                {% if disk_ids is string %}{% set disk_ids = [disk_ids] %}{% endif %}
+                {% if disk_sizes is string %}{% set disk_sizes = [disk_sizes] %}{% endif %}
+                {% if disk_provs is string %}{% set disk_provs = [disk_provs] %}{% endif %}
+                
+                {% set new_disk_counter = 1 %}
+                {% set form_disk_ids = [] %}
+                {% set has_any_disk_info = false %}
+                
+                {# 處理表單中存在的磁碟 #}
+                {% if disk_ids and disk_sizes %}
+                  {% set has_any_disk_info = true %}
+                  {% for i in range([disk_ids|length, disk_sizes|length] | max) %}
+                    {% set disk_id = disk_ids[i] if i < disk_ids|length else '' %}
+                    {% set disk_size = disk_sizes[i] if i < disk_sizes|length else '' %}
+                    {% set disk_prov = disk_provs[i] if i < disk_provs|length else 'thin' %}
+                    
+                    {% if disk_size and disk_size.strip() != '' %}
+                      {% if disk_id and disk_id.strip() != '' %}
+                        {# 記錄這個磁碟 ID 存在於表單中 #}
+                        {% set _ = form_disk_ids.append(disk_id.strip()) %}
+                        
+                        {# 現有磁碟的修改 #}
+                        {% set orig_disk = orig_disk_map.get(disk_id.strip()) %}
+                        {% if orig_disk %}
+                          {% set orig_label = ('Hard Disk ' ~ orig_disk.ui_disk_number) if orig_disk.ui_disk_number is not none else (orig_disk.label or ('Hard Disk ' ~ orig_disk.id)) %}
+                          {% set orig_size = orig_disk.size|string %}
+                          {% set orig_prov = (orig_disk.disk_provisioning or 'thin')|replace('_',' ')|title %}
+                          {% set new_prov = disk_prov|replace('_',' ')|title %}
+                          
+                          {# 檢查是否有變更 #}
+                          {% if orig_size != disk_size or orig_prov != new_prov %}
+                            <div class="disk-line">
+                              <span class="disk-badge unchanged">{{ orig_label }}: {{ orig_size }} GB, {{ orig_prov }}</span>
+                              <span class="arrow">→</span>
+                              <span class="disk-badge changed">{{ orig_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                            </div>
+                          {% else %}
+                            <div class="disk-line">
+                              <span class="disk-badge unchanged">{{ orig_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                            </div>
+                          {% endif %}
+                        {% endif %}
+                      {% else %}
+                        {# 新增磁碟 #}
+                        {% set new_prov = disk_prov|replace('_',' ')|title %}
+                        <div class="disk-line">
+                          <span class="disk-badge new">New Disk {{ new_disk_counter }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                        </div>
+                        {% set new_disk_counter = new_disk_counter + 1 %}
+                      {% endif %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+                
+                {# 檢查是否有磁碟被刪除（原有磁碟不在表單中） #}
+                {% for orig_disk in original_disks %}
+                  {% if orig_disk.id|string not in form_disk_ids %}
+                    {% set has_any_disk_info = true %}
+                    {% set orig_label = ('Hard Disk ' ~ orig_disk.ui_disk_number) if orig_disk.ui_disk_number is not none else (orig_disk.label or ('Hard Disk ' ~ orig_disk.id)) %}
+                    {% set orig_prov = (orig_disk.disk_provisioning or 'thin')|replace('_',' ')|title %}
+                    <div class="disk-line">
+                      <span class="disk-badge removed">{{ orig_label }}: {{ orig_disk.size }} GB, {{ orig_prov }}</span>
+                    </div>
+                  {% endif %}
+                {% endfor %}
+                
+                {# 如果完全沒有磁碟資訊 #}
+                {% if not has_any_disk_info %}
+                  <span class="text-muted">No disk changes</span>
+                {% endif %}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- vSphere Placement Info -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">vSphere Placement</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="kv">
+            <div class="k">Datacenter</div><div class="v">{{ new_config.get('vsphere_datacenter', '-') }}</div>
+            <div class="k">Cluster</div><div class="v">{{ new_config.get('vsphere_cluster', '-') }}</div>
+            <div class="k">ESXi Host</div><div class="v">{{ new_config.get('vsphere_esxi_host', '-') }}</div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="kv">
+            <div class="k">Template</div><div class="v">{{ original.get('vsphere_template', '-') }}</div>
+            <div class="k">Datastore</div><div class="v">{{ original.get('vsphere_datastore', '-') }}</div>
+            <div class="k">Network</div><div class="v">{{ original.get('vsphere_network', '-') }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if workflow and (workflow.status == 'DRAFT' or workflow.status == 'RETURNED') %}
+  <div class="mt-4 d-flex justify-content-end gap-2">
+    <form method="post" action="{{ url_for('vm.vsphere_submit_request') }}?from_modal=1"
+          onsubmit="return confirm('{% if workflow.status == 'RETURNED' %}Are you sure you want to RESUBMIT this update request for approval?{% else %}Are you sure you want to submit this VM update request?{% endif %}');">
+
+        <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
+
+        {% if workflow.status == 'RETURNED' %}
+            <button type="submit" class="btn btn-warning">
+                <i class="bi bi-arrow-up-circle me-1"></i> Resubmit for Approval
+            </button>
+        {% else %}
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check2-circle me-1"></i> Confirm &amp; Submit
+            </button>
+        {% endif %}
+    </form>
+  </div>
+  {% endif %}
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
