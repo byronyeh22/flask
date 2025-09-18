@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>VM Update Approval</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+
+  <style>
+    .kv { display: grid; grid-template-columns: 220px 1fr; gap: .5rem 1rem; }
+    .kv .k { color: #6c757d; font-weight: 600; }
+    .kv .v { word-break: break-word; }
+    .table-disks th, .table-disks td { vertical-align: middle; }
+    .status-badge { padding: 0.25rem 0.6rem; border-radius: 999px; font-size: .78rem; font-weight: 600; text-transform: uppercase; }
+    .status-manual  { background: rgba(241,196,15,.18); color:#b07d00; border: 1px solid rgba(241,196,15,.35); }
+    .status-running { background: rgba(52,152,219,.18); color:#1b6691; border: 1px solid rgba(52,152,219,.35); }
+    .status-success { background: rgba(39,174,96,.18); color:#167a44; border: 1px solid rgba(39,174,96,.35); }
+    .status-failed  { background: rgba(231,76,60,.18); color:#9c2e21; border: 1px solid rgba(231,76,60,.35); }
+    .status-default { background: rgba(108,117,125,.18); color:#495057; border: 1px solid rgba(108,117,125,.35); }
+    .workflow-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    
+    /* Update 特有樣式 - 整合 review.html 的樣式 */
+    .change-highlight { 
+      color: #dc3545; 
+      font-weight: normal;
+      font-size: 0.9rem;
+    }
+    .no-change { 
+      color: #6c757d; 
+      font-size: 0.85rem;
+    }
+    .config-table {
+      table-layout: fixed;
+      width: 100%;
+      min-width: 600px;
+    }
+    .config-table th:nth-child(1) { width: 20%; }
+    .config-table th:nth-child(2) { width: 80%; }
+    .config-table td {
+      font-size: 0.9rem;
+      padding: 0.75rem 0.6rem;
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
+    }
+    .config-table th {
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.75rem 0.6rem;
+    }
+    .disk-badge {
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: normal;
+      margin: 0.1rem 0.2rem 0.1rem 0;
+      display: inline-block;
+    }
+    .disk-badge.unchanged {
+      background-color: #6c757d;
+      color: white;
+    }
+    .disk-badge.changed {
+      background-color: #dc3545;
+      color: white;
+    }
+    .disk-badge.removed {
+      background-color: #dc3545;
+      color: white;
+      text-decoration: line-through;
+    }
+    .disk-badge.new {
+      background-color: #28a745;
+      color: white;
+    }
+    .disk-line {
+      display: block;
+      margin-bottom: 0.3rem;
+      line-height: 1.4;
+    }
+    .arrow {
+      color: #dc3545;
+      font-weight: bold;
+      margin: 0 0.3rem;
+    }
+  </style>
+</head>
+<body>
+<div class="container-fluid py-3">
+
+  <h4 class="mb-3 d-flex align-items-center gap-2">
+    <i class="bi bi-gear-wide-connected"></i>
+    VM Update Approval
+  </h4>
+
+  {# 後端 route workflow_approve_page() 傳入：workflow, pipeline, jira_ticket, request_details #}
+  {% set original = request_details.get('original_config', {}) or {} %}
+  {% set new_config = request_details.get('new_config', {}) or {} %}
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Pipeline</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Workflow ID</div><div class="v workflow-id">#{{ workflow.workflow_id }}</div>
+        <div class="k">Pipeline ID</div><div class="v">{{ (pipeline.pipeline_id if pipeline else '-') }}</div>
+        <div class="k">Status</div>
+        <div class="v">
+          {% set st = (pipeline.status if pipeline else '-')|lower %}
+          {% set badge = 'status-default' %}
+          {% if st == 'manual' %}{% set badge = 'status-manual' %}
+          {% elif st in ['created','pending','preparing','running','waiting_for_resource'] %}{% set badge='status-running' %}
+          {% elif st == 'success' %}{% set badge='status-success' %}
+          {% elif st in ['failed','canceled'] %}{% set badge='status-failed' %}{% endif %}
+          <span class="status-badge {{ badge }}">{{ pipeline.status if pipeline else '-' }}</span>
+        </div>
+        <div class="k">Web URL</div>
+        <div class="v">
+          {% if pipeline and pipeline.web_url %}
+            <a href="{{ pipeline.web_url }}" target="_blank" class="link-primary">Open in GitLab</a>
+          {% else %}
+            -
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Workflow Info</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Created By</div>
+        <div class="v">{{ workflow.created_by or '-' }}</div>
+        <div class="k">Created At</div>
+        <div class="v">{{ (workflow.created_at or '-')|replace('T',' ') }}</div>
+        <div class="k">Submitted At</div>
+        <div class="v">{{ (workflow.submitted_at or '-')|replace('T',' ') }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">VM Update Summary</div>
+    <div class="card-body">
+      <div class="kv">
+        <div class="k">Action</div><div class="v">{{ new_config.get('action_type', 'Update') }}</div>
+        <div class="k">Resource</div><div class="v">{{ new_config.get('resource', 'vm') }}</div>
+        <div class="k">Target VM</div><div class="v">{{ new_config.get('vm_name_prefix','-') }}</div>
+        <div class="k">Environment</div><div class="v">{{ new_config.get('environment','-') }}</div>
+        <div class="k">vSphere Host</div><div class="v">{{ new_config.get('vsphere_host','-') }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">Configuration Changes</div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle config-table">
+          <thead class="table-light">
+            <tr>
+              <th>Field</th>
+              <th>Changes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>vCPU</td>
+              <td>
+                {% set orig_cpu = original.get('vm_num_cpus')|string %}
+                {% set new_cpu = new_config.get('vm_num_cpus')|string %}
+                {% if orig_cpu != new_cpu %}
+                  <span class="change-highlight">
+                    {{ original.get('vm_num_cpus', 'N/A') }} → {{ new_config.get('vm_num_cpus', 'N/A') }}
+                  </span>
+                {% else %}
+                  <span class="no-change">{{ new_config.get('vm_num_cpus', 'N/A') }} (unchanged)</span>
+                {% endif %}
+              </td>
+            </tr>
+
+            <tr>
+              <td>Memory (MB)</td>
+              <td>
+                {% set orig_mem = original.get('vm_memory')|string %}
+                {% set new_mem = new_config.get('vm_memory')|string %}
+                {% if orig_mem != new_mem %}
+                  <span class="change-highlight">
+                    {{ original.get('vm_memory', 'N/A') }} → {{ new_config.get('vm_memory', 'N/A') }}
+                  </span>
+                {% else %}
+                  <span class="no-change">{{ new_config.get('vm_memory', 'N/A') }} (unchanged)</span>
+                {% endif %}
+              </td>
+            </tr>
+
+            <tr>
+              <td>Additional Disks</td>
+              <td>
+                {# 處理磁碟變更邏輯 #}
+                {% set original_disks = original.get('additional_disks', []) %}
+
+                {# 建立原始磁碟的 mapping (by id) #}
+                {% set orig_disk_map = {} %}
+                {% for d in original_disks %}
+                  {% set _ = orig_disk_map.update({d.id|string: d}) %}
+                {% endfor %}
+
+                {# 從 new_config 取得表單資料 #}
+                {% set disk_ids = new_config.get('update_disk_db_id[]', new_config.get('update_disk_db_id', [])) %}
+                {% set disk_sizes = new_config.get('update_vm_disk_size[]', new_config.get('update_vm_disk_size', [])) %}
+                {% set disk_provs = new_config.get('update_vm_disk_provisioning[]', new_config.get('update_vm_disk_provisioning', [])) %}
+
+                {# 確保都是 list 格式 #}
+                {% if disk_ids is string %}{% set disk_ids = [disk_ids] %}{% endif %}
+                {% if disk_sizes is string %}{% set disk_sizes = [disk_sizes] %}{% endif %}
+                {% if disk_provs is string %}{% set disk_provs = [disk_provs] %}{% endif %}
+
+                {% set form_disk_ids = [] %}
+                {% set has_any_disk_info = false %}
+
+                {# 處理表單中存在的磁碟 #}
+                {% if disk_ids and disk_sizes %}
+                  {% set has_any_disk_info = true %}
+                  {% for i in range([disk_ids|length, disk_sizes|length] | max) %}
+                    {% set disk_id = disk_ids[i] if i < disk_ids|length else '' %}
+                    {% set disk_size = disk_sizes[i] if i < disk_sizes|length else '' %}
+                    {% set disk_prov = disk_provs[i] if i < disk_provs|length else 'thin' %}
+
+                    {% if disk_size and disk_size.strip() != '' %}
+                      {% if disk_id and disk_id.strip() != '' %}
+                        {# 記錄這個磁碟 ID 存在於表單中 #}
+                        {% set _ = form_disk_ids.append(disk_id.strip()) %}
+
+                        {# 現有磁碟的修改 #}
+                        {% set orig_disk = orig_disk_map.get(disk_id.strip()) %}
+                        {% if orig_disk %}
+                          {% set orig_label = ('Hard Disk ' ~ orig_disk.ui_disk_number) if orig_disk.ui_disk_number is not none else (orig_disk.label or ('Hard Disk ' ~ orig_disk.id)) %}
+                          {% set orig_size = orig_disk.size|string %}
+                          {% set orig_prov = (orig_disk.disk_provisioning or 'thin')|replace('_',' ')|title %}
+                          {% set new_prov = disk_prov|replace('_',' ')|title %}
+
+                          {# 檢查是否有變更 #}
+                          {% if orig_size != disk_size or orig_prov != new_prov %}
+                            <div class="disk-line">
+                              <span class="disk-badge unchanged">{{ orig_label }}: {{ orig_size }} GB, {{ orig_prov }}</span>
+                              <span class="arrow">→</span>
+                              <span class="disk-badge changed">{{ orig_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                            </div>
+                          {% else %}
+                            <div class="disk-line">
+                              <span class="disk-badge unchanged">{{ orig_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                            </div>
+                          {% endif %}
+                        {% endif %}
+                      {% else %}
+                        {# 新增磁碟 - 使用不同方法計算編號 #}
+                        {% set new_disk_count_before_current = [] %}
+                        {% for j in range(i) %}
+                          {% set prev_id = disk_ids[j] if j < disk_ids|length else '' %}
+                          {% set prev_size = disk_sizes[j] if j < disk_sizes|length else '' %}
+                          {% if prev_size and prev_size.strip() != '' and (not prev_id or prev_id.strip() == '') %}
+                            {% set _ = new_disk_count_before_current.append(1) %}
+                          {% endif %}
+                        {% endfor %}
+                        {% set new_prov = disk_prov|replace('_',' ')|title %}
+                        <div class="disk-line">
+                          <span class="disk-badge new">New Disk {{ new_disk_count_before_current|length + 1 }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                        </div>
+                      {% endif %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+
+                {# 檢查是否有磁碟被刪除（原有磁碟不在表單中） #}
+                {% for orig_disk in original_disks %}
+                  {% if orig_disk.id|string not in form_disk_ids %}
+                    {% set has_any_disk_info = true %}
+                    {% set orig_label = ('Hard Disk ' ~ orig_disk.ui_disk_number) if orig_disk.ui_disk_number is not none else (orig_disk.label or ('Hard Disk ' ~ orig_disk.id)) %}
+                    {% set orig_prov = (orig_disk.disk_provisioning or 'thin')|replace('_',' ')|title %}
+                    <div class="disk-line">
+                      <span class="disk-badge removed">{{ orig_label }}: {{ orig_disk.size }} GB, {{ orig_prov }}</span>
+                    </div>
+                  {% endif %}
+                {% endfor %}
+
+                {# 如果完全沒有磁碟資訊 #}
+                {% if not has_any_disk_info %}
+                  <span class="text-muted">No disk changes</span>
+                {% endif %}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold">vSphere Placement</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="kv">
+            <div class="k">Datacenter</div><div class="v">{{ new_config.get('vsphere_datacenter', '-') }}</div>
+            <div class="k">Cluster</div><div class="v">{{ new_config.get('vsphere_cluster', '-') }}</div>
+            <div class="k">ESXi Host</div><div class="v">{{ new_config.get('vsphere_esxi_host', '-') }}</div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="kv">
+            <div class="k">Network</div><div class="v">{{ new_config.get('vsphere_network','-') }}</div>
+            <div class="k">IPv4 Gateway</div><div class="v">{{ new_config.get('vm_ipv4_gateway','-') }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-4 d-flex justify-content-end gap-2">
+    <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#returnModal">
+      <i class="bi bi-arrow-return-left me-1"></i> Return
+    </button>
+
+    <form method="post" action="{{ url_for('vm.workflow_execute', workflow_id=workflow.workflow_id) }}?from_modal=1" onsubmit="return confirmApprove();">
+      <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
+      <button type="submit" class="btn btn-success px-4">
+        <i class="bi bi-check2 me-1"></i> Approve Update
+      </button>
+    </form>
+  </div>
+
+</div>
+
+<div class="modal fade" id="returnModal" tabindex="-1" aria-labelledby="returnModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="returnModalLabel">Return – Provide a reason</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="cannedReasonSelect" class="form-label">Canned Response (Optional)</label>
+          <select id="cannedReasonSelect" class="form-select">
+            <option value="">-- Select a reason --</option>
+            <option value="Invalid resource configuration changes.">Invalid resource configuration</option>
+            <option value="Update request needs clarification.">Needs clarification</option>
+            <option value="Resource requirements exceed limits.">Exceeds limits</option>
+            <option value="Other (please specify below).">Other</option>
+          </select>
+        </div>
+        <label for="returnReason" class="form-label">Comment</label>
+        <textarea id="returnReason" class="form-control" rows="4" placeholder="e.g. Please adjust CPU allocation or provide justification for memory increase."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" id="btnReturnConfirm">
+          <i class="bi bi-reply"></i> Confirm Return
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function confirmApprove() {
+    return confirm("Approve and execute this VM update request?");
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const returnModal = document.getElementById('returnModal');
+    if (!returnModal) return;
+
+    const cannedSelect = returnModal.querySelector('#cannedReasonSelect');
+    const reasonText = returnModal.querySelector('#returnReason');
+    const btnConfirm = returnModal.querySelector('#btnReturnConfirm');
+
+    // Handle canned responses
+    if (cannedSelect && reasonText) {
+      cannedSelect.addEventListener('change', function() {
+        if (this.value) {
+          reasonText.value = this.value;
+          if (this.value === "Other (please specify below).") {
+              reasonText.value = "";
+          }
+          reasonText.focus();
+        }
+      });
+    }
+
+    // Handle return confirmation
+    if (btnConfirm) {
+      btnConfirm.addEventListener('click', async () => {
+        const reason = (reasonText?.value || '').trim();
+        if (!reason) {
+          alert('Please provide a reason.');
+          return;
+        }
+        if (!confirm('Are you sure you want to RETURN this update request?')) {
+          return;
+        }
+
+        const wfId = {{ workflow.workflow_id }};
+        const url = `{{ url_for('vm.workflow_return', workflow_id=0) }}`.replace('0', wfId) + '?from_modal=1';
+
+        try {
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+            body: JSON.stringify({ returned_reason: reason })
+          });
+          if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(txt || 'Return failed.');
+          }
+          try { window.top.location = "{{ url_for('vm.overview_index') }}"; }
+          catch (e) { window.parent.location = "{{ url_for('vm.overview_index') }}"; }
+        } catch (err) {
+          console.error(err);
+          alert('Return failed: ' + err.message);
+        }
+      });
+    }
+  });
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
