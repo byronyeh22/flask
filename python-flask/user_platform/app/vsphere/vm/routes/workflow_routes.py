@@ -410,13 +410,33 @@ def workflow_approve_page(workflow_id):
                 request_details = {}
 
         # 4) Render approve page
-        return render_template(
-            "create/approve.html",
-            workflow=workflow,
-            pipeline=pipeline,
-            jira_ticket=jira_ticket,
-            request_details=request_details
-        )
+        action_type = (request_details.get("action_type") or "create").strip().lower()
+
+        if action_type == "update":
+            return render_template(
+                "update/approve.html",
+                workflow=workflow,
+                pipeline=pipeline,
+                jira_ticket=jira_ticket,
+                request_details=request_details
+            )
+        elif action_type == "delete":
+            return render_template(
+                "delete/approve.html",
+                workflow=workflow,
+                pipeline=pipeline,
+                jira_ticket=jira_ticket,
+                request_details=request_details
+            )
+        else:
+            return render_template(
+                "create/approve.html",
+                workflow=workflow,
+                pipeline=pipeline,
+                jira_ticket=jira_ticket,
+                request_details=request_details
+            )
+
 
     except Exception as e:
         flash(f"Error loading approval page: {e}", "danger")
