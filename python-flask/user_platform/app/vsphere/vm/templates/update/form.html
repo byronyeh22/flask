@@ -1,3 +1,4 @@
+{% set d = draft_data or {} %}
 {% if action_type %}
   <div class="alert alert-info fw-bold mb-3">
     Current Action: {{ action_type }}
@@ -297,6 +298,8 @@ document.addEventListener('DOMContentLoaded', function() {
   // let originalById = {};
   let newDiskCounter = 1;
   let placementObjects = null;
+  let __restoreInProgress = false;   // true 代表正在做初次回填
+  let __applyDraftOnce = true;       // 只允許在初次載入時回填
 
   // 使用事件委派來處理磁碟操作
   newDiskContainer.addEventListener('click', function(e) {
@@ -312,6 +315,10 @@ document.addEventListener('DOMContentLoaded', function() {
       updateProvisioningValues(select);
     }
   });
+
+  // --- 草稿物件（Update 專用） ---
+  const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
+  console.log('Draft data received:', __DRAFT__);
 
   // --- Helpers ---
   const fetchJSON = async (url) => {
@@ -337,6 +344,18 @@ document.addEventListener('DOMContentLoaded', function() {
     selectEl.innerHTML = `<option value="" disabled selected>${placeholderText}</option>` +
       opts.map(v => `<option value="${v}">${v}</option>`).join('');
     selectEl.disabled = false;
+  }
+
+  function setSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    const v = (value ?? '').toString();
+    if (!v) return;
+    let opt = Array.from(selectEl.options).find(o => o.value === v);
+    if (opt) { selectEl.value = v; return; }
+    opt = Array.from(selectEl.options).find(o => (o.text || '').trim() === v);
+    if (opt) { opt.selected = true; return; }
+    const fallback = new Option(v, v, true, true);
+    selectEl.appendChild(fallback);
   }
 
   function showToast(msg) {
@@ -657,23 +676,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const prov = (d.disk_provisioning || 'thin').replace(/_/g, ' ');
         const label = normalizedLabelFromConfig(d);
         currentDiskContainer.insertAdjacentHTML(
-          'beforeend',
-          `<div class="mb-2"><strong>${label}:</strong> ${d.size} GB, ${prov}</div>`
-        );
-      });
-    } else {
-      currentDiskContainer.innerHTML = `<p class="text-muted">No additional disks</p>`;
-    }
-  }
+                  'beforeend',
+                  `<div class="mb-2"><strong>${label}:</strong> ${d.size} GB, ${prov}</div>`
+                );
+              });
+            } else {
+              currentDiskContainer.innerHTML = `<p class="text-muted">No additional disks</p>`;
+            }
+          }
 
   function populateNewDiskConfig(config) {
     newDiskContainer.innerHTML = '';
     newDiskCounter = 1;
     originalById = {};
-
-    // (config.additional_disks || []).forEach(d => { 
-    //   originalById[String(d.id)] = d; 
-    // });
 
     // 直接使用 current config 的 additional_disks
     if (config.additional_disks && config.additional_disks.length > 0) {
@@ -702,16 +717,201 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (cpuInput && isFirstLoad) {
       cpuInput.value = current_config.vm_num_cpus || '';
-      // 標記為已初始化
       cpuInput.setAttribute('data-user-modified', 'false');
     }
     if (memoryInput && isFirstLoad) {
       memoryInput.value = current_config.vm_memory || '';
-      // 標記為已初始化
       memoryInput.setAttribute('data-user-modified', 'false');
     }
 
     populateNewDiskConfig(current_config);
+  }
+
+  // --- Draft 回填邏輯（Update 專用） ---
+  async function restoreDraftOnLoad() {
+    console.log('Starting draft restoration for Update form');
+    
+    // 從 draft_data 中提取資料
+    // Update 的 draft 結構: { original_config: {}, new_config: {}, action_type: "update" }
+    const newConfig = __DRAFT__?.new_config || {};
+    
+    if (!newConfig || Object.keys(newConfig).length === 0) {
+      console.log('No new_config found in draft data');
+      return;
+    }
+
+    __restoreInProgress = true;
+    __applyDraftOnce = true;
+
+    console.log('Draft new_config:', newConfig);
+
+    // 依序回填選擇欄位
+    const draftEnv = (newConfig.environment || '').trim();
+    if (draftEnv) {
+      setSelectValue(envSelect, draftEnv);
+      console.log('Set environment:', draftEnv);
+      
+      if (envSelect.value) {
+        await onEnvironmentChange();
+        
+        // 回填 Host
+        const draftHost = (newConfig.vsphere_host || '').trim();
+        if (draftHost) {
+          setTimeout(async () => {
+            setSelectValue(hostSelect, draftHost);
+            console.log('Set host:', draftHost);
+            
+            if (hostSelect.value) {
+              await onHostChange();
+              
+              // 回填 Datacenter
+              const draftDC = (newConfig.vsphere_datacenter || '').trim();
+              if (draftDC) {
+                setTimeout(async () => {
+                  setSelectValue(datacenterSelect, draftDC);
+                  console.log('Set datacenter:', draftDC);
+                  
+                  if (datacenterSelect.value) {
+                    await onDatacenterChange();
+                    
+                    // 回填 Cluster
+                    const draftCluster = (newConfig.vsphere_cluster || '').trim();
+                    if (draftCluster) {
+                      setTimeout(async () => {
+                        setSelectValue(clusterSelect, draftCluster);
+                        console.log('Set cluster:', draftCluster);
+                        
+                        if (clusterSelect.value) {
+                          await onClusterChange();
+                          
+                          // 回填 ESXi
+                          const draftESXi = (newConfig.vsphere_esxi_host || '').trim();
+                          if (draftESXi) {
+                            setTimeout(async () => {
+                              setSelectValue(esxiSelect, draftESXi);
+                              console.log('Set ESXi:', draftESXi);
+                              
+                              if (esxiSelect.value) {
+                                await onEsxiChange();
+                                
+                                // 回填 VM
+                                const draftVM = (newConfig.vm_name_prefix || '').trim();
+                                if (draftVM) {
+                                  setTimeout(async () => {
+                                    setSelectValue(vmPrefixSelect, draftVM);
+                                    console.log('Set VM:', draftVM);
+                                    
+                                    if (vmPrefixSelect.value) {
+                                      await onVmChange();
+                                      
+                                      // VM 載入完成後，回填表單值
+                                      setTimeout(() => {
+                                        restoreDraftFormValues(newConfig);
+                                      }, 500);
+                                    }
+                                  }, 300);
+                                }
+                              }
+                            }, 300);
+                          }
+                        }
+                      }, 300);
+                    }
+                  }
+                }, 300);
+              }
+            }
+          }, 300);
+        }
+      }
+    }
+
+    __restoreInProgress = false;
+    __applyDraftOnce = false;
+  }
+
+  function restoreDraftFormValues(newConfig) {
+    console.log('Restoring draft form values:', newConfig);
+    
+    // 回填 CPU 和 Memory
+    const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
+    const memoryInput = configForm.querySelector('input[name="vm_memory"]');
+    
+    if (cpuInput && newConfig.vm_num_cpus) {
+      cpuInput.value = newConfig.vm_num_cpus;
+      cpuInput.setAttribute('data-user-modified', 'true');
+      console.log('Restored CPU:', newConfig.vm_num_cpus);
+    }
+    
+    if (memoryInput && newConfig.vm_memory) {
+      memoryInput.value = newConfig.vm_memory;
+      memoryInput.setAttribute('data-user-modified', 'true');
+      console.log('Restored Memory:', newConfig.vm_memory);
+    }
+
+    // 回填磁碟配置（如果有的話）
+    // Update 的磁碟回填比較複雜，因為需要處理 form 結構
+    restoreDraftDiskConfig(newConfig);
+  }
+
+  function restoreDraftDiskConfig(newConfig) {
+    // 處理 Update 表單的磁碟回填
+    // newConfig 中包含表單提交的磁碟資料
+    const diskIds = newConfig['update_disk_db_id[]'] || newConfig['update_disk_db_id'] || [];
+    const diskSizes = newConfig['update_vm_disk_size[]'] || newConfig['update_vm_disk_size'] || [];
+    const diskProvs = newConfig['update_vm_disk_provisioning[]'] || newConfig['update_vm_disk_provisioning'] || [];
+    
+    if (!Array.isArray(diskIds) && diskIds) {
+      diskIds = [diskIds];
+    }
+    if (!Array.isArray(diskSizes) && diskSizes) {
+      diskSizes = [diskSizes];
+    }
+    if (!Array.isArray(diskProvs) && diskProvs) {
+      diskProvs = [diskProvs];
+    }
+
+    console.log('Draft disk data:', { diskIds, diskSizes, diskProvs });
+
+    if (diskSizes && diskSizes.length > 0) {
+      // 清空現有磁碟配置，重新根據 draft 建立
+      setTimeout(() => {
+        newDiskContainer.innerHTML = '';
+        newDiskCounter = 1;
+
+        for (let i = 0; i < diskSizes.length; i++) {
+          const id = diskIds[i] || '';
+          const size = diskSizes[i] || 50;
+          const prov = diskProvs[i] || 'thin';
+
+          if (id) {
+            // 現有磁碟 - 需要從 initialVMConfig 找到對應資料
+            const existingDisk = initialVMConfig.additional_disks?.find(d => String(d.id) === String(id));
+            if (existingDisk) {
+              // 建立修改過的磁碟項目
+              const modifiedDisk = { ...existingDisk, size: size, disk_provisioning: prov };
+              addExistingDisk(modifiedDisk);
+            }
+          } else {
+            // 新磁碟
+            addNewDisk();
+            // 設定大小和類型
+            const lastDiskItem = newDiskContainer.lastElementChild;
+            if (lastDiskItem) {
+              const sizeInput = lastDiskItem.querySelector('input[name="update_vm_disk_size[]"]');
+              const provSelect = lastDiskItem.querySelector('select[name="update_vm_disk_provisioning[]"]');
+              if (sizeInput) sizeInput.value = size;
+              if (provSelect) {
+                provSelect.value = prov;
+                updateProvisioningValues(provSelect);
+              }
+            }
+          }
+        }
+        
+        console.log('Restored disk configuration from draft');
+      }, 200);
+    }
   }
 
   // --- Main Logic ---
@@ -799,13 +999,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
-      // 產生基本 URL，只包含環境篩選
       const baseUrl = repl(vmPrefixSelect.dataset.vmsByEnvUrl, env, '__ENV__');
-      // 建立 URLSearchParams 物件以處理查詢參數
       const params = new URLSearchParams();
-      // 添加 vsphere_esxi_host 參數
       params.append('vsphere_esxi_host', esxi);
-      // 合併 URL 和查詢參數
       const url = `${baseUrl}?${params.toString()}`;
 
       console.log('Loading VMs from URL:', url);
@@ -843,20 +1039,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
       populateForm(config);
       configForm.style.display = 'block';
-      // btnSave.dataset.baseline = JSON.stringify(takeSnapshotFromForm());
-      // if (!btnSave.dataset.originalText) btnSave.dataset.originalText = (btnSave.textContent || '').trim();
 
       // 設置初始狀態並添加事件監聽器
       const cpuInputEl = configForm.querySelector('input[name="vm_num_cpus"]');
       const memoryInputEl = configForm.querySelector('input[name="vm_memory"]');
 
       if (cpuInputEl) {
-        // 保存當前值
         const currentCpuValue = cpuInputEl.value;
-        // 清除所有現有事件監聽器
         cpuInputEl.replaceWith(cpuInputEl.cloneNode(true));
         const newCpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
-        // 恢復值
         newCpuInput.value = currentCpuValue;
         newCpuInput.addEventListener('input', function() {
           this.classList.remove('is-invalid');
@@ -868,12 +1059,9 @@ document.addEventListener('DOMContentLoaded', function() {
       }
 
       if (memoryInputEl) {
-        // 保存當前值
         const currentMemoryValue = memoryInputEl.value;
-        // 清除所有現有事件監聽器
         memoryInputEl.replaceWith(memoryInputEl.cloneNode(true));
         const newMemoryInput = configForm.querySelector('input[name="vm_memory"]');
-        // 恢復值
         newMemoryInput.value = currentMemoryValue;
         newMemoryInput.addEventListener('input', function() {
           this.classList.remove('is-invalid');
@@ -884,7 +1072,6 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log("Memory input enabled and event listener added");
       }
 
-      // 延遲更新按鈕狀態，確保所有數據都已載入
       console.log("onVmChange completed, event listeners ready");
 
     } catch (e) {
@@ -893,8 +1080,14 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // --- Event Listeners ---
-  envSelect.addEventListener('change', onEnvironmentChange);
-  hostSelect.addEventListener('change', onHostChange);
+  envSelect.addEventListener('change', async () => {
+    __applyDraftOnce = false;
+    await onEnvironmentChange();
+  });
+  hostSelect.addEventListener('change', async () => {
+    __applyDraftOnce = false;
+    await onHostChange();
+  });
   datacenterSelect.addEventListener('change', onDatacenterChange);
   clusterSelect.addEventListener('change', onClusterChange);
   esxiSelect.addEventListener('change', onEsxiChange);
@@ -917,7 +1110,6 @@ document.addEventListener('DOMContentLoaded', function() {
         e.target.value = String(min);
       }
     }
-
   });
 
   newDiskContainer.addEventListener('click', function(e) {
@@ -925,11 +1117,14 @@ document.addEventListener('DOMContentLoaded', function() {
     if (btn) removeDisk(btn);
   });
 
-
-
   // --- Initial Load ---
   (function init() {
-    onEnvironmentChange();
+    // 如果有 Draft 資料就回填，否則正常初始化
+    if (__DRAFT__ && Object.keys(__DRAFT__).length > 0) {
+      restoreDraftOnLoad();
+    } else {
+      onEnvironmentChange();
+    }
   })();
 
   // 將 addNewDisk 函數暴露到全域，讓 HTML onclick 可以使用
