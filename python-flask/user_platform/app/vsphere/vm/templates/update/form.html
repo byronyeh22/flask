@@ -1,10 +1,4 @@
 {% set d = draft_data or {} %}
-{% if action_type %}
-  <div class="alert alert-info fw-bold mb-3">
-    Current Action: {{ action_type }}
-  </div>
-{% endif %}
-
 <input type="hidden" name="resource" value="vm">
 <input type="hidden" name="action_type" value="update">
 {% if workflow_id %}
@@ -12,75 +6,18 @@
 {% endif %}
 
 <style>
-  /* Custom styles for the comparison layout */
-  .config-row {
-    display: flex;
-    align-items: center;
-    margin-bottom: 1rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #eee;
-  }
-  .config-label {
-    font-weight: bold;
-    color: #555;
-    width: 180px; /* Fixed label width */
-  }
-  .config-current {
-    flex: 1;
-    padding: 0 15px;
-    color: #6c757d;
-    background-color: #f8f9fa;
-    border-radius: .25rem;
-    padding: .375rem .75rem;
-    margin-right: 15px;
-    min-height: 38px;
-    display: flex;
-    align-items: center;
-    word-break: break-all;
-  }
-  .config-new {
-    flex: 1;
-  }
-  .disk-config-current {
-    padding: 10px;
-    background-color: #f8f9fa;
-    border-radius: 5px;
-    min-height: 100px;
-  }
-  .btn-remove {
-    background-color: #dc3545;
-    color: #fff;
-  }
+  .config-row { display: flex; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
+  .config-label { font-weight: bold; color: #555; width: 180px; }
+  .config-current { flex: 1; padding: 0 15px; color: #6c757d; background-color: #f8f9fa; border-radius: .25rem; padding: .375rem .75rem; margin-right: 15px; min-height: 38px; display: flex; align-items: center; word-break: break-all; }
+  .config-new { flex: 1; }
+  .disk-config-current { padding: 10px; background-color: #f8f9fa; border-radius: 5px; min-height: 100px; }
+  .btn-remove { background-color: #dc3545; color: #fff; }
   .btn-remove:hover { background-color: #c82333; color: #fff; }
-  .btn-add {
-    background-color: #28a745;
-    color: #fff;
-  }
+  .btn-add { background-color: #28a745; color: #fff; }
   .btn-add:hover { background-color: #218838; color: #fff; }
-
-  .btn-cancel-link {
-    color: #dc3545;
-    text-decoration: none;
-    padding: 10px 20px;
-    border: 1px solid #dc3545;
-    border-radius: 4px;
-    font-size: 14px;
-    transition: all 0.3s ease;
-  }
-
-  .btn-cancel-link:hover {
-    background-color: #dc3545;
-    color: white;
-    text-decoration: none;
-  }
-
-  /* Label 欄位反灰（不可編輯） */
-  .disk-label[disabled] {
-    background-color: #e9ecef !important;
-    opacity: 1;
-    cursor: not-allowed;
-  }
-
+  .btn-cancel-link { color: #dc3545; text-decoration: none; padding: 10px 20px; border: 1px solid #dc3545; border-radius: 4px; font-size: 14px; transition: all 0.3s ease; }
+  .btn-cancel-link:hover { background-color: #dc3545; color: white; text-decoration: none; }
+  .disk-label[disabled] { background-color: #e9ecef !important; opacity: 1; cursor: not-allowed; }
 </style>
 
 <div class="card mb-4 shadow-sm">
@@ -242,7 +179,6 @@
         </div>
       </div>
 
-<!--       <div id="removed-disks"></div> -->
     </div>
   </div>
 </div>
