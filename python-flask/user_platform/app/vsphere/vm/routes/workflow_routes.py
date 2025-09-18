@@ -129,10 +129,11 @@ def workflow_draft_edit(workflow_id: int):
 
         elif action_type == "update":
             return render_template(
-                "update/form.html",  # ← 修改成正確的模板路徑
+                "vm_index.html",
                 environment=environments,
                 draft_data=draft_data,
                 workflow_id=workflow_id,
+                active_tab="update",
             )
 
         elif action_type == "delete":

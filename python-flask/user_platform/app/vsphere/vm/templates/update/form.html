@@ -431,6 +431,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
   function handleAddRemoveConflictIfAny() {
+    if (__restoreInProgress) return false; // 回填時跳過衝突檢查
     const s = computeChangeSummary();
     if (s.added > 0 && s.removed > 0) {
       showToast('Only one operation at a time: either add or remove disks. Please submit them separately.');
@@ -624,7 +625,6 @@ document.addEventListener('DOMContentLoaded', function() {
   function populateNewDiskConfig(config) {
     newDiskContainer.innerHTML = '';
     newDiskCounter = 1;
-    originalById = {};
 
     // 直接使用 current config 的 additional_disks
     if (config.additional_disks && config.additional_disks.length > 0) {
@@ -793,9 +793,9 @@ document.addEventListener('DOMContentLoaded', function() {
   function restoreDraftDiskConfig(newConfig) {
     // 處理 Update 表單的磁碟回填
     // newConfig 中包含表單提交的磁碟資料
-    const diskIds = newConfig['update_disk_db_id[]'] || newConfig['update_disk_db_id'] || [];
-    const diskSizes = newConfig['update_vm_disk_size[]'] || newConfig['update_vm_disk_size'] || [];
-    const diskProvs = newConfig['update_vm_disk_provisioning[]'] || newConfig['update_vm_disk_provisioning'] || [];
+    let diskIds = newConfig['update_disk_db_id[]'] || newConfig['update_disk_db_id'] || [];
+    let diskSizes = newConfig['update_vm_disk_size[]'] || newConfig['update_vm_disk_size'] || [];
+    let diskProvs = newConfig['update_vm_disk_provisioning[]'] || newConfig['update_vm_disk_provisioning'] || [];
     
     if (!Array.isArray(diskIds) && diskIds) {
       diskIds = [diskIds];
@@ -982,29 +982,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
       if (cpuInputEl) {
         const currentCpuValue = cpuInputEl.value;
-        cpuInputEl.replaceWith(cpuInputEl.cloneNode(true));
-        const newCpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
-        newCpuInput.value = currentCpuValue;
-        newCpuInput.addEventListener('input', function() {
+        cpuInputEl.value = currentCpuValue;
+        cpuInputEl.addEventListener('input', function() {
           this.classList.remove('is-invalid');
           this.setAttribute('data-user-modified', 'true');
           console.log('CPU input changed');
         });
-        newCpuInput.disabled = false;
+        cpuInputEl.disabled = false;
         console.log("CPU input enabled and event listener added");
       }
 
       if (memoryInputEl) {
         const currentMemoryValue = memoryInputEl.value;
-        memoryInputEl.replaceWith(memoryInputEl.cloneNode(true));
-        const newMemoryInput = configForm.querySelector('input[name="vm_memory"]');
-        newMemoryInput.value = currentMemoryValue;
-        newMemoryInput.addEventListener('input', function() {
+        memoryInputEl.value = currentMemoryValue;
+        memoryInputEl.addEventListener('input', function() {
           this.classList.remove('is-invalid');
           this.setAttribute('data-user-modified', 'true');
           console.log('Memory input changed');
         });
-        newMemoryInput.disabled = false;
+        memoryInputEl.disabled = false;
         console.log("Memory input enabled and event listener added");
       }
 
@@ -1032,26 +1028,26 @@ document.addEventListener('DOMContentLoaded', function() {
   btnAdd.addEventListener('click', addNewDisk);
 
   // 硬碟相關事件
-  newDiskContainer.addEventListener('change', function(e) {
-    if (e.target.classList.contains('disk-provisioning')) {
-      updateProvisioningValues(e.target);
-    }
-  });
+  // newDiskContainer.addEventListener('change', function(e) {
+  //   if (e.target.classList.contains('disk-provisioning')) {
+  //     updateProvisioningValues(e.target);
+  //   }
+  // });
 
-  newDiskContainer.addEventListener('input', function(e) {
-    if (e.target && e.target.name === 'update_vm_disk_size[]') {
-      const min = parseInt(e.target.getAttribute('min') || '1', 10);
-      const val = parseInt(e.target.value || '0', 10);
-      if (!Number.isNaN(min) && !Number.isNaN(val) && val < min) {
-        e.target.value = String(min);
-      }
-    }
-  });
+  // newDiskContainer.addEventListener('input', function(e) {
+  //   if (e.target && e.target.name === 'update_vm_disk_size[]') {
+  //     const min = parseInt(e.target.getAttribute('min') || '1', 10);
+  //     const val = parseInt(e.target.value || '0', 10);
+  //     if (!Number.isNaN(min) && !Number.isNaN(val) && val < min) {
+  //       e.target.value = String(min);
+  //     }
+  //   }
+  // });
 
-  newDiskContainer.addEventListener('click', function(e) {
-    const btn = e.target.closest('.remove-disk-btn');
-    if (btn) removeDisk(btn);
-  });
+  // newDiskContainer.addEventListener('click', function(e) {
+  //   const btn = e.target.closest('.remove-disk-btn');
+  //   if (btn) removeDisk(btn);
+  // });
 
   // --- Initial Load ---
   (function init() {
@@ -1161,9 +1157,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 這裡沿用你原本的驗證與送出程式碼
     // --- 範例（請把你原本的收集欄位/append/POST 全搬進來） ---
-    if (!validateRequiredFields || !validateRequiredFields()) {
-      return;
-    }
+    if (!validateRequiredFields()) return;
 
     const fd = new FormData();
     fd.append('resource', 'vm');

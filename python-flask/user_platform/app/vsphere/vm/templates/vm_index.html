@@ -104,7 +104,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // 初始狀態：顯示 Create pane 並套用 required
-    const initialTab = document.getElementById('create-tab');
+    const activeTab = "{{ active_tab|default('create') }}";  // 預設 create
+    const initialTab = document.getElementById(activeTab + "-tab");
     if (initialTab) {
         const tab = new bootstrap.Tab(initialTab);
         tab.show();
