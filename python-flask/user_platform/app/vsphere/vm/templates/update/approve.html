@@ -148,17 +148,17 @@
                           {% endif %}
                         {% endif %}
                       {% else %}
-                        {% set new_count = 0 %}
+                        {% set new_disk_count_before_current = [] %}
                         {% for j in range(i) %}
                           {% set prev_id = disk_ids[j] if j < disk_ids|length else '' %}
                           {% set prev_size = disk_sizes[j] if j < disk_sizes|length else '' %}
                           {% if prev_size and prev_size.strip() != '' and (not prev_id or prev_id.strip() == '') %}
-                            {% set new_count = new_count + 1 %}
+                            {% set _ = new_disk_count_before_current.append(1) %}
                           {% endif %}
                         {% endfor %}
                         {% set new_prov = disk_prov|replace('_',' ')|title %}
                         <span class="disk-line">
-                          <span class="disk-badge new">New Disk {{ new_count + 1 }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                          <span class="disk-badge new">New Disk {{ new_disk_count_before_current|length + 1 }}: {{ disk_size }} GB, {{ new_prov }}</span>
                         </span>
                       {% endif %}
                     {% endif %}

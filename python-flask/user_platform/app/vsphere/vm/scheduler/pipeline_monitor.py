@@ -22,7 +22,10 @@ from app.vsphere.vm.db.workflow_manager import update_request_status
 from mysql.connector import Error as MySQLError
 
 # ---------- vSphere Disk Manager ----------
+# *若你的 disk_manager 實作名稱不同，改這兩行 import 名稱即可，其餘程式碼不需更動*
 from app.vsphere.vm.vsphere_api.disk_manager import add_disk_to_vm
+from app.vsphere.vm.vsphere_api.disk_manager import update_disk_size  # 你的函式若叫 resize_vm_disk，請改名於此
+from app.vsphere.vm.vsphere_api.disk_manager import remove_disk_from_vm  # 你的函式若叫 remove_disk_from_vm，請改名於此
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 PIPELINE_MANUAL_STATUS = "manual"
@@ -203,7 +206,19 @@ def _release_batch_lock(cur, workflow_id: int) -> None:
     except Exception:
         pass
 
+def _normalize_prov(v: str) -> str:
+    v = (v or "").strip().lower()
+    if v in ("thin", "thick_lazy", "thick_eager"):
+        return v
+    return "thin"
+
 def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
+    """
+    執行 pipeline 成功後的磁碟處理（含 Create/Resize/Delete）：
+      - PENDING_CREATION → CREATING → SUCCESS/FAILED
+      - PENDING_RESIZE   → RESIZING → SUCCESS/FAILED
+      - PENDING_DELETE   → DELETING → row deleted / FAILED
+    """
     # 使用獨立的 cursor 處理鎖
     lock_cur = db_conn.cursor(dictionary=True)
     lock_acquired = False
@@ -225,10 +240,10 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
             vm_configuration_id = _get_vm_config_id_by_workflow(db_conn, workflow_id)
             vm_name_prefix = _get_vm_name_prefix_by_config_id(db_conn, vm_configuration_id)
 
-            # 使用新的 cursor 查詢磁碟
-            disk_cur = db_conn.cursor(dictionary=True)
+            # ---------- 1) CREATE ----------
+            create_cur = db_conn.cursor(dictionary=True)
             try:
-                disk_cur.execute(
+                create_cur.execute(
                     """
                     SELECT id, size, disk_provisioning
                       FROM vm_disks
@@ -238,25 +253,16 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                     """,
                     (vm_configuration_id,),
                 )
-                pending_disks = disk_cur.fetchall()
+                pending_creates = create_cur.fetchall()
             finally:
-                disk_cur.close()
+                create_cur.close()
 
-            if not pending_disks:
-                logging.info(f"🟢 No pending disks for workflow {workflow_id} (vm_config_id={vm_configuration_id})")
-                return
-
-            logging.info(f"💽 Creating {len(pending_disks)} disk(s) for VM '{vm_name_prefix}' (workflow {workflow_id})")
-
-            # 其餘磁碟處理邏輯保持不變...
-            for disk_row in pending_disks:
+            for disk_row in (pending_creates or []):
                 disk_id = disk_row["id"]
                 size_gb = int(disk_row["size"])
-                provisioning = (disk_row["disk_provisioning"] or "").strip().lower()
-                if provisioning not in ("thin", "thick_lazy", "thick_eager"):
-                    provisioning = "thin"
+                provisioning = _normalize_prov(disk_row.get("disk_provisioning"))
 
-                # 1) 搶單
+                # claim
                 claim_cur = db_conn.cursor()
                 try:
                     claim_cur.execute(
@@ -276,18 +282,17 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                     claim_cur.close()
 
                 try:
-                    # 2) 呼叫新增磁碟
+                    # 呼叫 vSphere 新增磁碟
                     result = add_disk_to_vm(vm_name_prefix, {
                         "size_gb": size_gb,
                         "provision_type": provisioning
                     })
 
                     scsi_controller = result.get("controller_bus")
-                    unit_number = result.get("unit_number")
-                    label_number = result.get("label_number")
-                    vmdk_path = result.get("vmdk_path")
+                    unit_number     = result.get("unit_number")
+                    label_number    = result.get("label_number")
+                    vmdk_path       = result.get("vmdk_path")
 
-                    # 3) 成功回寫
                     ok_cur = db_conn.cursor()
                     try:
                         ok_cur.execute(
@@ -297,7 +302,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                                    unit_number     = %s,
                                    label           = %s,
                                    vmdk_path       = %s,
-                                   status          = 'CREATED',
+                                   status          = 'SUCCESS',
                                    updated_at      = NOW()
                              WHERE id = %s
                                AND status = 'CREATING'
@@ -312,7 +317,6 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
 
                 except Exception as e:
                     logging.error(f"❌ Failed to create disk #{disk_id} for VM '{vm_name_prefix}': {e}")
-
                     try:
                         fail_cur = db_conn.cursor()
                         try:
@@ -334,9 +338,244 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
 
                     set_failed_message(db_conn, workflow_id, f"DISK:{disk_id}", f"Create disk failed: {str(e)}")
 
+            # ---------- 2) RESIZE ----------
+            resize_cur = db_conn.cursor(dictionary=True)
+            try:
+                resize_cur.execute(
+                    """
+                    SELECT id, size AS new_size, scsi_controller, unit_number, label, vmdk_path, status
+                      FROM vm_disks
+                     WHERE vm_configuration_id = %s
+                       AND status IN ('PENDING_RESIZE', 'RESIZING')
+                     ORDER BY id ASC
+                    """,
+                    (vm_configuration_id,),
+                )
+                pending_resizes = resize_cur.fetchall()
+            finally:
+                resize_cur.close()
+
+            for disk_row in (pending_resizes or []):
+                disk_id = disk_row["id"]
+                new_size_gb = int(disk_row["new_size"])
+                scsi_controller = disk_row.get("scsi_controller")
+                unit_number = disk_row.get("unit_number")
+                label = disk_row.get("label")
+                vmdk_path = disk_row.get("vmdk_path")
+
+                # 檢查目前狀態，決定是否需要 claim
+                current_status = disk_row.get("status")  # 需要在查詢中加入 status 欄位
+                
+                if current_status == 'PENDING_RESIZE':
+                    # claim
+                    claim_cur = db_conn.cursor()
+                    try:
+                        claim_cur.execute(
+                            """
+                            UPDATE vm_disks
+                               SET status='RESIZING',
+                                   updated_at=NOW()
+                             WHERE id=%s
+                               AND status='PENDING_RESIZE'
+                            """,
+                            (disk_id,)
+                        )
+                        db_conn.commit()
+                        if claim_cur.rowcount != 1:
+                            continue
+                    finally:
+                        claim_cur.close()
+
+                try:
+                    # 從 vSphere 查詢當前磁碟狀態來取得 disk_key
+                    from app.vsphere.vm.vsphere_api.disk_manager import get_vm_disks
+                    current_disks = get_vm_disks(vm_name_prefix)
+
+                    target_disk_key = None
+                    for disk in current_disks:
+                        if (disk.get("controller_bus") == scsi_controller and 
+                            disk.get("unit_number") == unit_number):
+                            target_disk_key = disk.get("key")
+                            break
+
+                    if not target_disk_key:
+                        raise ValueError(f"Cannot find disk_key for scsi({scsi_controller}:{unit_number})")
+
+                    logging.info(f"About to call update_disk_size with vm_name={vm_name_prefix}, disk_key={target_disk_key}, new_size_gb={new_size_gb}")
+                    logging.info(f"update_disk_size function: {update_disk_size}")
+
+                    # 呼叫 vSphere 調整大小
+                    result = update_disk_size(vm_name_prefix, target_disk_key, new_size_gb)
+                    logging.info(f"update_disk_size result: {result}")
+
+                    # 更新資料庫狀態為成功
+                    logging.info(f"Now updating database status for disk #{disk_id} from RESIZING to SUCCESS")
+                    ok_cur = db_conn.cursor()
+                    try:
+                        ok_cur.execute(
+                            """
+                            UPDATE vm_disks
+                               SET status='SUCCESS',
+                                   updated_at=NOW()
+                             WHERE id = %s
+                               AND status = 'RESIZING'
+                            """,
+                            (disk_id,)
+                        )
+                        db_conn.commit()
+                    finally:
+                        ok_cur.close()
+
+                    logging.info(f"✅ Disk #{disk_id} resized to {new_size_gb} GB")
+
+                except Exception as e:
+                    logging.error(f"❌ Failed to resize disk #{disk_id} for VM '{vm_name_prefix}': {e}")
+                    logging.error(f"Exception type: {type(e)}")
+                    logging.error(f"Error args: {e.args}")
+
+                    # 更新資料庫狀態為失敗
+                    try:
+                        fail_cur = db_conn.cursor()
+                        try:
+                            fail_cur.execute(
+                                """
+                                UPDATE vm_disks
+                                   SET status='FAILED',
+                                       updated_at=NOW()
+                                 WHERE id=%s
+                                   AND status IN ('PENDING_RESIZE','RESIZING')
+                                """,
+                                (disk_id,)
+                            )
+                            db_conn.commit()
+                        finally:
+                            fail_cur.close()
+                    except Exception as write_err:
+                        logging.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
+
+                    set_failed_message(db_conn, workflow_id, f"DISK:{disk_id}", f"Resize disk failed: {str(e)}")
+
+            # ---------- 3) DELETE ----------
+            delete_cur = db_conn.cursor(dictionary=True)
+            try:
+                delete_cur.execute(
+                    """
+                    SELECT id, scsi_controller, unit_number, label, vmdk_path, status
+                      FROM vm_disks
+                     WHERE vm_configuration_id = %s
+                       AND status = 'PENDING_DELETE'
+                     ORDER BY id ASC
+                    """,
+                    (vm_configuration_id,),
+                )
+                pending_deletes = delete_cur.fetchall()
+            finally:
+                delete_cur.close()
+
+            for disk_row in (pending_deletes or []):
+                disk_id = disk_row["id"]
+                scsi_controller = disk_row.get("scsi_controller")
+                unit_number = disk_row.get("unit_number")
+                label = disk_row.get("label")
+                vmdk_path = disk_row.get("vmdk_path")
+                current_status = disk_row.get("status")
+
+                if current_status == 'PENDING_DELETE':
+                    # claim
+                    claim_cur = db_conn.cursor()
+                    try:
+                        claim_cur.execute(
+                            """
+                            UPDATE vm_disks
+                               SET status='DELETING',
+                                   updated_at=NOW()
+                             WHERE id=%s
+                               AND status='PENDING_DELETE'
+                            """,
+                            (disk_id,)
+                        )
+                        db_conn.commit()
+                        if claim_cur.rowcount != 1:
+                            continue
+                    finally:
+                        claim_cur.close()
+
+                try:
+                    # 從 vSphere 查詢當前磁碟狀態來取得 disk_key
+                    from app.vsphere.vm.vsphere_api.disk_manager import get_vm_disks
+                    current_disks = get_vm_disks(vm_name_prefix)
+                    
+                    target_disk_key = None
+                    for disk in current_disks:
+                        if (disk.get("controller_bus") == scsi_controller and 
+                            disk.get("unit_number") == unit_number):
+                            target_disk_key = disk.get("key")
+                            break
+
+                    if not target_disk_key:
+                        # 檢查是否為 NULL 值的情況
+                        if scsi_controller is None or unit_number is None:
+                            logging.warning(f"Disk #{disk_id} has NULL scsi_controller({scsi_controller}) or unit_number({unit_number}), marking as deleted")
+                            # 直接刪除資料庫記錄，因為磁碟資訊不完整
+                            ok_cur = db_conn.cursor()
+                            try:
+                                ok_cur.execute("DELETE FROM vm_disks WHERE id = %s", (disk_id,))
+                                db_conn.commit()
+                                logging.info(f"✅ Disk #{disk_id} record deleted (NULL values)")
+                                continue
+                            finally:
+                                ok_cur.close()
+                        
+                        # 磁碟可能已被手動刪除，記錄警告並清理資料庫
+                        logging.warning(f"Disk #{disk_id} not found in vSphere at scsi({scsi_controller}:{unit_number}), assuming already deleted")
+                        ok_cur = db_conn.cursor()
+                        try:
+                            ok_cur.execute("DELETE FROM vm_disks WHERE id = %s", (disk_id,))
+                            db_conn.commit()
+                            logging.info(f"✅ Disk #{disk_id} record cleaned up (not found in vSphere)")
+                            continue
+                        finally:
+                            ok_cur.close()
+
+                    remove_disk_from_vm(vm_name_prefix, target_disk_key)
+
+
+                    # 成功就直接刪 row
+                    ok_cur = db_conn.cursor()
+                    try:
+                        ok_cur.execute("DELETE FROM vm_disks WHERE id = %s", (disk_id,))
+                        db_conn.commit()
+                    finally:
+                        ok_cur.close()
+
+                    logging.info(f"✅ Disk #{disk_id} deleted")
+
+                except Exception as e:
+                    logging.error(f"❌ Failed to delete disk #{disk_id} for VM '{vm_name_prefix}': {e}")
+                    try:
+                        fail_cur = db_conn.cursor()
+                        try:
+                            fail_cur.execute(
+                                """
+                                UPDATE vm_disks
+                                   SET status='FAILED',
+                                       updated_at=NOW()
+                                 WHERE id=%s
+                                   AND status IN ('PENDING_DELETE','DELETING')
+                                """,
+                                (disk_id,)
+                            )
+                            db_conn.commit()
+                        finally:
+                            fail_cur.close()
+                    except Exception as write_err:
+                        logging.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
+
+                    set_failed_message(db_conn, workflow_id, f"DISK:{disk_id}", f"Delete disk failed: {str(e)}")
+
         except Exception as e:
             logging.error(f"❌ ensure_disks_after_success error for workflow {workflow_id}: {e}")
-            set_failed_message(db_conn, workflow_id, "DISK", f"Batch disk create failed: {str(e)}")
+            set_failed_message(db_conn, workflow_id, "DISK", f"Batch disk ops failed: {str(e)}")
 
     finally:
         # 釋放鎖
@@ -354,7 +593,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
 def _summarize_disk_batch_state(db_conn, workflow_id: int):
     """
     回傳 (vm_configuration_id, counts)
-    counts 是 dict：{'PENDING_CREATION':x,'CREATING':y,'CREATED':z,'FAILED':w}
+    counts 是 dict：包含 pending / working / final 狀態
     """
     vm_configuration_id = _get_vm_config_id_by_workflow(db_conn, workflow_id)
     cur = db_conn.cursor(dictionary=True)
@@ -369,7 +608,16 @@ def _summarize_disk_batch_state(db_conn, workflow_id: int):
             (vm_configuration_id,)
         )
         rows = cur.fetchall()
-        counts = {'PENDING_CREATION': 0, 'CREATING': 0, 'CREATED': 0, 'FAILED': 0}
+        counts = {
+            'PENDING_CREATION': 0,
+            'CREATING': 0,
+            'PENDING_RESIZE': 0,
+            'RESIZING': 0,
+            'PENDING_DELETE': 0,
+            'DELETING': 0,
+            'SUCCESS': 0,
+            'FAILED': 0
+        }
         for r in rows:
             s = (r['status'] or '').upper()
             if s in counts:
@@ -378,13 +626,10 @@ def _summarize_disk_batch_state(db_conn, workflow_id: int):
     finally:
         cur.close()
 
-# ---------- 修正：獲取 Pipeline 狀態和磁碟狀態的統一函數 ----------
+# ---------- 統一查詢工作流狀態 + 磁碟狀態 ----------
 def get_workflow_state_info(db_conn, workflow_id: int) -> dict:
-    """
-    一次性獲取 workflow 的所有狀態信息，避免重複查詢
-    """
     try:
-        # 1. 獲取 Pipeline 狀態
+        # 1. Pipeline 狀態
         cur = db_conn.cursor(dictionary=True)
         try:
             cur.execute(
@@ -403,15 +648,15 @@ def get_workflow_state_info(db_conn, workflow_id: int) -> dict:
 
         pipeline_status = (pipeline.get("status") or "").lower() if pipeline else "unknown"
 
-        # 2. 獲取磁碟狀態
+        # 2. 磁碟狀態
         vmc_id, actual_counts = _summarize_disk_batch_state(db_conn, workflow_id)
 
-        # 3. 計算有效磁碟狀態
+        # 3. 有些 pipeline 終態可忽略 pending（例如失敗/取消）
         effective_counts = actual_counts.copy()
         if pipeline_status in ("failed", "canceled"):
-            effective_counts['PENDING_CREATION'] = 0
-            effective_counts['CREATING'] = 0
-            logging.info(f"🚫 Pipeline {pipeline_status} for workflow {workflow_id}, ignoring pending/creating disks")
+            for k in ("PENDING_CREATION","CREATING","PENDING_RESIZE","RESIZING","PENDING_DELETE","DELETING"):
+                effective_counts[k] = 0
+            logging.info(f"🚫 Pipeline {pipeline_status} for workflow {workflow_id}, ignoring pending jobs")
 
         return {
             'vm_configuration_id': vmc_id,
@@ -424,46 +669,51 @@ def get_workflow_state_info(db_conn, workflow_id: int) -> dict:
         logging.error(f"❌ Error getting workflow state info for workflow {workflow_id}: {e}")
         return {
             'vm_configuration_id': 0,
-            'actual_counts': {'PENDING_CREATION': 0, 'CREATING': 0, 'CREATED': 0, 'FAILED': 0},
-            'effective_counts': {'PENDING_CREATION': 0, 'CREATING': 0, 'CREATED': 0, 'FAILED': 0},
+            'actual_counts': {k:0 for k in ('PENDING_CREATION','CREATING','PENDING_RESIZE','RESIZING','PENDING_DELETE','DELETING','SUCCESS','FAILED')},
+            'effective_counts': {k:0 for k in ('PENDING_CREATION','CREATING','PENDING_RESIZE','RESIZING','PENDING_DELETE','DELETING','SUCCESS','FAILED')},
             'pipeline_status': 'unknown'
         }
 
-# ---------- 修正：根據狀態決定 Workflow 目標狀態 ----------
+# ---------- 決定 Workflow 目標狀態 ----------
 def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline_status: str) -> str:
-    """根據 Pipeline 狀態和磁碟狀態決定 Workflow 狀態"""
-
+    """
+    規則：
+      - pipeline failed/canceled → 直接 FAILED/CANCELED
+      - pipeline manual → PENDING_APPROVAL
+      - pipeline success →
+          若磁碟有任一 pending/working（create/resize/delete）→ DEPLOYING
+          若有 FAILED → FAILED
+          全部處理完（且無 FAILED）→ SUCCESS
+      - 其他 → IN_PROGRESS
+    """
     logging.info(f"🔍 Determining status for workflow {workflow_id}, pipeline_status={pipeline_status}")
 
     if pipeline_status == "failed":
-        logging.info(f"➡️ Workflow {workflow_id} -> FAILED (pipeline failed)")
         return "FAILED"
     elif pipeline_status == "canceled":
-        logging.info(f"➡️ Workflow {workflow_id} -> CANCELED (pipeline canceled)")
         return "CANCELED"
     elif pipeline_status == "manual":
-        logging.info(f"➡️ Workflow {workflow_id} -> PENDING_APPROVAL (pipeline manual)")
         return "PENDING_APPROVAL"
     elif pipeline_status == "success":
         state_info = get_workflow_state_info(db_conn, workflow_id)
-        counts = state_info['effective_counts']
+        c = state_info['effective_counts']
 
-        pend = counts['PENDING_CREATION'] + counts['CREATING']
-        fail = counts['FAILED']
+        pending = (
+            c['PENDING_CREATION'] + c['CREATING'] +
+            c['PENDING_RESIZE']   + c['RESIZING'] +
+            c['PENDING_DELETE']   + c['DELETING']
+        )
+        failed = c['FAILED']
 
-        logging.info(f"📊 Workflow {workflow_id} effective disk counts: {counts}")
+        logging.info(f"📊 Workflow {workflow_id} effective disk counts: {c}")
 
-        if fail > 0:
-            logging.info(f"➡️ Workflow {workflow_id} -> FAILED ({fail} disks failed)")
+        if failed > 0:
             return "FAILED"
-        elif pend > 0:
-            logging.info(f"➡️ Workflow {workflow_id} -> DEPLOYING ({pend} disks pending)")
+        elif pending > 0:
             return "DEPLOYING"
         else:
-            logging.info(f"➡️ Workflow {workflow_id} -> SUCCESS (all disks completed)")
             return "SUCCESS"
     else:
-        logging.info(f"➡️ Workflow {workflow_id} -> IN_PROGRESS (pipeline status: {pipeline_status})")
         return "IN_PROGRESS"
 
 # ---------- Check if GitLab pipeline is manual ----------
@@ -488,28 +738,23 @@ def is_pipeline_manual_for_workflow(db_conn, workflow_id: int) -> bool:
     finally:
         cur.close()
 
-# ---------- 修正：處理 workflow 狀態更新的統一函數 ----------
+# ---------- 處理 workflow 狀態更新 ----------
 def process_workflow_status_update(db_conn, workflow_id: int, target_status: str, pipeline_id: int) -> None:
-    """統一處理 workflow 狀態更新邏輯"""
     try:
         logging.info(f"🎯 Processing workflow {workflow_id} status update to {target_status}")
 
         if target_status == "SUCCESS":
-            logging.info(f"✨ Processing SUCCESS for workflow {workflow_id}")
+            # 全部磁碟應已完成；保險再跑一次
             ensure_disks_after_success(db_conn, workflow_id)
-            logging.info(f"🎫 About to ensure Jira for workflow {workflow_id}")
             ensure_jira_after_success(db_conn, workflow_id)
-            logging.info(f"✅ Completed SUCCESS processing for workflow {workflow_id}")
 
         elif target_status == "DEPLOYING":
-            logging.info(f"⚙️ Processing DEPLOYING for workflow {workflow_id}")
+            # pipeline success 但仍有 pending 磁碟 → 這裡持續推進
             ensure_disks_after_success(db_conn, workflow_id)
 
         elif target_status in ("FAILED", "CANCELED"):
-            logging.info(f"❌ Processing {target_status} for workflow {workflow_id}")
             set_failed_message(db_conn, workflow_id, "GITLAB", f"Pipeline {pipeline_id} status is {target_status.lower()}")
 
-        logging.info(f"📝 About to update workflow {workflow_id} status to {target_status}")
         update_request_status(workflow_id, target_status)
         logging.info(f"✅ Updated workflow {workflow_id} status to {target_status}")
 
@@ -591,7 +836,6 @@ def monitor_pipelines(app):
                             if wr_now and (wr_now.get("status") or "").upper() == "RETURNED":
                                 continue
 
-                            # 使用新的統一邏輯
                             target_status = determine_workflow_status_after_pipeline(db_conn, workflow_id, fresh)
                             process_workflow_status_update(db_conn, workflow_id, target_status, pipeline_id)
 
@@ -615,7 +859,6 @@ def monitor_pipelines(app):
                         if wr_now and (wr_now.get("status") or "").upper() == "RETURNED":
                             continue
 
-                        # 使用新的統一邏輯
                         target_status = determine_workflow_status_after_pipeline(db_conn, workflow_id, db_status)
                         process_workflow_status_update(db_conn, workflow_id, target_status, pipeline_id)
 
@@ -665,7 +908,6 @@ def monitor_workflows(app):
                 print(f"❌ Full traceback: {traceback.format_exc()}")
             finally:
                 if db_conn:
-                    cur.close()
                     db_conn.close()
 
             time.sleep(60)
