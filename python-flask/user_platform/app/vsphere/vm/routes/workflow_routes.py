@@ -240,12 +240,43 @@ def vsphere_submit_request():
             return f'<script>window.top.location="{redirect_url}"</script>'
 
         payload = json.loads(wf.get("request_payload") or "{}")
-        form_data = payload.get("new_config", payload)
-        if not form_data:
-            flash("Draft content is empty. Please check the form again.", "danger")
-            redirect_url = url_for('vm.overview_index')
-            return f'<script>window.top.location="{redirect_url}"</script>'
-
+        
+        # 判斷是否為 UPDATE 操作，將結構標準化
+        is_update = 'new_config' in payload
+        
+        # 統一參數格式 - 將 UPDATE 的 new_config 與 CREATE 的格式保持一致
+        if is_update:
+            # 從 new_config 中提取資料
+            form_data = payload.get("new_config", {})
+            
+            # 如果是 UPDATE，還需要從 original_config 補充一些可能不在 new_config 中的欄位
+            original_config = payload.get("original_config", {})
+            
+            # 為了確保所有 GitLab Pipeline 需要的欄位都存在，從 original_config 補充缺失的欄位
+            for key in ['os_type', 'vm_os_type', 'vm_instance_type', 'vsphere_template', 
+                       'vsphere_network', 'vsphere_datastore', 'netbox_prefix', 'netbox_tenant', 
+                       'vm_ipv4_gateway']:
+                if (key not in form_data or not form_data.get(key)) and key in original_config:
+                    form_data[key] = original_config.get(key)
+            
+            # 處理磁碟陣列 - 將 update_vm_disk_* 轉換為與 create_vm_disk_* 相同的格式
+            if any(k.startswith('update_vm_disk_size') for k in form_data):
+                # 確保 UPDATE 的磁碟資訊也能傳遞到 GitLab pipeline
+                size_key = next((k for k in form_data if k.startswith('update_vm_disk_size')), None)
+                prov_key = next((k for k in form_data if k.startswith('update_vm_disk_provisioning')), None)
+                
+                if size_key:
+                    form_data['create_vm_disk_size[]'] = form_data.get(size_key)
+                if prov_key:
+                    form_data['create_vm_disk_provisioning[]'] = form_data.get(prov_key)
+        else:
+            # CREATE 操作直接使用 payload
+            form_data = payload
+        
+        # 確保 action_type 和 resource 存在
+        form_data['action_type'] = form_data.get('action_type', payload.get('action_type', 'create'))
+        form_data['resource'] = form_data.get('resource', payload.get('resource', 'vm'))
+        
         # 3) GitLab Pipeline：每次 submit 一律觸發新的
         logging.info(f"Triggering new pipeline for workflow #{workflow_id}...")
         pipeline_data = trigger_gitlab_pipeline(form_data)
