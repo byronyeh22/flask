@@ -18,6 +18,7 @@ def trigger_gitlab_pipeline(form_data):
         "ENVIRONMENT": form_data.get('environment', ''),
         "RESOURCE": form_data.get('resource', ''),
         "OS_TYPE": form_data.get('os_type', ''),
+        "VSPHERE_HOST": form_data.get('vsphere_host', ''),
         "VSPHERE_DATACENTER": form_data.get('vsphere_datacenter', ''),
         "VSPHERE_CLUSTER": form_data.get('vsphere_cluster', ''),
         "VSPHERE_ESXI_HOST": form_data.get('vsphere_esxi_host', ''),
