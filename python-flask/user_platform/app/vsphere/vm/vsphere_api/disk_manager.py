@@ -112,6 +112,8 @@ def _with_connection(func):
 
 def _sync_all_disk_labels_after_operation(vm) -> List[Dict]:
     """在磁盤操作後，重新讀取 VM 所有磁盤的最新狀態"""
+    if _is_local_mode():
+        return []  # local 模式不需要同步
     disk_info = []
     
     for dev in vm.config.hardware.device:
@@ -362,6 +364,26 @@ def add_disk_to_vm(si, vm_name: str, disk_spec: Dict) -> Dict[str, Optional[obje
         r = requests.post(f"{_mock_base()}/vsphere/vms/{vm_name}/disks", json=payload, timeout=20)
         r.raise_for_status()
         data = r.json() or {}
+        
+        # 執行操作後重新查詢並同步最新狀態
+        try:
+            r_disks = requests.get(f"{_mock_base()}/vsphere/vms/{vm_name}/disks", timeout=10)
+            if r_disks.status_code == 200:
+                updated_disks = r_disks.json() or []
+                sync_data = []
+                for disk in updated_disks:
+                    sync_data.append({
+                        "key": disk.get("key"),
+                        "controller_bus": disk.get("controller_bus"),
+                        "unit_number": disk.get("unit_number"),
+                        "label_text": disk.get("label_text"),
+                        "label_number": disk.get("label_number"),
+                        "vmdk_path": disk.get("vmdk_path")
+                    })
+                sync_disk_labels_to_database(vm_name, sync_data)
+        except Exception as e:
+            logging.warning(f"Failed to sync disk labels in local mode: {e}")
+        
         return {
             "controller_bus": data.get("controller_bus"),
             "unit_number": data.get("unit_number"),
@@ -460,6 +482,26 @@ def remove_disk_from_vm(si, vm_name: str, disk_key: int) -> str:
         if r.status_code == 404:
             raise ValueError(f"Disk with key {disk_key} not found.")
         r.raise_for_status()
+        
+        # 執行操作後重新查詢並同步最新狀態
+        try:
+            r_disks = requests.get(f"{_mock_base()}/vsphere/vms/{vm_name}/disks", timeout=10)
+            if r_disks.status_code == 200:
+                updated_disks = r_disks.json() or []
+                sync_data = []
+                for disk in updated_disks:
+                    sync_data.append({
+                        "key": disk.get("key"),
+                        "controller_bus": disk.get("controller_bus"),
+                        "unit_number": disk.get("unit_number"),
+                        "label_text": disk.get("label_text"),
+                        "label_number": disk.get("label_number"),
+                        "vmdk_path": disk.get("vmdk_path")
+                    })
+                sync_disk_labels_to_database(vm_name, sync_data)
+        except Exception as e:
+            logging.warning(f"Failed to sync disk labels in local mode: {e}")
+        
         return f"Successfully removed disk (key: {disk_key})."
 
     # ------- 真實 pyVmomi -------
@@ -502,19 +544,11 @@ def update_disk_size(si, vm_name: str, disk_key: int, new_size_gb: int) -> str:
         if r.status_code == 404:
             raise ValueError(f"Disk with key {disk_key} not found.")
         if r.status_code == 400:
-            # e.g. cannot shrink
             err = (r.json() or {}).get("error") or "Bad Request"
             raise ValueError(err)
         r.raise_for_status()
-        # 重新讀取所有磁盤狀態並同步到資料庫
-        all_disks = _sync_all_disk_labels_after_operation(vm)
-
-        sync_disk_labels_to_database(vm_name, all_disks)
-
-        return {
-            "message": f"Successfully updated disk (key: {disk_key}) on '{vm_name}' to {new_size_gb}GB",
-            "all_updated_disks": all_disks
-        }
+        # ✅ local 模式直接返回字串，不需要同步
+        return f"Successfully updated disk (key: {disk_key}) on '{vm_name}' to {new_size_gb}GB."
 
     # ------- 真實 pyVmomi -------
     vm = _get_vm_by_name(si, vm_name)

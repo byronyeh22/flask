@@ -367,14 +367,8 @@ def _find_next_slot_auto(vm) -> (int, int, int):
     raise RuntimeError("No available SCSI slot")
 
 def _next_label_number(vm) -> int:
-    """取現有 label 的最大 N，再 +1（較貼近 vSphere 規則）"""
-    max_n = 0
-    for d in vm["disks"]:
-        label = d.get("label_text") or ""
-        parts = label.split()
-        if parts and parts[-1].isdigit():
-            max_n = max(max_n, int(parts[-1]))
-    return max_n + 1
+    """取現有磁碟數量 + 1 作為下一個編號"""
+    return len(vm["disks"]) + 1
 
 def _build_disk_json(d):
     return {
@@ -402,6 +396,18 @@ def get_vsphere_objects():
     })
 
 # ---- vSphere Mock: VM & Disk APIs ----
+def _renumber_disk_labels(vm):
+    """
+    模擬 vSphere 刪除磁碟後自動重新編號 label 的行為
+    按照 (controller_bus, unit_number) 排序後重新編號
+    """
+    # 排序所有磁碟（按位置排序）
+    sorted_disks = sorted(vm["disks"], key=lambda d: (d["controller_bus"], d["unit_number"]))
+    
+    # 重新編號（從 1 開始）
+    for i, disk in enumerate(sorted_disks, 1):
+        disk["label_number"] = i
+        disk["label_text"] = f"Hard disk {i}"
 
 @mock_app.route('/mock/vsphere/vms/<string:vm_name>/ensure', methods=['POST'])
 def vsphere_vm_ensure(vm_name):
@@ -497,6 +503,10 @@ def vsphere_remove_disk(vm_name, disk_key):
     vm["disks"] = [d for d in vm["disks"] if d["key"] != disk_key]
     if len(vm["disks"]) == before:
         return jsonify({"error": "disk not found"}), 404
+    
+    # ✅ 新增：重新編號所有磁碟的 label
+    _renumber_disk_labels(vm)
+    
     return jsonify({"message": "removed", "disk_key": disk_key})
 
 @mock_app.route('/mock/vsphere/vms/<string:vm_name>/disks/<int:disk_key>', methods=['PATCH'])
