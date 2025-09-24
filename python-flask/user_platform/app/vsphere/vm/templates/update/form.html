@@ -21,7 +21,7 @@
 </style>
 
 <div class="card mb-4 shadow-sm">
-  <div class="card-header bg-primary text-white fw-bold">選擇目標 VM</div>
+  <div class="card-header bg-primary text-white fw-bold">Select Target VM</div>
   <div class="card-body">
     <div class="row g-3">
       <div class="col-12">
@@ -111,7 +111,7 @@
           <option value="" disabled selected>--- Select ESXi Host First ---</option>
         </select>
         <div class="muted mt-1">
-          依序選擇 Environment → vSphere Host → Datacenter → Cluster → ESXi，再選擇目標 VM。
+          Select Environment → vSphere Host → Datacenter → Cluster → ESXi in order, then select the target VM.
         </div>
       </div>
     </div>
@@ -120,7 +120,7 @@
 
 <div id="configuration-form" style="display:none;">
   <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-success text-white fw-bold">檢視與修改 VM 設定</div>
+    <div class="card-header bg-success text-white fw-bold">Review and Modify VM Configuration</div>
     <div class="card-body">
 
       <div class="row mb-3">
@@ -448,56 +448,62 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // --- 硬碟 UI 函數 ---
   function addExistingDisk(disk) {
-    const id    = disk.id || '';
-    const size  = (disk.size != null ? disk.size : 50);
-    const prov  = disk.disk_provisioning || 'thin';
+      const id    = disk.id || '';
+      const size  = (disk.size != null ? disk.size : 50);
+      const prov  = disk.disk_provisioning || 'thin';
 
-    let labelText = normalizedLabelFromConfig(disk);
-    if (!labelText) {
-      labelText = `Hard Disk ${disk.id || 'Unknown'}`;
+      let labelText = normalizedLabelFromConfig(disk);
+      if (!labelText) {
+        labelText = `Hard Disk ${disk.id || 'Unknown'}`;
+      }
+
+      // 根據資料庫欄位名稱，取得 SCSI 資訊
+      const scsiInfo = disk.scsi_controller != null && disk.unit_number != null
+                       ? ` (${disk.scsi_controller}:${disk.unit_number})`
+                       : '';
+      const fullLabelText = `${labelText}${scsiInfo}`;
+
+      const isThin  = (prov === 'thin') ? 'true' : 'false';
+      const isEager = (prov === 'thick_eager') ? 'true' : 'false';
+
+      const sizeMinAttr = `min="${size}"`;
+      const provDisabledAttr = 'disabled';
+      const provTip = 'Existing disk provisioning cannot be changed.';
+
+      const html = `
+        <div class="disk-item mb-2 p-3 border rounded bg-light">
+          <input type="hidden" name="update_disk_db_id[]" value="${id}">
+          <input type="hidden" name="update_disk_label[]" value="${fullLabelText}">
+          <div class="row align-items-end g-2">
+            <div class="col-4 col-md-3">
+              <label class="form-label mb-0">Label</label>
+              <input type="text" class="form-control disk-label" value="${fullLabelText}" disabled>
+            </div>
+            <div class="col-4 col-md-2">
+              <label class="form-label mb-0">Size (GB)</label>
+              <input type="number" name="update_vm_disk_size[]" class="form-control" ${sizeMinAttr} value="${size}">
+            </div>
+            <div class="col-8 col-md-5">
+              <label class="form-label mb-0">Disk Provisioning</label>
+              <select class="form-select disk-provisioning-display" ${provDisabledAttr} title="${provTip}">
+                <option value="thin" ${prov === 'thin' ? 'selected' : ''}>Thin Provision</option>
+                <option value="thick_lazy" ${prov === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
+                <option value="thick_eager" ${prov === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
+              </select>
+              <input type="hidden" name="update_vm_disk_provisioning[]" value="${prov}">
+              <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
+              <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
+            </div>
+            <div class="col-4 col-md-2 d-flex align-items-center">
+              <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
+                <i class="bi bi-trash"></i> Remove
+              </button>
+            </div>
+          </div>
+        </div>`;
+
+      newDiskContainer.insertAdjacentHTML('beforeend', html);
     }
-
-    const isThin  = (prov === 'thin') ? 'true' : 'false';
-    const isEager = (prov === 'thick_eager') ? 'true' : 'false';
-
-    const sizeMinAttr = `min="${size}"`;
-    const provDisabledAttr = 'disabled';
-    const provTip = 'Existing disk provisioning cannot be changed.';
-
-    const html = `
-      <div class="disk-item mb-2 p-3 border rounded bg-light">
-        <input type="hidden" name="update_disk_db_id[]" value="${id}">
-        <input type="hidden" name="update_disk_label[]" value="${labelText}">
-        <div class="row align-items-end g-2">
-          <div class="col-4 col-md-3">
-            <label class="form-label mb-0">Label</label>
-            <input type="text" class="form-control disk-label" value="${labelText}" disabled>
-          </div>
-          <div class="col-4 col-md-2">
-            <label class="form-label mb-0">Size (GB)</label>
-            <input type="number" name="update_vm_disk_size[]" class="form-control" ${sizeMinAttr} value="${size}">
-          </div>
-          <div class="col-8 col-md-5">
-            <label class="form-label mb-0">Disk Provisioning</label>
-            <select class="form-select disk-provisioning-display" ${provDisabledAttr} title="${provTip}">
-              <option value="thin" ${prov === 'thin' ? 'selected' : ''}>Thin Provision</option>
-              <option value="thick_lazy" ${prov === 'thick_lazy' ? 'selected' : ''}>Thick Provision Lazy Zeroed</option>
-              <option value="thick_eager" ${prov === 'thick_eager' ? 'selected' : ''}>Thick Provision Eager Zeroed</option>
-            </select>
-            <input type="hidden" name="update_vm_disk_provisioning[]" value="${prov}">
-            <input type="hidden" name="update_vm_disk_thin_provisioned[]" class="thin-provisioned-value" value="${isThin}">
-            <input type="hidden" name="update_vm_disk_eagerly_scrub[]" class="eagerly-scrub-value" value="${isEager}">
-          </div>
-          <div class="col-4 col-md-2 d-flex align-items-center">
-            <button type="button" class="btn btn-sm btn-remove remove-disk-btn">
-              <i class="bi bi-trash"></i> Remove
-            </button>
-          </div>
-        </div>
-      </div>`;
-
-    newDiskContainer.insertAdjacentHTML('beforeend', html);
-  }
 
   function addNewDisk() {
     const curNew = getNewAddedDiskCount();
@@ -599,28 +605,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // --- Disk UI Helpers ---
   function populateCurrentDiskConfig(config) {
-    const disks = config.additional_disks || [];
-    currentDiskContainer.innerHTML = '';
+      const disks = config.additional_disks || [];
+      currentDiskContainer.innerHTML = '';
 
-    if (disks.length > 0) {
-      const sorted = [...disks].sort((a,b) => {
-        const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
-        const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
-        return ua - ub;
-      });
+      if (disks.length > 0) {
+        const sorted = [...disks].sort((a,b) => {
+          const ua = (a.ui_disk_number == null ? 9999 : a.ui_disk_number);
+          const ub = (b.ui_disk_number == null ? 9999 : b.ui_disk_number);
+          return ua - ub;
+        });
 
-      sorted.forEach(d => {
-        const prov = (d.disk_provisioning || 'thin').replace(/_/g, ' ');
-        const label = normalizedLabelFromConfig(d);
-        currentDiskContainer.insertAdjacentHTML(
-                  'beforeend',
-                  `<div class="mb-2"><strong>${label}:</strong> ${d.size} GB, ${prov}</div>`
-                );
-              });
-            } else {
-              currentDiskContainer.innerHTML = `<p class="text-muted">No additional disks</p>`;
+        sorted.forEach(d => {
+          const prov = (d.disk_provisioning || 'thin').replace(/_/g, ' ');
+          const label = normalizedLabelFromConfig(d);
+          // 根據資料庫欄位名稱，取得 SCSI 資訊
+          const scsiInfo = d.scsi_controller != null && d.unit_number != null
+                           ? ` (${d.scsi_controller}:${d.unit_number})`
+                           : '';
+
+          currentDiskContainer.insertAdjacentHTML(
+                    'beforeend',
+                    `<div class="mb-2"><strong>${label}${scsiInfo}:</strong> ${d.size} GB, ${prov}</div>`
+                  );
+                });
+              } else {
+                currentDiskContainer.innerHTML = `<p class="text-muted">No additional disks</p>`;
+              }
             }
-          }
 
   function populateNewDiskConfig(config) {
     newDiskContainer.innerHTML = '';

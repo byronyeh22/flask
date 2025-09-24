@@ -120,9 +120,13 @@
 
                 {% set form_disk_ids = [] %}
 
+                {% set disk_labels = new_config.get('update_disk_label[]', new_config.get('update_disk_label', [])) %}
+                {% if disk_labels is string %}{% set disk_labels = [disk_labels] %}{% endif %}
+
                 {% if disk_ids and disk_sizes %}
                   {% for i in range([disk_ids|length, disk_sizes|length] | max) %}
                     {% set disk_id = disk_ids[i] if i < disk_ids|length else '' %}
+                    {% set new_disk_label = disk_labels[i] if i < disk_labels|length else '' %}
                     {% set disk_size = disk_sizes[i] if i < disk_sizes|length else '' %}
                     {% set disk_prov = disk_provs[i] if i < disk_provs|length else 'thin' %}
 
@@ -131,19 +135,22 @@
                         {% set _ = form_disk_ids.append(disk_id.strip()) %}
                         {% set orig_disk = orig_disk_map.get(disk_id.strip()) %}
                         {% if orig_disk %}
+                          {% set orig_scsi_info = ' (' ~ orig_disk.scsi_controller ~ ':' ~ orig_disk.unit_number ~ ')' if orig_disk.scsi_controller is not none and orig_disk.unit_number is not none else '' %}
                           {% set orig_label = ('Hard Disk ' ~ orig_disk.ui_disk_number) if orig_disk.ui_disk_number is not none else (orig_disk.label or ('Hard Disk ' ~ orig_disk.id)) %}
+                          {% set full_orig_label = orig_label ~ orig_scsi_info %}
+
                           {% set orig_size = orig_disk.size|string %}
                           {% set orig_prov = (orig_disk.disk_provisioning or 'thin')|replace('_',' ')|title %}
                           {% set new_prov = disk_prov|replace('_',' ')|title %}
                           {% if orig_size != disk_size or orig_prov != new_prov %}
                             <span class="disk-line">
-                              <span class="disk-badge unchanged">{{ orig_label }}: {{ orig_size }} GB, {{ orig_prov }}</span>
+                              <span class="disk-badge unchanged">{{ full_orig_label }}: {{ orig_size }} GB, {{ orig_prov }}</span>
                               <span class="arrow">→</span>
-                              <span class="disk-badge changed">{{ orig_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                              <span class="disk-badge changed">{{ new_disk_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
                             </span>
                           {% else %}
                             <span class="disk-line">
-                              <span class="disk-badge unchanged">{{ orig_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
+                              <span class="disk-badge unchanged">{{ new_disk_label }}: {{ disk_size }} GB, {{ new_prov }}</span>
                             </span>
                           {% endif %}
                         {% endif %}
@@ -169,8 +176,10 @@
                   {% if orig_disk.id|string not in form_disk_ids %}
                     {% set orig_label = ('Hard Disk ' ~ orig_disk.ui_disk_number) if orig_disk.ui_disk_number is not none else (orig_disk.label or ('Hard Disk ' ~ orig_disk.id)) %}
                     {% set orig_prov = (orig_disk.disk_provisioning or 'thin')|replace('_',' ')|title %}
+
+                    {% set scsi_info = ' (' ~ orig_disk.scsi_controller ~ ':' ~ orig_disk.unit_number ~ ')' if orig_disk.scsi_controller is not none and orig_disk.unit_number is not none else '' %}
                     <span class="disk-line">
-                      <span class="disk-badge removed">{{ orig_label }}: {{ orig_disk.size }} GB, {{ orig_prov }}</span>
+                      <span class="disk-badge removed">{{ orig_label }}{{ scsi_info }}: {{ orig_disk.size }} GB, {{ orig_prov }}</span>
                     </span>
                   {% endif %}
                 {% endfor %}
