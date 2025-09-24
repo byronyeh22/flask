@@ -15,8 +15,27 @@ def _generate_create_summary(data):
 
 def _generate_update_summary(data):
     """為 Update 操作產生 Jira 標題"""
+    # print(f"DEBUG: _generate_update_summary received data keys: {list(data.keys())}")
+    # print(f"DEBUG: data structure: {data}")
+
     original_config = data.get('original_config', {})
     new_config = data.get('new_config', {})
+
+    # print(f"DEBUG: original_config keys: {list(original_config.keys())}")
+    # print(f"DEBUG: new_config keys: {list(new_config.keys())}")
+
+    # 標準化磁碟相關欄位的格式，確保它們始終是列表
+    disk_fields = [
+        'update_disk_db_id[]', 'update_disk_label[]', 'update_vm_disk_size[]',
+        'update_vm_disk_provisioning[]', 'update_vm_disk_eagerly_scrub[]',
+        'update_vm_disk_thin_provisioned[]'
+    ]
+
+    for field in disk_fields:
+        if field in new_config:
+            # 如果欄位存在但不是列表，則將其轉換為列表
+            if not isinstance(new_config[field], list):
+                new_config[field] = [new_config[field]]
 
     env = original_config.get('environment', 'N/A')
     action = data.get('action_type', 'update')
@@ -24,39 +43,118 @@ def _generate_update_summary(data):
     os_type = original_config.get('os_type', 'N/A')
     instance = original_config.get('vm_instance_type', 'N/A')
 
+    # print(f"DEBUG: Final values - env: {env}, prefix: {prefix}, os_type: {os_type}, instance: {instance}")
+
     return f"[VM Provisioning] {env} - {action} {prefix} - {os_type} ({instance})"
 
 def _generate_update_description(data):
     """為 Update 操作產生詳細的 Jira 描述 (使用 Jira Wiki Markup)"""
     original = data.get('original_config', {})
     new = data.get('new_config', {})
+    
+    vm_name = new.get('vm_name_prefix') or original.get('vm_name_prefix') or 'Unknown VM'
+    
     desc_parts = [
-        f"Request to update VM: *{new.get('vm_name_prefix')}*",
+        f"Request to update VM: *{vm_name}*",
         "---",
         "{panel:title=Configuration Changes|borderStyle=dashed|borderColor=#ccc|titleBGColor=#F7F7F7}"
     ]
-
+    
+    changes_found = False
+    
     # 比較 CPU
-    if str(original.get('vm_num_cpus')) != str(new.get('vm_num_cpus')):
-        desc_parts.append(f"• *vCPU:* {original.get('vm_num_cpus', 'N/A')} -> *{new.get('vm_num_cpus', 'N/A')}*")
-
+    orig_cpu = str(original.get('vm_num_cpus', '')).strip()
+    new_cpu = str(new.get('vm_num_cpus', '')).strip()
+    if orig_cpu != new_cpu and new_cpu and orig_cpu:
+        desc_parts.append(f"• *vCPU:* {orig_cpu} -> *{new_cpu}*")
+        changes_found = True
+    
     # 比較 Memory
-    if str(original.get('vm_memory')) != str(new.get('vm_memory')):
-        desc_parts.append(f"• *Memory (MB):* {original.get('vm_memory', 'N/A')} -> *{new.get('vm_memory', 'N/A')}*")
-
-    # 比較 Disk
-    # 原始磁碟資料可能是 JSON 字串，新資料是列表，需要統一格式再比較
-    try:
-        original_disks = json.loads(original.get('vm_disk_size', '[]'))
-    except (json.JSONDecodeError, TypeError):
-        original_disks = original.get('vm_disk_size', [])
-    new_disks = new.get('vm_disk_size', [])
-
-    if original_disks != new_disks:
-         desc_parts.append(f"• *Disks (GB):* {original_disks} -> *{new_disks}*")
-
+    orig_mem = str(original.get('vm_memory', '')).strip()
+    new_mem = str(new.get('vm_memory', '')).strip()
+    if orig_mem != new_mem and new_mem and orig_mem:
+        desc_parts.append(f"• *Memory (MB):* {orig_mem} -> *{new_mem}*")
+        changes_found = True
+    
+    # 比較磁碟 - 正確處理磁碟變更
+    disk_changes = _compare_disk_changes(original, new)
+    if disk_changes:
+        desc_parts.extend(disk_changes)
+        changes_found = True
+    
+    # 如果沒有發現任何變更，添加一個說明
+    if not changes_found:
+        desc_parts.append("• *No configuration changes detected*")
+    
     desc_parts.append("{panel}")
+    
     return "\n".join(desc_parts)
+
+def _compare_disk_changes(original_config, new_config):
+    """比較磁碟變更並產生變更描述"""
+    changes = []
+    
+    # 從 original_config 提取現有磁碟
+    original_disks = {}
+    if 'additional_disks' in original_config:
+        for disk in original_config['additional_disks']:
+            disk_id = disk.get('id')
+            if disk_id:
+                original_disks[str(disk_id)] = {
+                    'size': disk.get('size'),
+                    'label': disk.get('label'),
+                    'provisioning': disk.get('disk_provisioning'),
+                    'ui_number': disk.get('ui_disk_number')
+                }
+    
+    # 從 new_config 提取更新後的磁碟
+    updated_disks = {}
+    disk_ids = new_config.get('update_disk_db_id[]', [])
+    disk_labels = new_config.get('update_disk_label[]', [])
+    disk_sizes = new_config.get('update_vm_disk_size[]', [])
+    disk_provisionings = new_config.get('update_vm_disk_provisioning[]', [])
+    
+    for i, disk_id in enumerate(disk_ids):
+        # 處理空字串的 disk_id (新增的磁碟)
+        # 將其轉換為唯一識別符
+        if not disk_id:
+            disk_id = f"new_{i}"
+            
+        updated_disks[str(disk_id)] = {
+            'size': int(disk_sizes[i]) if i < len(disk_sizes) and disk_sizes[i] else None,
+            'label': disk_labels[i] if i < len(disk_labels) else None,
+            'provisioning': disk_provisionings[i] if i < len(disk_provisionings) else None
+        }
+    
+    # 找出被移除的磁碟
+    removed_disks = set(original_disks.keys()) - set(updated_disks.keys())
+    for disk_id in removed_disks:
+        disk_info = original_disks[disk_id]
+        changes.append(f"• *Removed Disk {disk_info['label']}:* {disk_info['size']} GB ({disk_info['provisioning']})")
+    
+    # 找出新增的磁碟（如果有的話）
+    added_disks = [key for key in updated_disks.keys() if key.startswith('new_') or key not in original_disks]
+    for disk_id in added_disks:
+        disk_info = updated_disks[disk_id]
+        if disk_info['label'] and disk_info['size'] and disk_info['provisioning']:
+            changes.append(f"• *Added Disk:* {disk_info['label']} - {disk_info['size']} GB ({disk_info['provisioning']})")
+    
+    # 找出修改的磁碟
+    common_disks = [key for key in original_disks.keys() if key in updated_disks and not key.startswith('new_')]
+    for disk_id in common_disks:
+        orig = original_disks[disk_id]
+        new = updated_disks[disk_id]
+        
+        disk_changes = []
+        if orig['size'] != new['size']:
+            disk_changes.append(f"size: {orig['size']} -> {new['size']} GB")
+        if orig['provisioning'] != new['provisioning']:
+            disk_changes.append(f"provisioning: {orig['provisioning']} -> {new['provisioning']}")
+        
+        if disk_changes:
+            changes.append(f"• *Modified Disk {orig['label']}:* {', '.join(disk_changes)}")
+    
+    return changes
 
 
 # --- [NEW] Create 動作的 Jira 描述（使用 Jira Wiki Markup） ---
@@ -169,44 +267,31 @@ def _generate_create_description(data: dict) -> str:
 
 
 # --- 主要函式 ---
-def create_jira_ticket(ticket_data):
-    """
-    建立 Jira 工單。
-    可處理 Create(扁平) / Update(巢狀 new_config) / Delete(可選)。
-    """
+def create_jira_ticket(ticket_data: dict, db_conn=None, workflow_id=None, check_existing=True) -> str:
+    # 初始化設置
     jira_base = current_app.config['JIRA_BASE_URL']
-    auth = (
-        current_app.config['JIRA_USER'],
-        current_app.config['JIRA_API_TOKEN']
-    )
+    auth = (current_app.config['JIRA_USER'], current_app.config['JIRA_API_TOKEN'])
 
-    # 判斷 action_type（update/delete/create）
-    action_type = (ticket_data.get("action_type")
-                   or ticket_data.get("new_config", {}).get("action_type")
-                   or "").lower()
+    # 獲取並標準化 action_type
+    action_type = (ticket_data.get("action_type", "") or "").strip().lower()
+    print(f"Creating Jira ticket with action_type: {action_type}, data keys: {list(ticket_data.keys())}")
 
-    if action_type == 'create' or 'new_config' not in ticket_data:
-        # --- Create ---
-        summary = _generate_create_summary(ticket_data)
-        description = _generate_create_description(ticket_data)
-
-    elif ('new_config' in ticket_data) or (action_type == 'update'):
-        # --- Update ---
+    # 根據 action_type 生成內容
+    if action_type == "update":
         summary = _generate_update_summary(ticket_data)
         description = _generate_update_description(ticket_data)
-
-    elif action_type == 'delete':
-        # --- Delete ---
-        try:
-            summary = _generate_delete_summary(ticket_data)
-            description = _generate_delete_description(ticket_data)
-        except NameError:
-            summary = f"[VM Provisioning] {ticket_data.get('environment','N/A')} - Delete {ticket_data.get('vm_name_prefix','N/A')}"
-            description = "Delete request (details TODO)."
-
+        print("Using UPDATE template for Jira ticket")
+    elif action_type == "delete":
+        summary = f"[VM Provisioning] {ticket_data.get('environment','N/A')} - Delete {ticket_data.get('vm_name_prefix','N/A')}"
+        description = "Delete request (details TODO)."
+        print("Using DELETE template for Jira ticket")
     else:
-        raise ValueError(f"Unsupported action_type: {action_type}")
-
+        # 預設走 create
+        summary = _generate_create_summary(ticket_data)
+        description = _generate_create_description(ticket_data)
+        print("Using CREATE template for Jira ticket")
+    
+    # 建立 payload 並發送請求
     payload = {
         "fields": {
             "project": {"key": "SJT"},
@@ -215,7 +300,8 @@ def create_jira_ticket(ticket_data):
             "description": description,
         }
     }
-
+    
+    # 發送請求
     try:
         resp = requests.post(
             f"{jira_base}/rest/api/2/issue/",
@@ -227,21 +313,5 @@ def create_jira_ticket(ticket_data):
         resp.raise_for_status()
         data = resp.json()
         return data["key"]
-
-    except requests.exceptions.HTTPError as http_err:
-        # 確保不會引用未定義的 response 物件
-        text = getattr(http_err.response, "text", "")
-        print(f"HTTP error occurred while creating Jira ticket: {http_err} - {text}")
-        raise
-    except requests.exceptions.RequestException as req_err:
-        print(f"Request error occurred while creating Jira ticket: {req_err}")
-        raise
-    except KeyError as key_err:
-        # 防呆：resp 可能不存在
-        body = ""
-        try:
-            body = resp.text  # 若前面有成功拿到 resp
-        except Exception:
-            pass
-        print(f"Key error after creating ticket (likely parsing response): {key_err} - Response: {body}")
-        raise
+    except Exception as e:
+        raise RuntimeError(f"Failed to create Jira ticket: {e}")

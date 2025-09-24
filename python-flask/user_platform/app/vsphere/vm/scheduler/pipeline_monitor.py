@@ -67,13 +67,65 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
     finally:
         cur.close()
 
-def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
+def _refresh_pipeline_from_gitlab(db_conn, pipeline_id: int) -> str:
+    """
+    直接打 GitLab 取最新 pipeline 詳情，並用 update_gitlab_pipeline_details 寫回 DB。
+    回傳最新的狀態（小寫），失敗則回空字串。
+    """
     try:
+        result = get_pipeline_status_from_gitlab(pipeline_id)
+        if result.get("success"):
+            update_gitlab_pipeline_details(db_conn, pipeline_id, result)
+            return (result.get("status") or "").lower()
+        else:
+            logging.warning(f"⚠️ GitLab refresh failed for pipeline {pipeline_id}: {result.get('error')}")
+            return ""
+    except Exception as e:
+        logging.warning(f"⚠️ GitLab refresh threw for pipeline {pipeline_id}: {e}")
+        return ""
+
+def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
+    """
+    加強版的 Jira 建立邏輯，使用資料庫鎖避免重複建立
+    """
+    # 使用 MySQL 的命名鎖確保原子性
+    lock_cur = db_conn.cursor(dictionary=True)
+    lock_acquired = False
+    
+    try:
+        # 獲取專門的 Jira 鎖
+        lock_name = f"jira_creation_{workflow_id}"
+        lock_cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 10))
+        lock_result = lock_cur.fetchone()
+        lock_cur.fetchall()  # 清空剩餘結果
+        
+        if not (lock_result and list(lock_result.values())[0] == 1):
+            logging.info(f"Skip Jira creation for workflow {workflow_id}: lock busy or timeout")
+            return
+            
+        lock_acquired = True
+        logging.info(f"Acquired Jira creation lock for workflow {workflow_id}")
+        
+        # 雙重檢查：再次確認是否已存在 Jira ticket
         existing = get_jira_ticket_by_workflow_id(workflow_id)
         if existing and existing.get("ticket_id"):
-            logging.info(f"✅ Jira ticket already exists for workflow {workflow_id}")
+            logging.info(f"Jira ticket already exists for workflow {workflow_id}: {existing.get('ticket_id')}")
             return
 
+        # 檢查當前 workflow 狀態，避免在終態重複處理
+        status_cur = db_conn.cursor(dictionary=True)
+        try:
+            status_cur.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+            workflow_row = status_cur.fetchone()
+            if workflow_row:
+                current_status = workflow_row.get('status', '').upper()
+                if current_status in ('SUCCESS', 'FAILED', 'CANCELED'):
+                    logging.info(f"Workflow {workflow_id} already in final state {current_status}, skipping Jira creation")
+                    return
+        finally:
+            status_cur.close()
+
+        # 獲取 request_payload
         cur = db_conn.cursor(dictionary=True)
         try:
             cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
@@ -91,63 +143,102 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
             set_failed_message(db_conn, workflow_id, "JIRA", f"Invalid request_payload JSON: {je}")
             return
 
-        form_data = payload.get("new_config", payload)
+        # 根據 action_type 決定傳遞的資料結構
+        action_type = payload.get("action_type", "create")
 
-        logging.info(f"🎫 Creating Jira ticket for workflow {workflow_id}")
+        if action_type == "update":
+            # UPDATE 操作：傳遞完整的 payload（包含 original_config 和 new_config）
+            form_data = payload
+        else:
+            # CREATE 或其他操作：使用原有邏輯
+            form_data = payload.get("new_config", payload)
+
+        logging.info(f"Creating Jira ticket for workflow {workflow_id} with action_type: {action_type}")
+        
+        # 建立 Jira ticket
         jira_key = create_jira_ticket(form_data)
-        logging.info(f"✅ Jira ticket created: {jira_key} for workflow {workflow_id}")
+        logging.info(f"Successfully created Jira ticket: {jira_key} for workflow {workflow_id}")
 
-        time.sleep(5)  # 給 Jira 初始化
+        # 給 Jira 初始化時間
+        time.sleep(5)
 
-        # retry 加 comment
+        # retry 機制：新增 comment
         max_retries = 5
         retry_delay = 3
+        comment_success = False
+        
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     time.sleep(retry_delay)
-                logging.info(f"💬 Adding comment to {jira_key}, attempt {attempt + 1}/{max_retries}")
+                logging.info(f"Adding comment to {jira_key}, attempt {attempt + 1}/{max_retries}")
                 jira_add_comment(jira_key, "Auto-created by pipeline SUCCESS.")
-                logging.info(f"✅ Comment added successfully to {jira_key}")
+                logging.info(f"Successfully added comment to {jira_key}")
+                comment_success = True
                 break
             except Exception as e:
-                logging.warning(f"⚠️  [JIRA RETRY] Add comment failed {attempt + 1}/{max_retries} for {jira_key}: {str(e)}")
+                logging.warning(f"Add comment failed {attempt + 1}/{max_retries} for {jira_key}: {str(e)}")
                 if attempt + 1 == max_retries:
                     set_failed_message(db_conn, workflow_id, "JIRA", f"Add comment failed after {max_retries} attempts: {str(e)}")
-                    return
+
+        # 如果 comment 失敗，記錄但繼續處理
+        if not comment_success:
+            logging.warning(f"Comment addition failed for {jira_key}, but continuing with transition")
 
         time.sleep(2)
 
-        # retry transition
+        # retry 機制：轉換狀態到 Done
+        transition_success = False
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     time.sleep(retry_delay)
-                logging.info(f"🔄 Transitioning {jira_key} to Done, attempt {attempt + 1}/{max_retries}")
+                logging.info(f"Transitioning {jira_key} to Done, attempt {attempt + 1}/{max_retries}")
                 jira_transition_issue(jira_key, "Done")
-                logging.info(f"✅ Successfully transitioned {jira_key} to Done")
+                logging.info(f"Successfully transitioned {jira_key} to Done")
+                transition_success = True
                 break
             except Exception as e:
-                logging.warning(f"⚠️  [JIRA RETRY] Transition failed {attempt + 1}/{max_retries} for {jira_key}: {str(e)}")
+                logging.warning(f"Transition failed {attempt + 1}/{max_retries} for {jira_key}: {str(e)}")
                 if attempt + 1 == max_retries:
                     set_failed_message(db_conn, workflow_id, "JIRA", f"Transition to Done failed after {max_retries} attempts: {str(e)}")
-                    return
+
+        # 如果 transition 失敗，記錄但繼續處理
+        if not transition_success:
+            logging.warning(f"Transition to Done failed for {jira_key}, but continuing with database insertion")
 
         time.sleep(3)
 
+        # 獲取最終的 ticket 詳細資訊並插入資料庫
         try:
-            logging.info(f"📋 Fetching final details for {jira_key}")
+            logging.info(f"Fetching final details for {jira_key}")
             ticket_data = get_jira_issue_detail(jira_key)
             insert_jira_info_to_db(workflow_id, ticket_data)
-            logging.info(f"✅ Successfully inserted ticket {jira_key} to database for workflow {workflow_id}")
+            logging.info(f"Successfully inserted ticket {jira_key} to database for workflow {workflow_id}")
         except Exception as e:
-            logging.error(f"❌ Insert ticket to DB failed for {jira_key}: {str(e)}")
+            logging.error(f"Insert ticket to DB failed for {jira_key}: {str(e)}")
             set_failed_message(db_conn, workflow_id, "JIRA", f"Insert ticket to DB failed: {str(e)}")
             return
 
+        # 只有在 Jira ticket 完全建立並插入資料庫後，才標記為成功
+        logging.info(f"Jira ticket creation process completed successfully for workflow {workflow_id}")
+
     except Exception as e:
-        logging.error(f"❌ Create ticket failed for workflow {workflow_id}: {str(e)}")
+        logging.error(f"Create ticket failed for workflow {workflow_id}: {str(e)}")
         set_failed_message(db_conn, workflow_id, "JIRA", f"Create ticket failed: {str(e)}")
+    finally:
+        # 釋放鎖
+        if lock_acquired:
+            try:
+                lock_name = f"jira_creation_{workflow_id}"
+                lock_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                lock_cur.fetchone()  # 讀取結果
+                lock_cur.fetchall()  # 清空剩餘結果
+                logging.info(f"Released Jira creation lock for workflow {workflow_id}")
+            except Exception as e:
+                logging.error(f"Failed to release Jira lock for workflow {workflow_id}: {e}")
+
+        lock_cur.close()
 
 # ---------- Disk helpers ----------
 def _get_vm_config_id_by_workflow(db_conn, workflow_id: int) -> int:
@@ -213,6 +304,7 @@ def _normalize_prov(v: str) -> str:
     return "thin"
 
 def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
+    logging.info(f"🔧 [DISK_DEBUG] Starting ensure_disks_after_success for workflow {workflow_id}")
     """
     執行 pipeline 成功後的磁碟處理（含 Create/Resize/Delete）：
       - PENDING_CREATION → CREATING → SUCCESS/FAILED
@@ -684,17 +776,18 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
           若磁碟有任一 pending/working（create/resize/delete）→ DEPLOYING
           若有 FAILED → FAILED
           全部處理完（且無 FAILED）→ SUCCESS
-      - 其他 → IN_PROGRESS
+      - 其他（running/pending/created/scheduled/...）→ IN_PROGRESS
     """
-    logging.info(f"🔍 Determining status for workflow {workflow_id}, pipeline_status={pipeline_status}")
+    ps = (pipeline_status or "").strip().lower()
+    logging.info(f"🔍 Determining status for workflow {workflow_id}, pipeline_status={ps}")
 
-    if pipeline_status == "failed":
+    if ps == "failed":
         return "FAILED"
-    elif pipeline_status == "canceled":
+    elif ps == "canceled":
         return "CANCELED"
-    elif pipeline_status == "manual":
+    elif ps == "manual":
         return "PENDING_APPROVAL"
-    elif pipeline_status == "success":
+    elif ps == "success":
         state_info = get_workflow_state_info(db_conn, workflow_id)
         c = state_info['effective_counts']
 
@@ -706,15 +799,24 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
         failed = c['FAILED']
 
         logging.info(f"📊 Workflow {workflow_id} effective disk counts: {c}")
+        logging.info(f"📊 Total pending disks: {pending}, failed: {failed}")
 
         if failed > 0:
             return "FAILED"
         elif pending > 0:
+            logging.info(f"📊 Workflow {workflow_id} has {pending} pending disks, returning DEPLOYING")
             return "DEPLOYING"
         else:
             return "SUCCESS"
-    else:
+
+    elif ps in {"running", "pending", "created", "scheduled", "preparing", "waiting_for_resource"}:
         return "IN_PROGRESS"
+    elif ps == "skipped":
+        return "CANCELED"
+
+    logging.warning(f"⚠️ Unrecognized pipeline status '{ps}' for workflow {workflow_id}, defaulting to IN_PROGRESS")
+    return "IN_PROGRESS"
+
 
 # ---------- Check if GitLab pipeline is manual ----------
 def is_pipeline_manual_for_workflow(db_conn, workflow_id: int) -> bool:
@@ -764,6 +866,9 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
         logging.error(f"❌ Full traceback: {traceback.format_exc()}")
 
 # ---------- Monitor pipelines ----------
+# 檔案: pipeline_monitor.py
+# 函式: monitor_pipelines
+
 def monitor_pipelines(app):
     with app.app_context():
         while True:
@@ -773,7 +878,6 @@ def monitor_pipelines(app):
             try:
                 db_conn = get_db_connection()
 
-                # 1) 列出所有尚未終態的 workflows（7 天內）
                 cur = db_conn.cursor(dictionary=True)
                 try:
                     cur.execute(
@@ -789,10 +893,35 @@ def monitor_pipelines(app):
                 finally:
                     cur.close()
 
+                # 另外把「gitlab_pipelines 還缺 finished_at 或 duration」的 workflow 也抓進來
+                cur2 = db_conn.cursor(dictionary=True)
+                try:
+                    cur2.execute(
+                        """
+                        SELECT DISTINCT gp.workflow_id
+                          FROM gitlab_pipelines gp
+                         WHERE (gp.finished_at IS NULL OR gp.duration IS NULL)
+                           AND gp.started_at >= NOW() - INTERVAL 7 DAY
+                         ORDER BY gp.workflow_id DESC
+                        """
+                    )
+                    missing_fd = cur2.fetchall()
+                finally:
+                    cur2.close()
+
+                # 合併：未終態 + 缺欄位 的 workflow
+                wf_map = {w['workflow_id']: w for w in (workflows_todo or [])}
+                for r in (missing_fd or []):
+                    wid = r['workflow_id']
+                    if wid not in wf_map:
+                        # 若 workflow_runs 此刻已是 SUCCESS，這裡用一個占位 status，不影響後續 GitLab 輪詢
+                        wf_map[wid] = {'workflow_id': wid, 'status': 'SUCCESS'}
+                workflows_todo = list(wf_map.values())
+
                 for wr in workflows_todo:
                     workflow_id = wr["workflow_id"]
+                    current_status = wr["status"]
 
-                    # 2) 該 workflow 最新一筆 pipeline
                     cur_p = db_conn.cursor(dictionary=True)
                     try:
                         cur_p.execute(
@@ -805,50 +934,55 @@ def monitor_pipelines(app):
                             """,
                             (workflow_id,),
                         )
-                        latest = cur_p.fetchone()
+                        pipeline_row = cur_p.fetchone()
                     finally:
                         cur_p.close()
 
-                    if not latest:
+                    if not pipeline_row:
                         continue
 
-                    pipeline_id = latest["pipeline_id"]
-                    db_status   = (latest.get("status") or "").lower()
+                    pipeline_id = pipeline_row["pipeline_id"]
+                    db_status = (pipeline_row.get("status") or "").lower()
 
-                    # 3) 非終態 → 打 GitLab API 更新 DB
-                    if db_status not in ("success", "failed", "canceled"):
-                        print(f"🔍 [poll] wf={workflow_id} pid={pipeline_id} DB={db_status} → query GitLab")
-
-                        gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
-                        if gitlab_result.get("success"):
-                            update_gitlab_pipeline_details(db_conn, pipeline_id, gitlab_result)
-                            fresh = (gitlab_result.get("status") or "").lower()
-                            print(f"⚙️  [poll] wf={workflow_id} pid={pipeline_id} GitLab={fresh}")
-
-                            # RETURNED 不覆蓋
-                            cur_now = db_conn.cursor(dictionary=True)
-                            try:
-                                cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
-                                wr_now = cur_now.fetchone()
-                            finally:
-                                cur_now.close()
-
-                            if wr_now and (wr_now.get("status") or "").upper() == "RETURNED":
-                                continue
-
-                            target_status = determine_workflow_status_after_pipeline(db_conn, workflow_id, fresh)
-                            process_workflow_status_update(db_conn, workflow_id, target_status, pipeline_id)
-
+                    # 特殊處理 DEPLOYING 狀態
+                    if current_status == "DEPLOYING":
+                        print(f"🔧 [disk_check] wf={workflow_id} processing pending disks")
+                        
+                        ensure_disks_after_success(db_conn, workflow_id)
+                        
+                        state_info = get_workflow_state_info(db_conn, workflow_id)
+                        c = state_info['effective_counts']
+                        
+                        pending_disks = (
+                            c['PENDING_CREATION'] + c['CREATING'] +
+                            c['PENDING_RESIZE']   + c['RESIZING'] +
+                            c['PENDING_DELETE']   + c['DELETING']
+                        )
+                        
+                        if pending_disks == 0 and c['FAILED'] == 0:
+                            update_request_status(workflow_id, "SUCCESS")
+                            ensure_jira_after_success(db_conn, workflow_id)
+                            print(f"🔧 [disk_complete] wf={workflow_id} all disks done, moving to SUCCESS")
+                        elif c['FAILED'] > 0:
+                            update_request_status(workflow_id, "FAILED")
+                            print(f"🔧 [disk_failed] wf={workflow_id} has failed disks, marking as FAILED")
                         else:
-                            set_failed_message(
-                                db_conn, workflow_id, "GITLAB_API",
-                                f"Pipeline query failed: {gitlab_result.get('error')}",
-                            )
+                            print(f"🔧 [disk_pending] wf={workflow_id} still has {pending_disks} pending disks")
+                        
+                        continue
 
-                    else:
-                        # 4) DB 已是終態 → 直接補同步
-                        print(f"🧹 [finalize] wf={workflow_id} pid={pipeline_id} DB={db_status}")
-
+                    # 統一處理所有 GitLab 狀態查詢與更新邏輯
+                    # 這一塊程式碼將取代你原有的 if/else 分支
+                    print(f"🔍 [poll] wf={workflow_id} pid={pipeline_id} DB={db_status} → query GitLab")
+                    
+                    gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
+                    if gitlab_result.get("success"):
+                        # 無論狀態是否終態，都更新資料庫
+                        update_gitlab_pipeline_details(db_conn, pipeline_id, gitlab_result)
+                        fresh_status = (gitlab_result.get("status") or "").lower()
+                        print(f"⚙️ [poll] wf={workflow_id} pid={pipeline_id} GitLab={fresh_status}")
+                        
+                        # 從資料庫重新讀取 workflow 狀態，確保是最新的
                         cur_now = db_conn.cursor(dictionary=True)
                         try:
                             cur_now.execute("SELECT status FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
@@ -856,11 +990,24 @@ def monitor_pipelines(app):
                         finally:
                             cur_now.close()
 
-                        if wr_now and (wr_now.get("status") or "").upper() == "RETURNED":
-                            continue
+                        current_workflow_status = (wr_now.get("status") or "").upper() if wr_now else ""
+                        target_status = determine_workflow_status_after_pipeline(db_conn, workflow_id, fresh_status)
 
-                        target_status = determine_workflow_status_after_pipeline(db_conn, workflow_id, db_status)
-                        process_workflow_status_update(db_conn, workflow_id, target_status, pipeline_id)
+                        if target_status is None:
+                            logging.error(f"❗ determine_workflow_status_after_pipeline returned None (wf={workflow_id}, fresh_status={fresh_status})")
+
+                        if current_workflow_status != (target_status or "IN_PROGRESS").upper():
+                            print(f"📊 [status_change] wf={workflow_id} {current_workflow_status} → {target_status}")
+                            process_workflow_status_update(db_conn, workflow_id, target_status, pipeline_id)
+                        else:
+                            print(f"⭐ [skip] wf={workflow_id} already in target status {target_status}")
+
+
+                    else:
+                        set_failed_message(
+                            db_conn, workflow_id, "GITLAB_API",
+                            f"Pipeline query failed: {gitlab_result.get('error')}",
+                        )
 
             except Exception as e:
                 print(f"❌ Pipeline monitoring error: {e}")
@@ -870,7 +1017,6 @@ def monitor_pipelines(app):
                 if db_conn:
                     db_conn.close()
 
-            # 輪詢間隔
             time.sleep(5)
 
 # ---------- Scan IN_PROGRESS workflows ----------
