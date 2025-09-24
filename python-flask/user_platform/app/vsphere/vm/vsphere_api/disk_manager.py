@@ -3,6 +3,8 @@ import ssl
 import time
 import logging
 from typing import Tuple, List, Dict, Optional
+from app.vsphere.vm.db.vm_provisioning_manager import sync_disk_labels_to_database
+
 
 from flask import current_app
 
@@ -106,6 +108,39 @@ def _with_connection(func):
                 except Exception:
                     pass
     return wrapper
+
+
+def _sync_all_disk_labels_after_operation(vm) -> List[Dict]:
+    """在磁盤操作後，重新讀取 VM 所有磁盤的最新狀態"""
+    disk_info = []
+    
+    for dev in vm.config.hardware.device:
+        if isinstance(dev, vim.vm.device.VirtualDisk):
+            # 取得控制器資訊
+            controller_bus = None
+            for ctrl_dev in vm.config.hardware.device:
+                if (isinstance(ctrl_dev, vim.vm.device.VirtualSCSIController) 
+                    and ctrl_dev.key == dev.controllerKey):
+                    controller_bus = ctrl_dev.busNumber
+                    break
+            
+            # 跳過 OS 盤 (scsi 0:0)
+            if controller_bus == 0 and dev.unitNumber == 0:
+                continue
+                
+            label_text = getattr(dev.deviceInfo, "label", None)
+            label_number = int(label_text.replace("Hard disk ", "")) if label_text else None
+            
+            disk_info.append({
+                "key": dev.key,
+                "controller_bus": controller_bus,
+                "unit_number": dev.unitNumber,
+                "label_text": label_text,
+                "label_number": label_number,
+                "vmdk_path": getattr(dev.backing, "fileName", None)
+            })
+    
+    return disk_info
 
 # --------------------------------------------------------------------------------------
 # 真實模式專用工具（local 用不到）
@@ -387,6 +422,12 @@ def add_disk_to_vm(si, vm_name: str, disk_spec: Dict) -> Dict[str, Optional[obje
 
     wait_for_task(vm.ReconfigVM_Task(spec=spec))
 
+    # 重新讀取所有磁盤狀態並同步到資料庫
+    all_disks = _sync_all_disk_labels_after_operation(vm)
+
+    # 同步到資料庫
+    sync_disk_labels_to_database(vm_name, all_disks)
+
     # 回讀新磁碟資訊（用 controllerKey + unitNumber 配對）
     target_disk = None
     for dev in vm.config.hardware.device:
@@ -397,16 +438,17 @@ def add_disk_to_vm(si, vm_name: str, disk_spec: Dict) -> Dict[str, Optional[obje
 
     label_text = getattr(target_disk.deviceInfo, "label", None) if target_disk else None
     vmdk_path = getattr(target_disk.backing, "fileName", None) if target_disk else None
-    label_number = _parse_label_number(label_text)
+    label_number = int(label_text.replace("Hard disk ", "")) if label_text else None
 
     return {
-        "controller_bus": controller.busNumber,     # -> vm_disks.scsi_controller
-        "unit_number": unit_number,                 # -> vm_disks.unit_number
-        "label_text": label_text,                   # -> 顯示用
-        "label_number": label_number,               # -> vm_disks.label
-        "vmdk_path": vmdk_path,                     # -> vm_disks.vmdk_path
+        "controller_bus": controller.busNumber,
+        "unit_number": unit_number,
+        "label_text": label_text,
+        "label_number": label_number,
+        "vmdk_path": vmdk_path,
         "size_gb": size_gb,
         "provision_type": provision_type or "thick_lazy",
+        "all_updated_disks": all_disks
     }
 
 @_with_connection
@@ -439,7 +481,15 @@ def remove_disk_from_vm(si, vm_name: str, disk_key: int) -> str:
     spec.deviceChange = [dev_spec]
 
     wait_for_task(vm.ReconfigVM_Task(spec=spec))
-    return f"Successfully removed disk (key: {disk_key})."
+    # 重新讀取所有磁盤狀態並同步到資料庫
+    all_disks = _sync_all_disk_labels_after_operation(vm)
+
+    sync_disk_labels_to_database(vm_name, all_disks)
+
+    return {
+        "message": f"Successfully removed disk (key: {disk_key}) from '{vm_name}'",
+        "all_updated_disks": all_disks
+    }
 
 @_with_connection
 def update_disk_size(si, vm_name: str, disk_key: int, new_size_gb: int) -> str:
@@ -456,7 +506,15 @@ def update_disk_size(si, vm_name: str, disk_key: int, new_size_gb: int) -> str:
             err = (r.json() or {}).get("error") or "Bad Request"
             raise ValueError(err)
         r.raise_for_status()
-        return f"Successfully updated disk (key: {disk_key}) to {new_size_gb}GB."
+        # 重新讀取所有磁盤狀態並同步到資料庫
+        all_disks = _sync_all_disk_labels_after_operation(vm)
+
+        sync_disk_labels_to_database(vm_name, all_disks)
+
+        return {
+            "message": f"Successfully updated disk (key: {disk_key}) on '{vm_name}' to {new_size_gb}GB",
+            "all_updated_disks": all_disks
+        }
 
     # ------- 真實 pyVmomi -------
     vm = _get_vm_by_name(si, vm_name)
@@ -484,4 +542,12 @@ def update_disk_size(si, vm_name: str, disk_key: int, new_size_gb: int) -> str:
     spec.deviceChange = [dev_spec]
 
     wait_for_task(vm.ReconfigVM_Task(spec=spec))
-    return f"Successfully updated disk (key: {disk_key}) to {new_size_gb}GB."
+    # 重新讀取所有磁盤狀態並同步到資料庫
+    all_disks = _sync_all_disk_labels_after_operation(vm)
+
+    sync_disk_labels_to_database(vm_name, all_disks)
+
+    return {
+        "message": f"Successfully updated disk (key: {disk_key}) on '{vm_name}' to {new_size_gb}GB",
+        "all_updated_disks": all_disks
+    }

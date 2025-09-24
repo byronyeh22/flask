@@ -204,6 +204,49 @@ def _plan_disks_for_update(data: Dict[str, Any], db_disks: List[Dict[str, Any]])
 
     return to_create, to_update, to_delete
 
+
+# =======================================
+# 從 vSphere 同步 label 到資料庫
+# =======================================
+def sync_disk_labels_to_database(vm_name: str, vsphere_disks: List[Dict]):
+    """將從 vSphere 讀取的磁盤狀態同步到資料庫"""
+    db_conn = get_db_connection()
+    try:
+        with db_conn.cursor(dictionary=True) as cursor:
+            # 找到對應的 vm_configuration_id
+            cursor.execute("""
+                SELECT id FROM vm_configurations 
+                WHERE vm_name_prefix = %s ORDER BY id DESC LIMIT 1
+            """, (vm_name,))
+            
+            vm_config = cursor.fetchone()
+            if not vm_config:
+                return
+            
+            vm_configuration_id = vm_config["id"]
+            
+            # 更新每個磁盤的 label
+            for disk in vsphere_disks:
+                cursor.execute("""
+                    UPDATE vm_disks 
+                    SET label = %s
+                    WHERE vm_configuration_id = %s 
+                    AND scsi_controller = %s 
+                    AND unit_number = %s
+                """, (
+                    disk["label_number"], 
+                    vm_configuration_id,
+                    disk["controller_bus"], 
+                    disk["unit_number"]
+                ))
+            
+            db_conn.commit()
+    except Exception as e:
+        db_conn.rollback()
+        raise e
+    finally:
+        db_conn.close()
+
 # =======================================
 # Create：寫 vm_configurations + PENDING 磁碟
 # （符合新流程：磁碟只標 PENDING_CREATION，SCSI/label/vmdk_path 由 pyVmomi 建立後回寫）
