@@ -35,7 +35,7 @@
             After selecting the appropriate options, click <strong>Save to Draft</strong> to store your configuration as a draft.
           </p>
           <p>
-            Once submitted from overview, the system will automatically create a Jira ticket and trigger the VM provisioning pipeline.
+            After your submission is approved, the system automatically creates a Jira ticket and triggers the VM provisioning pipeline.
           </p>
         </div>
       </div>
@@ -45,7 +45,19 @@
 
     <!-- Update -->
     <div class="tab-pane fade" id="update-fields" role="tabpanel">
-      <div class="alert alert-warning">（請依需求填入更新欄位）</div>
+      <div class="card mb-3 border">
+        <div class="card-body text-dark">
+          <p>
+            Configure environment settings to update an existing Virtual Machine (VM).
+          </p>
+          <p>
+            Follow this order: <strong>Environment</strong> → <strong>vSphere Host</strong> → <strong>Datacenter</strong> → <strong>Cluster</strong> → <strong>ESXi Host</strong> → <strong>Target VM</strong>
+          </p>
+          <p>
+            After your submission is approved, the system automatically creates a Jira ticket and triggers the VM update pipeline.
+          </p>
+        </div>
+      </div>
       {% set action_type = 'Update' %}
       {% include "update/form.html" %}
     </div>
