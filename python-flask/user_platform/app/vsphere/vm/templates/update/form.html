@@ -7,175 +7,186 @@
 
 <style>
   .config-row { display: flex; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
-  .config-label { font-weight: bold; color: #555; width: 180px; }
-  .config-current { flex: 1; padding: 0 15px; color: #6c757d; background-color: #f8f9fa; border-radius: .25rem; padding: .375rem .75rem; margin-right: 15px; min-height: 38px; display: flex; align-items: center; word-break: break-all; }
+  .config-label { font-weight: bold; color: #555; width: 150px; font-size: 0.9rem; }
+  .config-current { flex: 1; padding: 0 10px; color: #6c757d; background-color: #f8f9fa; border-radius: .25rem; padding: .375rem .75rem; margin-right: 10px; min-height: 38px; display: flex; align-items: center; word-break: break-all; font-size: 0.9rem; }
   .config-new { flex: 1; }
-  .disk-config-current { padding: 10px; background-color: #f8f9fa; border-radius: 5px; min-height: 100px; }
+  .disk-config-current { padding: 8px; background-color: #f8f9fa; border-radius: 5px; min-height: 80px; max-height: 180px; overflow-y: auto; font-size: 0.85rem; }
   .btn-remove { background-color: #dc3545; color: #fff; }
   .btn-remove:hover { background-color: #c82333; color: #fff; }
   .btn-add { background-color: #28a745; color: #fff; }
   .btn-add:hover { background-color: #218838; color: #fff; }
-  .btn-cancel-link { color: #dc3545; text-decoration: none; padding: 10px 20px; border: 1px solid #dc3545; border-radius: 4px; font-size: 14px; transition: all 0.3s ease; }
+  .btn-cancel-link { background: transparent; color: #6c757d; text-decoration: none; padding: .375rem .75rem; }
   .btn-cancel-link:hover { background-color: #dc3545; color: white; text-decoration: none; }
   .disk-label[disabled] { background-color: #e9ecef !important; opacity: 1; cursor: not-allowed; }
+  #configuration-form h5 { font-size: 1rem; margin-bottom: 0.75rem; }
+  #configuration-form h6 { font-size: 0.9rem; }
+  .disk-item { font-size: 0.85rem; margin-bottom: 0.5rem; padding: 0.75rem; }
+  .disk-item .form-label { font-size: 0.8rem; margin-bottom: 0.25rem; }
+  .disk-item .form-control, .disk-item .form-select { font-size: 0.85rem; padding: 0.25rem 0.5rem; }
+  .disk-item .btn-sm { font-size: 0.75rem; padding: 0.25rem 0.5rem; min-width: 36px; }
+  .alert-warning { font-size: 0.8rem; padding: 0.5rem 0.75rem !important; margin-top: 0.5rem !important; }
 </style>
 
-<div class="card mb-4 shadow-sm">
-  <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-gear-wide-connected"></i> Select Target VM</div>
-  <div class="card-body">
-    <div class="row g-3">
-      <div class="col-12">
-        <label class="form-label">Environment</label>
-        <select
-          id="environment-select"
-          name="environment"
-          class="form-select"
-          data-hosts-url="{{ url_for('vm.get_hosts_by_environment_api', environment='__ENV__') }}"
-        >
-          <option value="" disabled selected>--- Select Environment ---</option>
-          {% for env in environment %}
-          <option value="{{ env }}">{{ env }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
+<div class="row g-4" id="update-form-root">
+  <div class="col-lg-5">
+    <div class="card mb-4 shadow-sm">
+      <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-gear-wide-connected"></i> Select Target VM</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Environment</label>
+            <select
+              id="environment-select"
+              name="environment"
+              class="form-select"
+              data-hosts-url="{{ url_for('vm.get_hosts_by_environment_api', environment='__ENV__') }}"
+            >
+              <option value="" disabled selected>--- Select Environment ---</option>
+              {% for env in environment %}
+              <option value="{{ env }}">{{ env }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
 
-    <div class="row g-3 mt-2">
-      <div class="col-12">
-        <label class="form-label">vSphere Host</label>
-        <select
-          id="vsphere-host-select"
-          name="vsphere_host"
-          class="form-select"
-          disabled
-          data-objects-by-host-url="{{ url_for('vm.get_vsphere_objects_by_host_api', host='__HOST__') }}"
-        >
-          <option value="" disabled selected>--- Select Environment First ---</option>
-        </select>
-      </div>
-    </div>
+        <div class="row g-3 mt-2">
+          <div class="col-12">
+            <label class="form-label">vSphere Host</label>
+            <select
+              id="vsphere-host-select"
+              name="vsphere_host"
+              class="form-select"
+              disabled
+              data-objects-by-host-url="{{ url_for('vm.get_vsphere_objects_by_host_api', host='__HOST__') }}"
+            >
+              <option value="" disabled selected>--- Select Environment First ---</option>
+            </select>
+          </div>
+        </div>
 
-    <div class="row g-3 mt-2">
-      <div class="col-12">
-        <label class="form-label">Datacenter</label>
-        <select
-          id="datacenter-select"
-          name="vsphere_datacenter"
-          class="form-select"
-          disabled
-        >
-          <option value="" disabled selected>--- Select vSphere Host First ---</option>
-        </select>
-      </div>
-    </div>
+        <div class="row g-3 mt-2">
+          <div class="col-12">
+            <label class="form-label">Datacenter</label>
+            <select
+              id="datacenter-select"
+              name="vsphere_datacenter"
+              class="form-select"
+              disabled
+            >
+              <option value="" disabled selected>--- Select vSphere Host First ---</option>
+            </select>
+          </div>
+        </div>
 
-    <div class="row g-3 mt-2">
-      <div class="col-12">
-        <label class="form-label">Cluster</label>
-        <select
-          id="cluster-select"
-          name="vsphere_cluster"
-          class="form-select"
-          disabled
-        >
-          <option value="" disabled selected>--- Select Datacenter First ---</option>
-        </select>
-      </div>
-    </div>
+        <div class="row g-3 mt-2">
+          <div class="col-12">
+            <label class="form-label">Cluster</label>
+            <select
+              id="cluster-select"
+              name="vsphere_cluster"
+              class="form-select"
+              disabled
+            >
+              <option value="" disabled selected>--- Select Datacenter First ---</option>
+            </select>
+          </div>
+        </div>
 
-    <div class="row g-3 mt-2">
-      <div class="col-12">
-        <label class="form-label">ESXi Host</label>
-        <select
-          id="esxi-select"
-          name="vsphere_esxi_host"
-          class="form-select"
-          disabled
-        >
-          <option value="" disabled selected>--- Select Cluster First ---</option>
-        </select>
-      </div>
-    </div>
+        <div class="row g-3 mt-2">
+          <div class="col-12">
+            <label class="form-label">ESXi Host</label>
+            <select
+              id="esxi-select"
+              name="vsphere_esxi_host"
+              class="form-select"
+              disabled
+            >
+              <option value="" disabled selected>--- Select Cluster First ---</option>
+            </select>
+          </div>
+        </div>
 
-    <div class="row g-3 mt-2">
-      <div class="col-12">
-        <label class="form-label">VM</label>
-        <select
-          id="vm-prefix-select"
-          name="vm_name_prefix"
-          class="form-select"
-          disabled
-          data-vms-by-env-url="{{ url_for('vm.get_vms_by_environment_api', environment='__ENV__') }}"
-          data-config-url="{{ url_for('vm.get_vm_config_api', environment='__ENV__', vm_name_prefix='__PREFIX__') }}"
-        >
-          <option value="" disabled selected>--- Select ESXi Host First ---</option>
-        </select>
+        <div class="row g-3 mt-2">
+          <div class="col-12">
+            <label class="form-label">VM</label>
+            <select
+              id="vm-prefix-select"
+              name="vm_name_prefix"
+              class="form-select"
+              disabled
+              data-vms-by-env-url="{{ url_for('vm.get_vms_by_environment_api', environment='__ENV__') }}"
+              data-config-url="{{ url_for('vm.get_vm_config_api', environment='__ENV__', vm_name_prefix='__PREFIX__') }}"
+            >
+              <option value="" disabled selected>--- Select ESXi Host First ---</option>
+            </select>
+          </div>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<div id="configuration-form" style="display:none;">
-  <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-cpu"></i>Review and Modify VM Configuration</div>
-    <div class="card-body">
+  <div class="col-lg-7" id="configuration-form" style="display:none;">
+    <div class="card mb-4 shadow-sm">
+      <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-cpu"></i>Review and Modify VM Configuration</div>
+      <div class="card-body">
 
-      <div class="row mb-3">
-        <div class="col-6"><h6 class="text-center text-secondary">Current Configuration</h6></div>
-        <div class="col-6"><h6 class="text-center text-primary">New Configuration</h6></div>
-      </div>
-
-      <div class="config-row">
-        <div class="config-label">vCPU</div>
-        <div id="current-cpu" class="config-current">N/A</div>
-        <div class="config-new">
-          <input type="number" name="vm_num_cpus" class="form-control" min="1">
+        <div class="row mb-3">
+          <div class="col-6"><h6 class="text-center text-secondary">Current Configuration</h6></div>
+          <div class="col-6"><h6 class="text-center text-primary">New Configuration</h6></div>
         </div>
-      </div>
 
-      <div class="config-row">
-        <div class="config-label">Memory (MB)</div>
-        <div id="current-memory" class="config-current">N/A</div>
-        <div class="config-new">
-          <input type="number" name="vm_memory" class="form-control" min="512" step="256">
-        </div>
-      </div>
-
-      <hr class="my-4">
-
-      <h5 class="mb-3">Additional Disks</h5>
-      <div class="row">
-        <div class="col-md-6">
-          <div id="current-disk-container" class="disk-config-current">
-            <p class="text-muted">N/A</p>
+        <div class="config-row">
+          <div class="config-label">vCPU</div>
+          <div id="current-cpu" class="config-current">N/A</div>
+          <div class="config-new">
+            <input type="number" name="vm_num_cpus" class="form-control" min="1">
           </div>
         </div>
-        <div class="col-md-6">
-          <div id="new-disk-container"></div>
 
-          <div class="alert alert-warning d-flex align-items-center py-2 px-3 mt-3" role="alert">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2 flex-shrink-0" viewBox="0 0 16 16" role="img" aria-label="Warning:"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.708c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>
-            NOTE: Hard Disk 1 uses the disk configuration from the template.
+        <div class="config-row">
+          <div class="config-label">Memory (MB)</div>
+          <div id="current-memory" class="config-current">N/A</div>
+          <div class="config-new">
+            <input type="number" name="vm_memory" class="form-control" min="512" step="256">
           </div>
+        </div>
 
-          <button type="button" class="btn btn-sm btn-add" id="btn-add-disk" onclick="addNewDisk()">
-            <i class="bi bi-plus-circle"></i> Add New Disk
-          </button>
+        <hr class="my-3">
 
-          <div class="form-actions">
-            <button type="button" id="btn-save-draft" onclick="handleSaveDraft()" style="background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 10px;">
-              {% if workflow_id %}
-                Update to Draft
-              {% else %}
-                Save to Draft
-              {% endif %}
+        <h5 class="mb-2">Additional Disks</h5>
+        <div class="row">
+          <div class="col-md-4">
+            <div id="current-disk-container" class="disk-config-current">
+              <p class="text-muted mb-0">N/A</p>
+            </div>
+          </div>
+          <div class="col-md-8">
+            <div id="new-disk-container"></div>
+
+            <div class="alert alert-warning d-flex align-items-center py-2 px-2 mt-2" role="alert">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="me-2 flex-shrink-0" viewBox="0 0 16 16" role="img" aria-label="Warning:"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.708c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>
+              NOTE: Hard Disk 1 uses the disk configuration from the template.
+            </div>
+
+            <button type="button" class="btn btn-sm btn-add mt-2" id="btn-add-disk" onclick="addNewDisk()">
+              <i class="bi bi-plus-circle"></i> Add New Disk
             </button>
 
-            <a href="{{ url_for('vm.overview_index') }}" class="btn-cancel-link">Cancel</a>
+            <div class="form-actions">
+              <button type="button" id="btn-save-draft" onclick="handleSaveDraft()" style="background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 10px;">
+                {% if workflow_id %}
+                  Update to Draft
+                {% else %}
+                  Save to Draft
+                {% endif %}
+              </button>
+
+              <a href="{{ url_for('vm.overview_index') }}" class="btn-cancel-link">Cancel</a>
+            </div>
           </div>
         </div>
-      </div>
 
+      </div>
     </div>
   </div>
 </div>

@@ -410,6 +410,70 @@ def vsphere_update_vm_review():
         redirect_url = url_for('vm.overview_index')
         return f'<script>window.top.location="{redirect_url}"</script>'
 
+# --- Delete Draft 路由 ---
+@vm_bp.route("/vsphere/vm/delete/review", methods=["POST"])
+def vsphere_delete_vm_review():
+    """
+    Handles saving a delete request as a draft.
+    """
+    # 1) 取得表單資料
+    form_data = request.form.to_dict(flat=True)
+
+    env = form_data.get('environment')
+    prefix = form_data.get('vm_name_prefix')
+
+    try:
+        # 2) 讀取原始設定以供 review 頁面使用
+        original_config = get_vm_config(env, prefix) or {}
+
+        # 處理 datetime 對象，確保 JSON 序列化
+        def serialize_datetime(obj):
+            from datetime import datetime
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+        
+        original_config_json = json.dumps(original_config, default=serialize_datetime)
+        original_config = json.loads(original_config_json)
+
+        # 3) 組裝 payload
+        # 為了與 update 路由結構一致，我們將 form_data 視為 new_config
+        payload = {
+            'original_config': original_config,
+            'new_config': form_data,
+            'action_type': 'delete',
+            'resource': 'vm'
+        }
+
+        # 4) 建立草稿
+        created_by = _current_username()
+        workflow_id = form_data.get("workflow_id")
+        
+        logging.info(f"[vsphere_delete_vm_review] username={created_by}, wf_id(raw)={workflow_id!r}")
+
+        # 使用 save_or_update_draft 處理
+        final_wf_id, action = save_or_update_draft(
+            processed_form_data=payload,
+            created_by=created_by,
+            workflow_id=workflow_id
+        )
+        
+        logging.info(f"[vsphere_delete_vm_review] save_or_update_draft returned: wf_id={final_wf_id}, action={action}")
+
+        if action == "updated":
+            flash(f"Draft #{final_wf_id} updated successfully.", "success")
+        else:
+            flash(f"New draft #{final_wf_id} created successfully.", "success")
+
+        redirect_url = url_for('vm.overview_index')
+        return f'<script>window.top.location="{redirect_url}"</script>'
+
+    except Exception as e:
+        logging.error(f"[vsphere_delete_vm_review] Failed to save draft: {e}", exc_info=True)
+        flash(f"Failed to save draft: {e}", "danger")
+        redirect_url = url_for('vm.overview_index')
+        return f'<script>window.top.location="{redirect_url}"</script>'
+
 @vm_bp.route("/vsphere/vm/cancel")
 def vsphere_cancel_vm_form():
     """Redirects to the overview page, as session is no longer used for forms."""

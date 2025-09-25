@@ -1,0 +1,560 @@
+{% set d = draft_data or {} %}
+<input type="hidden" name="resource" value="vm">
+<input type="hidden" name="action_type" value="delete">
+{% if workflow_id %}
+  <input type="hidden" id="delete-workflow_id" name="workflow_id" value="{{ workflow_id }}">
+{% endif %}
+
+<style>
+  .kv { display: grid; grid-template-columns: 220px 1fr; gap: .5rem 1rem; }
+  .kv .k { color: #6c757d; font-weight: 600; }
+  .kv .v { word-break: break-word; }
+  .card-header .bi { margin-right: 0.5rem; }
+  .form-label { font-weight: bold; }
+  .form-actions { margin-top: 16px; display: flex; gap: 8px; }
+  .btn-draft { background-color: #dc3545; color: #fff; border: 1px solid #dc3545; padding: .375rem .75rem; border-radius: .25rem; }
+  .btn-cancel-link { background: transparent; color: #6c757d; text-decoration: none; padding: .375rem .75rem; }
+  .is-invalid { border-color: #dc3545 !important; box-shadow: 0 0 0 .2rem rgba(220,53,69,.25); }
+  .form-select:disabled { background-color: #e9ecef; cursor: wait; }
+</style>
+
+<div class="row g-4" id="delete-form-root">
+  <div class="col-lg-6">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-gear-wide-connected"></i> Select Target VM</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="delete-environment-select" class="form-label">Environment</label>
+          <select
+            id="delete-environment-select"
+            name="environment"
+            class="form-select"
+            data-required="true"
+            data-hosts-url="{{ url_for('vm.get_hosts_by_environment_api', environment='__ENV__') }}"
+            required>
+            <option value="" disabled {{ '' if d.get('environment') else 'selected' }}>--- Select Environment ---</option>
+            {% for env in environment %}
+                <option value="{{ env }}" {{ 'selected' if d.get('environment') == env else '' }}>{{ env }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label for="delete-vsphere-host-select" class="form-label">vSphere Host</label>
+          <select
+            id="delete-vsphere-host-select"
+            name="vsphere_host"
+            class="form-select"
+            data-required="true"
+            data-objects-by-host-url="{{ url_for('vm.get_vsphere_objects_by_host_api', host='__HOST__') }}"
+            disabled
+            required>
+            <option value="" disabled selected>--- Select Environment First ---</option>
+          </select>
+        </div>
+        
+        <div class="mb-3">
+          <label for="delete-datacenter-select" class="form-label">Datacenter</label>
+          <select
+            id="delete-datacenter-select"
+            name="vsphere_datacenter"
+            class="form-select"
+            data-required="true"
+            disabled
+            required>
+            <option value="" disabled selected>--- Select Host First ---</option>
+          </select>
+        </div>
+        
+        <div class="mb-3">
+          <label for="delete-cluster-select" class="form-label">Cluster</label>
+          <select
+            id="delete-cluster-select"
+            name="vsphere_cluster"
+            class="form-select"
+            data-required="true"
+            disabled
+            required>
+             <option value="" disabled selected>--- Select Datacenter First ---</option>
+          </select>
+        </div>
+        
+        <div class="mb-3">
+            <label for="delete-esxi-select" class="form-label">ESXi Host</label>
+            <select
+              id="delete-esxi-select"
+              name="vsphere_esxi_host"
+              class="form-select"
+              data-required="true"
+              disabled
+              required>
+                <option value="" disabled selected>--- Select Cluster First ---</option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+          <label for="delete-vm-prefix-select" class="form-label">Target VM Name</label>
+          <select
+            id="delete-vm-prefix-select"
+            name="vm_name_prefix"
+            class="form-select"
+            data-required="true"
+            disabled
+            data-vms-by-env-url="{{ url_for('vm.get_vms_by_environment_api', environment='__ENV__') }}"
+            data-config-url="{{ url_for('vm.get_vm_config_api', environment='__ENV__', vm_name_prefix='__PREFIX__') }}"
+            required>
+            <option value="" disabled selected>--- Select ESXi Host First ---</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6" id="delete-vm-config-details" style="display:none;">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-light text-dark fw-bold h5"><i class="bi bi-info-circle-fill"></i> Current VM Configuration</div>
+      <div class="card-body">
+        <div class="alert alert-warning">
+          <p>You are about to delete the following VM. Please review the details carefully before proceeding.</p>
+        </div>
+        
+        <!-- 環境與位置資訊 -->
+        <h6 class="fw-bold mb-3 text-secondary">
+          <i class="bi bi-building"></i> Infrastructure Location
+        </h6>
+        <div class="kv mb-4">
+          <div class="k">Environment</div><div class="v" id="delete-current-environment">N/A</div>
+          <div class="k">vSphere Host</div><div class="v" id="delete-current-vsphere-host">N/A</div>
+          <div class="k">Datacenter</div><div class="v" id="delete-current-datacenter">N/A</div>
+          <div class="k">Cluster</div><div class="v" id="delete-current-cluster">N/A</div>
+          <div class="k">ESXi Host</div><div class="v" id="delete-current-esxi-host">N/A</div>
+        </div>
+        
+        <!-- VM 配置資訊 -->
+        <h6 class="fw-bold mb-3 text-secondary">
+          <i class="bi bi-hdd-rack"></i> VM Configuration
+        </h6>
+        <div class="kv">
+          <div class="k">OS Type</div><div class="v" id="delete-current-os-type">N/A</div>
+          <div class="k">VM Name</div><div class="v" id="delete-current-vm-name">N/A</div>
+          <div class="k">vCPU</div><div class="v" id="delete-current-cpu">N/A</div>
+          <div class="k">Memory (MB)</div><div class="v" id="delete-current-memory">N/A</div>
+          <div class="k">Network</div><div class="v" id="delete-current-network">N/A</div>
+          <div class="k">IPv4 Address</div><div class="v" id="delete-current-ipv4-address">N/A</div>
+          <div class="k">IPv4 Gateway</div><div class="v" id="delete-current-ipv4-gateway">N/A</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="form-actions">
+      <button type="button" id="delete-btn-save-draft" class="btn-draft">
+        {% if workflow_id %}
+          Update to Draft
+        {% else %}
+          Save to Draft
+        {% endif %}
+      </button>
+      <a href="{{ url_for('vm.overview_index') }}" class="btn-cancel-link">Cancel</a>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // --- 變數與 DOM (加上 delete- 前綴) ---
+  const envSelect = document.getElementById('delete-environment-select');
+  const hostSelect = document.getElementById('delete-vsphere-host-select');
+  const datacenterSelect = document.getElementById('delete-datacenter-select');
+  const clusterSelect = document.getElementById('delete-cluster-select');
+  const esxiSelect = document.getElementById('delete-esxi-select');
+  const vmPrefixSelect = document.getElementById('delete-vm-prefix-select');
+  const vmConfigDetails = document.getElementById('delete-vm-config-details');
+
+  let placementObjects = null;
+  let __restoreInProgress = false;
+  let __applyDraftOnce = true;
+
+  // --- 草稿物件（Delete 專用） ---
+  const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
+  console.log('Draft data received:', __DRAFT__);
+
+  // --- Helpers ---
+  const fetchJSON = async (url) => {
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) { console.warn('[HTTP]', r.status, url); throw new Error('HTTP ' + r.status); }
+    try { return await r.json(); } catch (e) { console.warn('[JSON parse error]', url); throw e; }
+  };
+  const repl = (url, value, key = '__ENV__') => url.replace(key, encodeURIComponent(value));
+  const replHost = (url, value) => url.replace('__HOST__', encodeURIComponent(value));
+  const replPrefix = (url, value) => url.replace('__PREFIX__', encodeURIComponent(value));
+
+  // --- UI Helpers ---
+  function setSelectPlaceholder(selectEl, text) {
+    if (!selectEl) return;
+    selectEl.innerHTML = `<option value="" disabled selected>${text}</option>`;
+    selectEl.value = '';
+    selectEl.disabled = true;
+  }
+
+  function populateSelect(selectEl, options, placeholderText) {
+    if (!selectEl) return;
+    const opts = [...new Set(options)].filter(Boolean);
+    selectEl.innerHTML = `<option value="" disabled selected>${placeholderText}</option>` +
+      opts.map(v => `<option value="${v}">${v}</option>`).join('');
+    selectEl.disabled = false;
+  }
+
+  function setSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    const v = (value ?? '').toString();
+    if (!v) return;
+    let opt = Array.from(selectEl.options).find(o => o.value === v);
+    if (opt) { selectEl.value = v; return; }
+    opt = Array.from(selectEl.options).find(o => (o.text || '').trim() === v);
+    if (opt) { opt.selected = true; return; }
+    const fallback = new Option(v, v, true, true);
+    selectEl.appendChild(fallback);
+  }
+
+  // --- Draft 回填邏輯（Delete 專用） ---
+  async function restoreDraftOnLoad() {
+    console.log('Starting draft restoration for Delete form');
+
+    // Delete 的 draft 結構: { original_config: {}, new_config: {}, action_type: "delete" }
+    const newConfig = __DRAFT__?.new_config || {};
+
+    if (!newConfig || Object.keys(newConfig).length === 0) {
+      console.log('No new_config found in draft data');
+      return;
+    }
+
+    __restoreInProgress = true;
+    __applyDraftOnce = true;
+
+    console.log('Draft new_config:', newConfig);
+
+    // 依序回填選擇欄位
+    const draftEnv = (newConfig.environment || '').trim();
+    if (draftEnv) {
+      setSelectValue(envSelect, draftEnv);
+      console.log('Set environment:', draftEnv);
+
+      if (envSelect.value) {
+        await onEnvironmentChange();
+
+        // 回填 Host
+        const draftHost = (newConfig.vsphere_host || '').trim();
+        if (draftHost) {
+          setTimeout(async () => {
+            setSelectValue(hostSelect, draftHost);
+            console.log('Set host:', draftHost);
+
+            if (hostSelect.value) {
+              await onHostChange();
+
+              // 回填 Datacenter
+              const draftDC = (newConfig.vsphere_datacenter || '').trim();
+              if (draftDC) {
+                setTimeout(async () => {
+                  setSelectValue(datacenterSelect, draftDC);
+                  console.log('Set datacenter:', draftDC);
+
+                  if (datacenterSelect.value) {
+                    await onDatacenterChange();
+
+                    // 回填 Cluster
+                    const draftCluster = (newConfig.vsphere_cluster || '').trim();
+                    if (draftCluster) {
+                      setTimeout(async () => {
+                        setSelectValue(clusterSelect, draftCluster);
+                        console.log('Set cluster:', draftCluster);
+
+                        if (clusterSelect.value) {
+                          await onClusterChange();
+
+                          // 回填 ESXi
+                          const draftESXi = (newConfig.vsphere_esxi_host || '').trim();
+                          if (draftESXi) {
+                            setTimeout(async () => {
+                              setSelectValue(esxiSelect, draftESXi);
+                              console.log('Set ESXi:', draftESXi);
+
+                              if (esxiSelect.value) {
+                                await onEsxiChange();
+
+                                // 回填 VM
+                                const draftVM = (newConfig.vm_name_prefix || '').trim();
+                                if (draftVM) {
+                                  setTimeout(async () => {
+                                    setSelectValue(vmPrefixSelect, draftVM);
+                                    console.log('Set VM:', draftVM);
+
+                                    if (vmPrefixSelect.value) {
+                                      await onVmChange();
+                                    }
+                                  }, 300);
+                                }
+                              }
+                            }, 300);
+                          }
+                        }
+                      }, 300);
+                    }
+                  }
+                }, 300);
+              }
+            }
+          }, 300);
+        }
+      }
+    }
+
+    __restoreInProgress = false;
+    __applyDraftOnce = false;
+  }
+
+  // --- Main Logic ---
+  async function onEnvironmentChange() {
+    setSelectPlaceholder(hostSelect, '--- Loading Hosts... ---');
+    setSelectPlaceholder(datacenterSelect, '--- Select vSphere Host First ---');
+    setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+    setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    vmConfigDetails.style.display = 'none';
+
+    const env = envSelect.value;
+    if (!env) {
+      setSelectPlaceholder(hostSelect, '--- Select Environment First ---');
+      return;
+    }
+
+    try {
+      const url = repl(envSelect.dataset.hostsUrl, env, '__ENV__');
+      console.log('Fetching hosts from:', url);
+      const data = await fetchJSON(url);
+      console.log('Received data:', data);
+      
+      const hosts = Array.isArray(data?.hosts) ? data.hosts : [];
+      console.log('Hosts array:', hosts);
+
+      populateSelect(hostSelect, data.hosts, '--- Select vSphere Host ---');
+    } catch (e) {
+      console.error('Error in onEnvironmentChange:', e);
+      setSelectPlaceholder(hostSelect, '--- Error Loading Hosts ---');
+    }
+  }
+
+  async function onHostChange() {
+    setSelectPlaceholder(datacenterSelect, '--- Loading Datacenters... ---');
+    setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+    setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    vmConfigDetails.style.display = 'none';
+
+    const host = hostSelect.value;
+    if (!host) {
+      setSelectPlaceholder(datacenterSelect, '--- Select vSphere Host First ---');
+      return;
+    }
+
+    try {
+      const url = replHost(hostSelect.dataset.objectsByHostUrl, host);
+      placementObjects = await fetchJSON(url);
+      populateSelect(datacenterSelect, placementObjects.datacenters, '--- Select Datacenter ---');
+    } catch (e) {
+      setSelectPlaceholder(datacenterSelect, '--- Error Loading Datacenters ---');
+    }
+  }
+
+  async function onDatacenterChange() {
+    setSelectPlaceholder(clusterSelect, '--- Loading Clusters... ---');
+    setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    vmConfigDetails.style.display = 'none';
+
+    const dc = datacenterSelect.value;
+    if (!dc || !placementObjects) {
+      setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+      return;
+    }
+    populateSelect(clusterSelect, placementObjects.datacenter_clusters[dc], '--- Select Cluster ---');
+  }
+
+  async function onClusterChange() {
+    setSelectPlaceholder(esxiSelect, '--- Loading ESXi Hosts... ---');
+    setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    vmConfigDetails.style.display = 'none';
+
+    const cluster = clusterSelect.value;
+    if (!cluster || !placementObjects) {
+      setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+      return;
+    }
+    populateSelect(esxiSelect, placementObjects.cluster_esxi_hosts[cluster], '--- Select ESXi Host ---');
+  }
+
+  async function onEsxiChange() {
+    setSelectPlaceholder(vmPrefixSelect, '--- Loading VMs... ---');
+    vmConfigDetails.style.display = 'none';
+
+    const env = envSelect.value;
+    const esxi = esxiSelect.value;
+    if (!esxi || !env) {
+      setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+      return;
+    }
+
+    try {
+      const baseUrl = repl(vmPrefixSelect.dataset.vmsByEnvUrl, env, '__ENV__');
+      const params = new URLSearchParams();
+      params.append('vsphere_esxi_host', esxi);
+      const url = `${baseUrl}?${params.toString()}`;
+
+      console.log('Loading VMs from URL:', url);
+      const data = await fetchJSON(url);
+      const vms = Array.isArray(data) ? data : [];
+      console.log('Loaded VMs:', vms);
+
+      if (vms.length === 0) {
+        setSelectPlaceholder(vmPrefixSelect, '--- No VMs found on this ESXi host ---');
+      } else {
+        populateSelect(vmPrefixSelect, vms, '--- Select VM ---');
+      }
+    } catch (e) {
+      console.error('Error loading VMs:', e);
+      setSelectPlaceholder(vmPrefixSelect, '--- Error Loading VMs ---');
+    }
+  }
+
+  async function onVmChange() {
+    const env = envSelect.value;
+    const vm = vmPrefixSelect.value;
+    
+    if (!env || !vm) {
+      vmConfigDetails.style.display = 'none';
+      return;
+    }
+    
+    const configUrl = replPrefix(repl(vmPrefixSelect.dataset.configUrl, env), vm);
+    
+    vmConfigDetails.style.display = 'none';
+    
+    // Infrastructure Location - Loading
+    document.getElementById('delete-current-environment').textContent = 'Loading...';
+    document.getElementById('delete-current-vsphere-host').textContent = 'Loading...';
+    document.getElementById('delete-current-datacenter').textContent = 'Loading...';
+    document.getElementById('delete-current-cluster').textContent = 'Loading...';
+    document.getElementById('delete-current-esxi-host').textContent = 'Loading...';
+    
+    // VM Configuration - Loading
+    document.getElementById('delete-current-os-type').textContent = 'Loading...';
+    document.getElementById('delete-current-vm-name').textContent = 'Loading...';
+    document.getElementById('delete-current-cpu').textContent = 'Loading...';
+    document.getElementById('delete-current-memory').textContent = 'Loading...';
+    document.getElementById('delete-current-network').textContent = 'Loading...';
+    document.getElementById('delete-current-ipv4-address').textContent = 'Loading...';
+    document.getElementById('delete-current-ipv4-gateway').textContent = 'Loading...';
+    
+    try {
+      const config = await fetchJSON(configUrl);
+      
+      // Infrastructure Location - 從下拉選單取得當前選擇的值
+      document.getElementById('delete-current-environment').textContent = envSelect.value || 'N/A';
+      document.getElementById('delete-current-vsphere-host').textContent = hostSelect.value || 'N/A';
+      document.getElementById('delete-current-datacenter').textContent = datacenterSelect.value || 'N/A';
+      document.getElementById('delete-current-cluster').textContent = clusterSelect.value || 'N/A';
+      document.getElementById('delete-current-esxi-host').textContent = esxiSelect.value || 'N/A';
+      
+      // VM Configuration - 從 API 回傳的資料取得
+      document.getElementById('delete-current-os-type').textContent = config.os_type || 'N/A';
+      document.getElementById('delete-current-vm-name').textContent = config.vm_name_prefix || 'N/A';
+      document.getElementById('delete-current-cpu').textContent = config.vm_num_cpus || 'N/A';
+      document.getElementById('delete-current-memory').textContent = config.vm_memory || 'N/A';
+      document.getElementById('delete-current-network').textContent = config.vsphere_network || 'N/A';
+      document.getElementById('delete-current-ipv4-address').textContent = config.vm_ipv4_ip || 'N/A';
+      document.getElementById('delete-current-ipv4-gateway').textContent = config.vm_ipv4_gateway || 'N/A';
+      
+      vmConfigDetails.style.display = 'block';
+    } catch (e) {
+      alert('Failed to load VM configuration: ' + e.message);
+    }
+  }
+
+  // --- Event Listeners ---
+  envSelect.addEventListener('change', async () => {
+    __applyDraftOnce = false;
+    await onEnvironmentChange();
+  });
+  
+  hostSelect.addEventListener('change', async () => {
+    __applyDraftOnce = false;
+    await onHostChange();
+  });
+  
+  datacenterSelect.addEventListener('change', onDatacenterChange);
+  clusterSelect.addEventListener('change', onClusterChange);
+  esxiSelect.addEventListener('change', onEsxiChange);
+  vmPrefixSelect.addEventListener('change', onVmChange);
+
+  // Save / Update to Draft
+  document.getElementById('delete-btn-save-draft').addEventListener('click', async function () {
+    const root = document.getElementById('delete-form-root');
+    
+    // 驗證必填欄位
+    const requiredFields = root.querySelectorAll('[data-required="true"]');
+    let isValid = true;
+    requiredFields.forEach(field => {
+      if (!field.value) {
+        field.classList.add('is-invalid');
+        isValid = false;
+      } else {
+        field.classList.remove('is-invalid');
+      }
+    });
+
+    if (!isValid) {
+      alert('Please fill out all required fields.');
+      return;
+    }
+    
+    const fields = document.querySelectorAll('#delete-form-root [name]');
+    const fd = new FormData();
+    fields.forEach(el => {
+      const name = el.getAttribute('name');
+      if (!name) return;
+      fd.append(name, el.value);
+    });
+    
+    const wfInput = document.getElementById('delete-workflow_id');
+    if (wfInput && wfInput.value) fd.append('workflow_id', wfInput.value);
+
+    try {
+      const resp = await fetch("{{ url_for('vm.vsphere_delete_vm_review') }}", { method: "POST", body: fd });
+      if (!resp.ok) { 
+        const txt = await resp.text(); 
+        alert("Save to Draft failed: " + txt); 
+        return; 
+      }
+      window.location.href = "{{ url_for('vm.overview_index') }}";
+    } catch (err) {
+      console.error(err);
+      alert("Network error while saving draft.");
+    }
+  });
+
+  // --- Initial Load ---
+  (function init() {
+    if (!__DRAFT__ || Object.keys(__DRAFT__).length === 0) {
+      setSelectPlaceholder(hostSelect, '--- Select Environment First ---');
+      setSelectPlaceholder(datacenterSelect, '--- Select Host First ---');
+      setSelectPlaceholder(clusterSelect, '--- Select Datacenter First ---');
+      setSelectPlaceholder(esxiSelect, '--- Select Cluster First ---');
+      setSelectPlaceholder(vmPrefixSelect, '--- Select ESXi Host First ---');
+    } else {
+      restoreDraftOnLoad();
+    }
+  })();
+
+  console.log('VM Delete Form 初始化完成');
+});
+</script>

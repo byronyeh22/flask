@@ -39,7 +39,7 @@
           </p>
         </div>
       </div>
-      {% set action_type = 'Create' %}
+      {% set action_type = 'create' %}
       {% include "create/form.html" %}
     </div>
 
@@ -58,24 +58,27 @@
           </p>
         </div>
       </div>
-      {% set action_type = 'Update' %}
+      {% set action_type = 'update' %}
       {% include "update/form.html" %}
     </div>
 
     <!-- Delete -->
     <div class="tab-pane fade" id="delete-fields" role="tabpanel">
-      <div class="alert alert-danger">（請選擇要刪除的 VM 名稱）</div>
-      <div class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label">VM Name Prefix</label>
-          <select name="vm_name_prefix" class="form-select" data-required="true">
-            <option value="" disabled selected>--- Select ---</option>
-            {% for vm_name in vm_name %}
-            <option value="{{ vm_name }}">{{ vm_name }}</option>
-            {% endfor %}
-          </select>
+      <div class="card mb-3 border">
+        <div class="card-body text-dark">
+          <p>
+            Delete an existing Virtual Machine (VM).
+          </p>
+          <p>
+            Follow this order: <strong>Environment</strong> → <strong>vSphere Host</strong> → <strong>Datacenter</strong> → <strong>Cluster</strong> → <strong>ESXi Host</strong> → <strong>Target VM</strong>
+          </p>
+          <p>
+            After your submission is approved, the system automatically creates a Jira ticket and triggers the VM delete pipeline.
+          </p>
         </div>
       </div>
+      {% set action_type = 'delete' %}
+      {% include "delete/form.html" %}
     </div>
 
   </div>
