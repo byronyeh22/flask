@@ -249,6 +249,22 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 
+  // 磁盤大小輸入驗證
+  document.addEventListener('change', function(e) {
+    if (e.target.matches('input[name="update_vm_disk_size[]"]')) {
+      const size = parseInt(e.target.value, 10);
+      const min = parseInt(e.target.getAttribute('min') || '1', 10);
+
+      if (isNaN(size) || size < min) {
+        e.target.classList.add('is-invalid');
+        alert(`Disk size cannot be reduced below ${min} GB. You can only increase disk size.`);
+        e.target.value = min; // 自動修正為最小值
+      } else {
+        e.target.classList.remove('is-invalid');
+      }
+    }
+  });
+
   // --- 草稿物件（Update 專用） ---
   const __DRAFT__ = {{ (draft_data or {}) | tojson | safe }};
   console.log('Draft data received:', __DRAFT__);
@@ -674,11 +690,11 @@ document.addEventListener('DOMContentLoaded', function() {
   // --- Draft 回填邏輯（Update 專用） ---
   async function restoreDraftOnLoad() {
     console.log('Starting draft restoration for Update form');
-    
+
     // 從 draft_data 中提取資料
     // Update 的 draft 結構: { original_config: {}, new_config: {}, action_type: "update" }
     const newConfig = __DRAFT__?.new_config || {};
-    
+
     if (!newConfig || Object.keys(newConfig).length === 0) {
       console.log('No new_config found in draft data');
       return;
@@ -694,60 +710,60 @@ document.addEventListener('DOMContentLoaded', function() {
     if (draftEnv) {
       setSelectValue(envSelect, draftEnv);
       console.log('Set environment:', draftEnv);
-      
+
       if (envSelect.value) {
         await onEnvironmentChange();
-        
+
         // 回填 Host
         const draftHost = (newConfig.vsphere_host || '').trim();
         if (draftHost) {
           setTimeout(async () => {
             setSelectValue(hostSelect, draftHost);
             console.log('Set host:', draftHost);
-            
+
             if (hostSelect.value) {
               await onHostChange();
-              
+
               // 回填 Datacenter
               const draftDC = (newConfig.vsphere_datacenter || '').trim();
               if (draftDC) {
                 setTimeout(async () => {
                   setSelectValue(datacenterSelect, draftDC);
                   console.log('Set datacenter:', draftDC);
-                  
+
                   if (datacenterSelect.value) {
                     await onDatacenterChange();
-                    
+
                     // 回填 Cluster
                     const draftCluster = (newConfig.vsphere_cluster || '').trim();
                     if (draftCluster) {
                       setTimeout(async () => {
                         setSelectValue(clusterSelect, draftCluster);
                         console.log('Set cluster:', draftCluster);
-                        
+
                         if (clusterSelect.value) {
                           await onClusterChange();
-                          
+
                           // 回填 ESXi
                           const draftESXi = (newConfig.vsphere_esxi_host || '').trim();
                           if (draftESXi) {
                             setTimeout(async () => {
                               setSelectValue(esxiSelect, draftESXi);
                               console.log('Set ESXi:', draftESXi);
-                              
+
                               if (esxiSelect.value) {
                                 await onEsxiChange();
-                                
+
                                 // 回填 VM
                                 const draftVM = (newConfig.vm_name_prefix || '').trim();
                                 if (draftVM) {
                                   setTimeout(async () => {
                                     setSelectValue(vmPrefixSelect, draftVM);
                                     console.log('Set VM:', draftVM);
-                                    
+
                                     if (vmPrefixSelect.value) {
                                       await onVmChange();
-                                      
+
                                       // VM 載入完成後，回填表單值
                                       setTimeout(() => {
                                         restoreDraftFormValues(newConfig);
@@ -776,17 +792,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function restoreDraftFormValues(newConfig) {
     console.log('Restoring draft form values:', newConfig);
-    
+
     // 回填 CPU 和 Memory
     const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
     const memoryInput = configForm.querySelector('input[name="vm_memory"]');
-    
+
     if (cpuInput && newConfig.vm_num_cpus) {
       cpuInput.value = newConfig.vm_num_cpus;
       cpuInput.setAttribute('data-user-modified', 'true');
       console.log('Restored CPU:', newConfig.vm_num_cpus);
     }
-    
+
     if (memoryInput && newConfig.vm_memory) {
       memoryInput.value = newConfig.vm_memory;
       memoryInput.setAttribute('data-user-modified', 'true');
@@ -804,7 +820,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let diskIds = newConfig['update_disk_db_id[]'] || newConfig['update_disk_db_id'] || [];
     let diskSizes = newConfig['update_vm_disk_size[]'] || newConfig['update_vm_disk_size'] || [];
     let diskProvs = newConfig['update_vm_disk_provisioning[]'] || newConfig['update_vm_disk_provisioning'] || [];
-    
+
     if (!Array.isArray(diskIds) && diskIds) {
       diskIds = [diskIds];
     }
@@ -852,7 +868,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
           }
         }
-        
+
         console.log('Restored disk configuration from draft');
       }, 200);
     }
@@ -1035,28 +1051,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   btnAdd.addEventListener('click', addNewDisk);
 
-  // 硬碟相關事件
-  // newDiskContainer.addEventListener('change', function(e) {
-  //   if (e.target.classList.contains('disk-provisioning')) {
-  //     updateProvisioningValues(e.target);
-  //   }
-  // });
-
-  // newDiskContainer.addEventListener('input', function(e) {
-  //   if (e.target && e.target.name === 'update_vm_disk_size[]') {
-  //     const min = parseInt(e.target.getAttribute('min') || '1', 10);
-  //     const val = parseInt(e.target.value || '0', 10);
-  //     if (!Number.isNaN(min) && !Number.isNaN(val) && val < min) {
-  //       e.target.value = String(min);
-  //     }
-  //   }
-  // });
-
-  // newDiskContainer.addEventListener('click', function(e) {
-  //   const btn = e.target.closest('.remove-disk-btn');
-  //   if (btn) removeDisk(btn);
-  // });
-
   // --- Initial Load ---
   (function init() {
     // 如果有 Draft 資料就回填，否則正常初始化
@@ -1078,12 +1072,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 檢查每一個選擇階段是否完成
     const selectionSteps = [
-      { el: envSelect, name: '環境' },
-      { el: hostSelect, name: 'vSphere 主機' },
-      { el: datacenterSelect, name: '數據中心' },
-      { el: clusterSelect, name: '叢集' },
-      { el: esxiSelect, name: 'ESXi 主機' },
-      { el: vmPrefixSelect, name: '虛擬機器' }
+      { el: envSelect, name: 'Environment' },
+      { el: hostSelect, name: 'vSphere Host' },
+      { el: datacenterSelect, name: 'Datacenter' },
+      { el: clusterSelect, name: 'Cluster' },
+      { el: esxiSelect, name: 'ESXi Host' },
+      { el: vmPrefixSelect, name: 'Virtual Machine' }
     ];
 
     for (const step of selectionSteps) {
@@ -1091,30 +1085,30 @@ document.addEventListener('DOMContentLoaded', function() {
         step.el.classList.add('is-invalid');
         if (!firstInvalidEl) firstInvalidEl = step.el;
         ok = false;
-        console.error(`未選擇 ${step.name}`);
+        console.error(`Not selected ${step.name}`);
       }
     }
 
     // 如果選擇階段有錯誤，則立即報告，不繼續檢查
     if (!ok) {
       if (firstInvalidEl) firstInvalidEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      alert('請先完成虛擬機器的選擇階段');
+      alert('Please complete the virtual machine selection stage first');
       return false;
     }
 
     // 確認配置表單是否顯示
     if (configForm.style.display === 'none') {
-      alert('請先選擇一個虛擬機器');
+      alert('Please select a virtual machine first');
       return false;
     }
 
     // 檢查 CPU 和記憶體
     const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
     const memoryInput = configForm.querySelector('input[name="vm_memory"]');
-    
+
     if (!cpuInput || !memoryInput) {
-      console.error('無法找到 CPU 或記憶體輸入欄位');
-      alert('表單結構錯誤：無法找到 CPU 或記憶體輸入欄位');
+      console.error('Cannot find CPU or Memory input fields');
+      alert('Form structure error: Cannot find CPU or Memory input fields');
       return false;
     }
 
@@ -1125,14 +1119,14 @@ document.addEventListener('DOMContentLoaded', function() {
       cpuInput.classList.add('is-invalid');
       if (!firstInvalidEl) firstInvalidEl = cpuInput;
       ok = false;
-      console.error('CPU 值無效');
+      console.error('CPU value invalid');
     }
 
     if (isNaN(memVal) || memVal < 512) {
       memoryInput.classList.add('is-invalid');
       if (!firstInvalidEl) firstInvalidEl = memoryInput;
       ok = false;
-      console.error('記憶體值無效');
+      console.error('Memory value invalid');
     }
 
     // 檢查磁碟大小是否有效
@@ -1144,14 +1138,15 @@ document.addEventListener('DOMContentLoaded', function() {
         el.classList.add('is-invalid');
         if (!firstInvalidEl) firstInvalidEl = el;
         ok = false;
-        console.error(`磁碟 ${idx+1} 大小無效`);
+        console.error(`Disk ${idx+1} size invalid`);
+        alert(`Disk ${idx+1} size cannot be reduced below ${min} GB. You can only increase disk size.`);
       }
     });
 
     // 如果有錯誤，捲動到第一個錯誤欄位
     if (!ok) {
       if (firstInvalidEl) firstInvalidEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      alert('請修正表單中標記為紅色的錯誤欄位');
+      alert('Please correct the fields marked in red in the form');
     }
 
     return ok;
