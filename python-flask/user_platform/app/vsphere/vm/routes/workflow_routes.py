@@ -138,10 +138,11 @@ def workflow_draft_edit(workflow_id: int):
 
         elif action_type == "delete":
             return render_template(
-                "delete/index.html",
+                "vm_index.html",
                 environment=environments,
                 draft_data=draft_data,
                 workflow_id=workflow_id,
+                active_tab="delete",
             )
 
         else:
@@ -171,7 +172,7 @@ def workflow_draft_delete(workflow_id: int):
 @vm_bp.route('/workflow/review/<int:workflow_id>', methods=['GET'])
 def workflow_review_page(workflow_id):
     """
-    以現有 create/review.html 呈現草稿或待審資料（供 Modal iframe 使用）
+    以 review.html 呈現草稿或待審資料（供 Modal iframe 使用）
     """
     try:
         wf = get_workflow_by_id(workflow_id)
@@ -203,9 +204,12 @@ def workflow_review_page(workflow_id):
         except Exception:
             payload = {}
 
-        is_update_action = 'new_config' in payload
+        # 根據 action_type 判斷是否為刪除操作
+        action_type = payload.get('action_type', '').lower()
 
-        if is_update_action:
+        if action_type == 'delete' or 'delete_config' in payload:
+            return render_template("delete/review.html", data=payload, workflow=wf)
+        elif action_type == 'update' or 'new_config' in payload:
             return render_template("update/review.html", data=payload, workflow=wf)
         else:
             return render_template("create/review.html", data=payload, workflow=wf)
@@ -240,43 +244,59 @@ def vsphere_submit_request():
             return f'<script>window.top.location="{redirect_url}"</script>'
 
         payload = json.loads(wf.get("request_payload") or "{}")
-        
-        # 判斷是否為 UPDATE 操作，將結構標準化
+
+        # 判斷操作類型，將結構標準化
         is_update = 'new_config' in payload
-        
-        # 統一參數格式 - 將 UPDATE 的 new_config 與 CREATE 的格式保持一致
+        is_delete = 'delete_config' in payload
+
+        # 統一參數格式
         if is_update:
-            # 從 new_config 中提取資料
+            # UPDATE: 從 new_config 中提取資料
             form_data = payload.get("new_config", {})
-            
-            # 如果是 UPDATE，還需要從 original_config 補充一些可能不在 new_config 中的欄位
+
+            # 從 original_config 補充一些可能不在 new_config 中的欄位
             original_config = payload.get("original_config", {})
-            
+
             # 為了確保所有 GitLab Pipeline 需要的欄位都存在，從 original_config 補充缺失的欄位
             for key in ['os_type', 'vm_os_type', 'vm_instance_type', 'vsphere_template', 
                        'vsphere_network', 'vsphere_datastore', 'netbox_prefix', 'netbox_tenant', 
                        'vm_ipv4_gateway']:
                 if (key not in form_data or not form_data.get(key)) and key in original_config:
                     form_data[key] = original_config.get(key)
-            
+
             # 處理磁碟陣列 - 將 update_vm_disk_* 轉換為與 create_vm_disk_* 相同的格式
             if any(k.startswith('update_vm_disk_size') for k in form_data):
                 # 確保 UPDATE 的磁碟資訊也能傳遞到 GitLab pipeline
                 size_key = next((k for k in form_data if k.startswith('update_vm_disk_size')), None)
                 prov_key = next((k for k in form_data if k.startswith('update_vm_disk_provisioning')), None)
-                
+
                 if size_key:
                     form_data['create_vm_disk_size[]'] = form_data.get(size_key)
                 if prov_key:
                     form_data['create_vm_disk_provisioning[]'] = form_data.get(prov_key)
+
+        elif is_delete:
+            # DELETE: 從 delete_config 中提取資料
+            form_data = payload.get("delete_config", {})
+
+            # 從 original_config 補充可能需要的欄位
+            original_config = payload.get("original_config", {})
+
+            # 為了確保所有 GitLab Pipeline 需要的欄位都存在，從 original_config 補充缺失的欄位
+            for key in ['os_type', 'vm_os_type', 'vm_instance_type', 'vsphere_template', 
+                       'vsphere_network', 'vsphere_datastore', 'netbox_prefix', 'netbox_tenant', 
+                       'vm_ipv4_gateway']:
+                if (key not in form_data or not form_data.get(key)) and key in original_config:
+                    form_data[key] = original_config.get(key)
+
         else:
             # CREATE 操作直接使用 payload
             form_data = payload
-        
+
         # 確保 action_type 和 resource 存在
         form_data['action_type'] = form_data.get('action_type', payload.get('action_type', 'create'))
         form_data['resource'] = form_data.get('resource', payload.get('resource', 'vm'))
-        
+
         # 3) GitLab Pipeline：每次 submit 一律觸發新的
         logging.info(f"Triggering new pipeline for workflow #{workflow_id}...")
         pipeline_data = trigger_gitlab_pipeline(form_data)
@@ -359,14 +379,14 @@ def vsphere_update_vm_review():
     try:
         # 2) 讀原始設定
         original_config = get_vm_config(env, prefix) or {}
-        
+
         # 在序列化之前處理 datetime 對象
         def serialize_datetime(obj):
             from datetime import datetime
             if isinstance(obj, datetime):
                 return obj.isoformat()
             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-        
+
         # 先將原始配置轉換為 JSON 字符串，然後再解析回 Python 對象
         # 這樣可以確保所有嵌套的 datetime 對象都被轉換為字符串
         original_config_json = json.dumps(original_config, default=serialize_datetime)
@@ -383,7 +403,7 @@ def vsphere_update_vm_review():
         # 4) 建立草稿
         created_by = _current_username()
         workflow_id = processed_new_config.get("workflow_id")
-        
+
         logging.info(f"[vsphere_update_vm_review] username={created_by}, wf_id(raw)={workflow_id!r}")
 
         # 使用 save_or_update_draft 來處理
@@ -392,7 +412,7 @@ def vsphere_update_vm_review():
             created_by=created_by,
             workflow_id=workflow_id
         )
-        
+
         logging.info(f"[vsphere_update_vm_review] save_or_update_draft returned: wf_id={final_wf_id}, action={action}")
 
         if action == "updated":
@@ -432,15 +452,14 @@ def vsphere_delete_vm_review():
             if isinstance(obj, datetime):
                 return obj.isoformat()
             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-        
+
         original_config_json = json.dumps(original_config, default=serialize_datetime)
         original_config = json.loads(original_config_json)
 
         # 3) 組裝 payload
-        # 為了與 update 路由結構一致，我們將 form_data 視為 new_config
         payload = {
             'original_config': original_config,
-            'new_config': form_data,
+            'delete_config': form_data,
             'action_type': 'delete',
             'resource': 'vm'
         }
@@ -448,7 +467,7 @@ def vsphere_delete_vm_review():
         # 4) 建立草稿
         created_by = _current_username()
         workflow_id = form_data.get("workflow_id")
-        
+
         logging.info(f"[vsphere_delete_vm_review] username={created_by}, wf_id(raw)={workflow_id!r}")
 
         # 使用 save_or_update_draft 處理
@@ -457,7 +476,7 @@ def vsphere_delete_vm_review():
             created_by=created_by,
             workflow_id=workflow_id
         )
-        
+
         logging.info(f"[vsphere_delete_vm_review] save_or_update_draft returned: wf_id={final_wf_id}, action={action}")
 
         if action == "updated":

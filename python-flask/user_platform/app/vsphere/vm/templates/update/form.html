@@ -679,20 +679,15 @@ document.addEventListener('DOMContentLoaded', function() {
     currentMemory.textContent = current_config.vm_memory || 'N/A';
     populateCurrentDiskConfig(current_config);
 
-    // 只在第一次載入時設定值，避免覆蓋用戶修改
     const cpuInput = configForm.querySelector('input[name="vm_num_cpus"]');
     const memoryInput = configForm.querySelector('input[name="vm_memory"]');
 
-    // 檢查是否為全新載入（輸入欄位不存在值或為空）
-    const isFirstLoad = !cpuInput.hasAttribute('data-user-modified');
-
-    if (cpuInput && isFirstLoad) {
+    // 無條件更新表單值
+    if (cpuInput) {
       cpuInput.value = current_config.vm_num_cpus || '';
-      cpuInput.setAttribute('data-user-modified', 'false');
     }
-    if (memoryInput && isFirstLoad) {
+    if (memoryInput) {
       memoryInput.value = current_config.vm_memory || '';
-      memoryInput.setAttribute('data-user-modified', 'false');
     }
 
     populateNewDiskConfig(current_config);
@@ -1016,8 +1011,8 @@ document.addEventListener('DOMContentLoaded', function() {
       const memoryInputEl = configForm.querySelector('input[name="vm_memory"]');
 
       if (cpuInputEl) {
-        const currentCpuValue = cpuInputEl.value;
-        cpuInputEl.value = currentCpuValue;
+        cpuInputEl.value = initialVMConfig.vm_num_cpus || '';
+        cpuInputEl.setAttribute('data-user-modified', 'false'); // 確保每次切換都重置
         cpuInputEl.addEventListener('input', function() {
           this.classList.remove('is-invalid');
           this.setAttribute('data-user-modified', 'true');
@@ -1028,8 +1023,8 @@ document.addEventListener('DOMContentLoaded', function() {
       }
 
       if (memoryInputEl) {
-        const currentMemoryValue = memoryInputEl.value;
-        memoryInputEl.value = currentMemoryValue;
+        memoryInputEl.value = initialVMConfig.vm_memory || '';
+        memoryInputEl.setAttribute('data-user-modified', 'false'); // 確保每次切換都重置
         memoryInputEl.addEventListener('input', function() {
           this.classList.remove('is-invalid');
           this.setAttribute('data-user-modified', 'true');

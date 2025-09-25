@@ -75,13 +75,16 @@
     </div>
   </div>
 
-  {% set new_cfg = data.get('new_config', {}) %}
+  {% set delete_cfg = data.get('delete_config', {}) %}
   {% set orig_cfg = data.get('original_config', {}) %}
 
-  <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
-    <i class="bi bi-exclamation-triangle-fill"></i>
-    <div>
-      <strong>Warning:</strong> You are about to delete the following VM. This action cannot be undone. Please review all details carefully before proceeding.
+  <div class="alert alert-warning" role="alert">
+    <div style="display: flex; align-items: flex-start;">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <div>
+        You are about to delete the following VM. This action cannot be undone.<br>
+        Please review all details carefully before proceeding.
+      </div>
     </div>
   </div>
 
@@ -92,19 +95,19 @@
     <div class="card-body">
       <div class="kv">
         <div class="k">Environment</div>
-        <div class="v">{{ new_cfg.get('environment', '-') }}</div>
+        <div class="v">{{ delete_cfg.get('environment', '-') }}</div>
 
         <div class="k">vSphere Host</div>
-        <div class="v">{{ new_cfg.get('vsphere_host', '-') }}</div>
+        <div class="v">{{ delete_cfg.get('vsphere_host', '-') }}</div>
 
         <div class="k">Datacenter</div>
-        <div class="v">{{ new_cfg.get('vsphere_datacenter', '-') }}</div>
+        <div class="v">{{ delete_cfg.get('vsphere_datacenter', '-') }}</div>
 
         <div class="k">Cluster</div>
-        <div class="v">{{ new_cfg.get('vsphere_cluster', '-') }}</div>
+        <div class="v">{{ delete_cfg.get('vsphere_cluster', '-') }}</div>
 
         <div class="k">ESXi Host</div>
-        <div class="v">{{ new_cfg.get('vsphere_esxi_host', '-') }}</div>
+        <div class="v">{{ delete_cfg.get('vsphere_esxi_host', '-') }}</div>
       </div>
     </div>
   </div>

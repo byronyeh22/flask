@@ -220,18 +220,18 @@ document.addEventListener('DOMContentLoaded', function() {
   async function restoreDraftOnLoad() {
     console.log('Starting draft restoration for Delete form');
 
-    // Delete 的 draft 結構: { original_config: {}, new_config: {}, action_type: "delete" }
-    const newConfig = __DRAFT__?.new_config || {};
+    // Delete 的 draft 結構: { original_config: {}, delete_config: {}, action_type: "delete" }
+    const newConfig = __DRAFT__?.delete_config || {};
 
     if (!newConfig || Object.keys(newConfig).length === 0) {
-      console.log('No new_config found in draft data');
+      console.log('No delete_config found in draft data');
       return;
     }
 
     __restoreInProgress = true;
     __applyDraftOnce = true;
 
-    console.log('Draft new_config:', newConfig);
+    console.log('Draft delete_config:', newConfig);
 
     // 依序回填選擇欄位
     const draftEnv = (newConfig.environment || '').trim();

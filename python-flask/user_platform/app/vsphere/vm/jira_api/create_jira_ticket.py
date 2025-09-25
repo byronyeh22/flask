@@ -47,53 +47,68 @@ def _generate_update_summary(data):
 
     return f"[VM Provisioning] {env} - {action} {prefix} - {os_type} ({instance})"
 
+def _generate_delete_summary(data):
+    """為 Delete 操作產生 Jira 標題"""
+    # Delete 的 payload 結構：{ original_config: {}, delete_config: {}, action_type: "delete" }
+
+    original_config = data.get('original_config', {})
+
+    # 優先從 delete_config 取，若無則從 original_config 取
+    env = original_config.get('environment', 'N/A')
+    action = data.get('action_type', 'delete')
+    prefix = original_config.get('vm_name_prefix', 'N/A')
+    os_type = original_config.get('os_type', 'N/A')
+    instance = original_config.get('vm_instance_type', 'N/A')
+
+    return f"[VM Provisioning] {env} - {action} {prefix} - {os_type} ({instance})"
+
 def _generate_update_description(data):
     """為 Update 操作產生詳細的 Jira 描述 (使用 Jira Wiki Markup)"""
     original = data.get('original_config', {})
     new = data.get('new_config', {})
-    
+
     vm_name = new.get('vm_name_prefix') or original.get('vm_name_prefix') or 'Unknown VM'
-    
+
     desc_parts = [
         f"Request to update VM: *{vm_name}*",
         "---",
         "{panel:title=Configuration Changes|borderStyle=dashed|borderColor=#ccc|titleBGColor=#F7F7F7}"
     ]
-    
+
     changes_found = False
-    
+
     # 比較 CPU
     orig_cpu = str(original.get('vm_num_cpus', '')).strip()
     new_cpu = str(new.get('vm_num_cpus', '')).strip()
     if orig_cpu != new_cpu and new_cpu and orig_cpu:
         desc_parts.append(f"• *vCPU:* {orig_cpu} -> *{new_cpu}*")
         changes_found = True
-    
+
     # 比較 Memory
     orig_mem = str(original.get('vm_memory', '')).strip()
     new_mem = str(new.get('vm_memory', '')).strip()
     if orig_mem != new_mem and new_mem and orig_mem:
         desc_parts.append(f"• *Memory (MB):* {orig_mem} -> *{new_mem}*")
         changes_found = True
-    
+
     # 比較磁碟 - 正確處理磁碟變更
     disk_changes = _compare_disk_changes(original, new)
     if disk_changes:
         desc_parts.extend(disk_changes)
         changes_found = True
-    
+
     # 如果沒有發現任何變更，添加一個說明
     if not changes_found:
         desc_parts.append("• *No configuration changes detected*")
-    
+
     desc_parts.append("{panel}")
-    
+
     return "\n".join(desc_parts)
 
 def _compare_disk_changes(original_config, new_config):
     """比較磁碟變更並產生變更描述"""
     changes = []
-    
+
     # 從 original_config 提取現有磁碟
     original_disks = {}
     if 'additional_disks' in original_config:
@@ -106,54 +121,54 @@ def _compare_disk_changes(original_config, new_config):
                     'provisioning': disk.get('disk_provisioning'),
                     'ui_number': disk.get('ui_disk_number')
                 }
-    
+
     # 從 new_config 提取更新後的磁碟
     updated_disks = {}
     disk_ids = new_config.get('update_disk_db_id[]', [])
     disk_labels = new_config.get('update_disk_label[]', [])
     disk_sizes = new_config.get('update_vm_disk_size[]', [])
     disk_provisionings = new_config.get('update_vm_disk_provisioning[]', [])
-    
+
     for i, disk_id in enumerate(disk_ids):
         # 處理空字串的 disk_id (新增的磁碟)
         # 將其轉換為唯一識別符
         if not disk_id:
             disk_id = f"new_{i}"
-            
+
         updated_disks[str(disk_id)] = {
             'size': int(disk_sizes[i]) if i < len(disk_sizes) and disk_sizes[i] else None,
             'label': disk_labels[i] if i < len(disk_labels) else None,
             'provisioning': disk_provisionings[i] if i < len(disk_provisionings) else None
         }
-    
+
     # 找出被移除的磁碟
     removed_disks = set(original_disks.keys()) - set(updated_disks.keys())
     for disk_id in removed_disks:
         disk_info = original_disks[disk_id]
         changes.append(f"• *Removed Disk {disk_info['label']}:* {disk_info['size']} GB ({disk_info['provisioning']})")
-    
+
     # 找出新增的磁碟（如果有的話）
     added_disks = [key for key in updated_disks.keys() if key.startswith('new_') or key not in original_disks]
     for disk_id in added_disks:
         disk_info = updated_disks[disk_id]
         if disk_info['label'] and disk_info['size'] and disk_info['provisioning']:
             changes.append(f"• *Added Disk:* {disk_info['label']} - {disk_info['size']} GB ({disk_info['provisioning']})")
-    
+
     # 找出修改的磁碟
     common_disks = [key for key in original_disks.keys() if key in updated_disks and not key.startswith('new_')]
     for disk_id in common_disks:
         orig = original_disks[disk_id]
         new = updated_disks[disk_id]
-        
+
         disk_changes = []
         if orig['size'] != new['size']:
             disk_changes.append(f"size: {orig['size']} -> {new['size']} GB")
         if orig['provisioning'] != new['provisioning']:
             disk_changes.append(f"provisioning: {orig['provisioning']} -> {new['provisioning']}")
-        
+
         if disk_changes:
             changes.append(f"• *Modified Disk {orig['label']}:* {', '.join(disk_changes)}")
-    
+
     return changes
 
 
@@ -282,15 +297,15 @@ def create_jira_ticket(ticket_data: dict, db_conn=None, workflow_id=None, check_
         description = _generate_update_description(ticket_data)
         print("Using UPDATE template for Jira ticket")
     elif action_type == "delete":
-        summary = f"[VM Provisioning] {ticket_data.get('environment','N/A')} - Delete {ticket_data.get('vm_name_prefix','N/A')}"
-        description = "Delete request (details TODO)."
+        summary = _generate_delete_summary(ticket_data)
+        description = _generate_delete_description(ticket_data)
         print("Using DELETE template for Jira ticket")
     else:
         # 預設走 create
         summary = _generate_create_summary(ticket_data)
         description = _generate_create_description(ticket_data)
         print("Using CREATE template for Jira ticket")
-    
+
     # 建立 payload 並發送請求
     payload = {
         "fields": {
@@ -300,7 +315,7 @@ def create_jira_ticket(ticket_data: dict, db_conn=None, workflow_id=None, check_
             "description": description,
         }
     }
-    
+
     # 發送請求
     try:
         resp = requests.post(
