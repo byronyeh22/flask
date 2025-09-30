@@ -444,6 +444,66 @@ def _apply_update_action(db_conn, form_data):
         if cursor:
             cursor.close()
 
+def _apply_delete_action(db_conn, form_data):
+    """
+    私有函式：處理 Delete 請求的資料庫寫入。
+    將目標 VM 的 lifecycle_status 標記為 'DELETING'。
+    """
+    cursor = None
+    try:
+        # 以 original_config（若存在）為準，否則回退頂層（相容舊 payload）
+        if isinstance(form_data, dict) and isinstance(form_data.get("original_config"), dict):
+            data = form_data["original_config"]
+        else:
+            data = form_data
+
+        environment_value    = _Helpers._first_scalar(data.get("environment"))
+        vm_name_prefix_value = _Helpers._first_scalar(data.get("vm_name_prefix"))
+
+        if not environment_value or not vm_name_prefix_value:
+            raise ValueError("Cannot apply delete: missing environment/vm_name_prefix in payload.")
+
+        cursor = db_conn.cursor(dictionary=True)
+
+        # 1) 先查 vm_configurations 是否存在
+        cursor.execute(
+            "SELECT id FROM vm_configurations WHERE environment = %s AND vm_name_prefix = %s",
+            (environment_value, vm_name_prefix_value)
+        )
+        vm_config = cursor.fetchone()
+        if not vm_config:
+            raise ValueError(f"Cannot apply delete: VM '{vm_name_prefix_value}' in '{environment_value}' not found.")
+        vm_config_id = vm_config["id"]
+
+        # 2) 更新 lifecycle_status 為 DELETING
+        cursor.execute(
+            """
+            UPDATE vm_configurations
+            SET lifecycle_status = 'DELETING',
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (vm_config_id,)
+        )
+        logger.info("   -> Applied DELETE action for vm_config_id: %s, marked as DELETING", vm_config_id)
+
+        db_conn.commit()
+
+    except Error as db_error:
+        logger.error("❌ DB error in _apply_delete_action: %s", db_error)
+        if db_conn and db_conn.is_connected():
+            db_conn.rollback()
+        raise
+    except Exception as error:
+        logger.error("❌ Unexpected error in _apply_delete_action: %s", error)
+        if db_conn and db_conn.is_connected():
+            db_conn.rollback()
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+
+
 
 # =======================================
 # 供 route 呼叫：保留並相容你的流程
@@ -478,6 +538,8 @@ def apply_request_to_db(workflow_id):
             _apply_create_action(db_conn, form_data)
         elif action_type == "update":
             _apply_update_action(db_conn, form_data)
+        elif action_type == "delete":
+            _apply_delete_action(db_conn, form_data)
         else:
             raise ValueError(f"Unsupported action_type: {action_type}")
 

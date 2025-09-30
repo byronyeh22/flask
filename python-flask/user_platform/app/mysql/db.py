@@ -110,6 +110,12 @@ def init_db():
             environment VARCHAR(100) NOT NULL,
             resource VARCHAR(50) NOT NULL,
             os_type VARCHAR(50) NOT NULL,
+            -- 業務狀態
+            lifecycle_status ENUM('ACTIVE','DELETING','DELETE_FAILED')
+                DEFAULT 'ACTIVE',
+            -- vSphere 電源狀態
+            power_state ENUM('UNKNOWN','POWERED_ON','POWERED_OFF','SUSPENDED')
+                DEFAULT 'UNKNOWN',
             vsphere_host VARCHAR(100),
             vsphere_datacenter VARCHAR(100),
             vsphere_cluster VARCHAR(100),

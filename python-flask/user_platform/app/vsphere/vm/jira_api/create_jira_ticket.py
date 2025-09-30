@@ -281,6 +281,91 @@ def _generate_create_description(data: dict) -> str:
     return "\n".join(parts)
 
 
+def _generate_delete_description(data: dict) -> str:
+    """
+    將 Delete VM 表單轉成多段 Panel + Table 的 Jira Wiki Markup。
+    處理 Delete 操作的相關欄位資訊。
+    """
+    # 從 original_config 中取得 VM 資訊
+    original = data.get('original_config', {})
+
+    # === Summary 區塊 ===
+    summary_tbl = _render_table(
+        ["Field", "Value"],
+        [
+            ("Action",         data.get('action_type', 'Delete')),
+            ("Resource",       original.get('resource', 'vm')),
+            ("Environment",    original.get('environment', '-')),
+            ("vSphere Host",   original.get('vsphere_host', '-')),
+            ("VM Name Prefix", original.get('vm_name_prefix', '-')),
+        ]
+    )
+
+    # === VM Information 區塊 ===
+    vm_info_tbl = _render_table(
+        ["Field", "Value"],
+        [
+            ("OS Type",         original.get('os_type', '-')),
+            ("Instance Type",   original.get('vm_instance_type', '-')),
+            ("vCPU",            original.get('vm_num_cpus', '-')),
+            ("Memory (MB)",     original.get('vm_memory', '-')),
+        ]
+    )
+
+    # === vSphere 區塊 ===
+    vsphere_tbl = _render_table(
+        ["Field", "Value"],
+        [
+            ("Datacenter",  original.get('vsphere_datacenter', '-')),
+            ("Cluster",     original.get('vsphere_cluster', '-')),
+            ("ESXi Host",   original.get('vsphere_esxi_host', '-')),
+            ("Template",    original.get('vsphere_template', '-')),
+            ("Datastore",   original.get('vsphere_datastore', '-')),
+            ("Network",     original.get('vsphere_network', '-')),
+        ]
+    )
+
+    # === Disks Information 區塊 ===
+    disk_rows = []
+    if 'additional_disks' in original:
+        for i, disk in enumerate(original['additional_disks']):
+            disk_rows.append([
+                i + 1,
+                disk.get('label', '-'),
+                disk.get('size', '-'),
+                disk.get('disk_provisioning', '-')
+            ])
+    disks_tbl = _render_table(
+        ["Num", "Label", "Size (GB)", "Provisioning"], 
+        disk_rows
+    ) if disk_rows else "_No additional disks_"
+
+    # === 組成描述(用 Panel 包住每個區塊,比較清楚) ===
+    parts = []
+    parts.append("*Request to delete the following VM:*")
+    parts.append("")
+
+    parts.append("{panel:title=Summary|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(summary_tbl)
+    parts.append("{panel}")
+
+    parts.append("{panel:title=VM Information|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(vm_info_tbl)
+    parts.append("{panel}")
+
+    parts.append("{panel:title=vSphere Configuration|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(vsphere_tbl)
+    parts.append("{panel}")
+
+    parts.append("{panel:title=Disks to be Removed|borderStyle=solid|borderColor=#dfe1e6|titleBGColor=#F4F5F7}")
+    parts.append(disks_tbl)
+    parts.append("{panel}")
+
+    parts.append("")
+    parts.append("⚠️ *Warning:* This operation will permanently delete the VM and all associated data.")
+
+    return "\n".join(parts)
+
 # --- 主要函式 ---
 def create_jira_ticket(ticket_data: dict, db_conn=None, workflow_id=None, check_existing=True) -> str:
     # 初始化設置

@@ -17,6 +17,9 @@ from app.vsphere.vm.jira_api.create_jira_ticket import create_jira_ticket
 from app.vsphere.vm.jira_api.get_jira_issue_detail import get_jira_issue_detail
 from app.vsphere.vm.jira_api.issue_updates import jira_add_comment, jira_transition_issue
 
+# ---------- vSphere ----------
+from app.vsphere.vm.db.delete_vm_from_database import delete_vm_from_database
+
 # Update workflow status
 from app.vsphere.vm.db.workflow_manager import update_request_status
 from mysql.connector import Error as MySQLError
@@ -91,21 +94,21 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
     # 使用 MySQL 的命名鎖確保原子性
     lock_cur = db_conn.cursor(dictionary=True)
     lock_acquired = False
-    
+
     try:
         # 獲取專門的 Jira 鎖
         lock_name = f"jira_creation_{workflow_id}"
         lock_cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 10))
         lock_result = lock_cur.fetchone()
         lock_cur.fetchall()  # 清空剩餘結果
-        
+
         if not (lock_result and list(lock_result.values())[0] == 1):
             logging.info(f"Skip Jira creation for workflow {workflow_id}: lock busy or timeout")
             return
-            
+
         lock_acquired = True
         logging.info(f"Acquired Jira creation lock for workflow {workflow_id}")
-        
+
         # 雙重檢查：再次確認是否已存在 Jira ticket
         existing = get_jira_ticket_by_workflow_id(workflow_id)
         if existing and existing.get("ticket_id"):
@@ -147,14 +150,17 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
         action_type = payload.get("action_type", "create")
 
         if action_type == "update":
-            # UPDATE 操作：傳遞完整的 payload（包含 original_config 和 new_config）
+            # UPDATE 操作：傳遞完整的 payload(包含 original_config 和 new_config)
+            form_data = payload
+        elif action_type == "delete":
+            # DELETE 操作：傳遞完整的 payload(包含 original_config)
             form_data = payload
         else:
             # CREATE 或其他操作：使用原有邏輯
             form_data = payload.get("new_config", payload)
 
         logging.info(f"Creating Jira ticket for workflow {workflow_id} with action_type: {action_type}")
-        
+
         # 建立 Jira ticket
         jira_key = create_jira_ticket(form_data)
         logging.info(f"Successfully created Jira ticket: {jira_key} for workflow {workflow_id}")
@@ -166,7 +172,7 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
         max_retries = 5
         retry_delay = 3
         comment_success = False
-        
+
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
@@ -250,7 +256,17 @@ def _get_vm_config_id_by_workflow(db_conn, workflow_id: int) -> int:
             raise ValueError("No request_payload")
 
         payload = json.loads(row["request_payload"])
-        form_data = payload.get("new_config", payload)
+        action_type = payload.get("action_type", "create")
+
+        # 根據 action_type 決定從哪裡取資料
+        if action_type == "update":
+            form_data = payload.get("new_config", payload)
+        elif action_type == "delete":
+            form_data = payload.get("original_config", payload)
+        else:
+            # create 或其他操作
+            form_data = payload.get("new_config", payload)
+
         environment_value = (form_data.get("environment") or "").strip()
         vm_name_prefix_value = (form_data.get("vm_name_prefix") or "").strip()
         if not environment_value or not vm_name_prefix_value:
@@ -457,7 +473,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
 
                 # 檢查目前狀態，決定是否需要 claim
                 current_status = disk_row.get("status")  # 需要在查詢中加入 status 欄位
-                
+
                 if current_status == 'PENDING_RESIZE':
                     # claim
                     claim_cur = db_conn.cursor()
@@ -596,7 +612,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                     # 從 vSphere 查詢當前磁碟狀態來取得 disk_key
                     from app.vsphere.vm.vsphere_api.disk_manager import get_vm_disks
                     current_disks = get_vm_disks(vm_name_prefix)
-                    
+
                     target_disk_key = None
                     for disk in current_disks:
                         if (disk.get("controller_bus") == scsi_controller and 
@@ -617,7 +633,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                                 continue
                             finally:
                                 ok_cur.close()
-                        
+
                         # 磁碟可能已被手動刪除，記錄警告並清理資料庫
                         logging.warning(f"Disk #{disk_id} not found in vSphere at scsi({scsi_controller}:{unit_number}), assuming already deleted")
                         ok_cur = db_conn.cursor()
@@ -773,10 +789,9 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
       - pipeline failed/canceled → 直接 FAILED/CANCELED
       - pipeline manual → PENDING_APPROVAL
       - pipeline success →
-          若磁碟有任一 pending/working（create/resize/delete）→ DEPLOYING
-          若有 FAILED → FAILED
-          全部處理完（且無 FAILED）→ SUCCESS
-      - 其他（running/pending/created/scheduled/...）→ IN_PROGRESS
+          DELETE 操作 → 直接 SUCCESS (不檢查磁碟)
+          其他操作 → 檢查磁碟狀態決定
+      - 其他(running/pending/created/scheduled/...)→ IN_PROGRESS
     """
     ps = (pipeline_status or "").strip().lower()
     logging.info(f"🔍 Determining status for workflow {workflow_id}, pipeline_status={ps}")
@@ -788,7 +803,30 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
     elif ps == "manual":
         return "PENDING_APPROVAL"
     elif ps == "success":
+        # 檢查是否為 DELETE 操作
+        cur = db_conn.cursor(dictionary=True)
+        try:
+            cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+            row = cur.fetchone()
+            if row and row.get("request_payload"):
+                payload = json.loads(row["request_payload"])
+                action_type = payload.get("action_type", "create")
+
+                # DELETE 操作直接返回 SUCCESS，不檢查磁碟
+                if action_type == "delete":
+                    logging.info(f"🗑️ Workflow {workflow_id} is DELETE operation, returning SUCCESS directly")
+                    return "SUCCESS"
+        except Exception as e:
+            logging.warning(f"⚠️ Failed to check action_type for workflow {workflow_id}: {e}")
+        finally:
+            cur.close()
+
+        # 非 DELETE 操作，檢查磁碟狀態
         state_info = get_workflow_state_info(db_conn, workflow_id)
+
+
+
+
         c = state_info['effective_counts']
 
         pending = (
@@ -846,7 +884,31 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
         logging.info(f"🎯 Processing workflow {workflow_id} status update to {target_status}")
 
         if target_status == "SUCCESS":
-            # 全部磁碟應已完成；保險再跑一次
+            # 檢查是否為 DELETE 操作
+            cur = db_conn.cursor(dictionary=True)
+            try:
+                cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+                row = cur.fetchone()
+                if row and row.get("request_payload"):
+                    payload = json.loads(row["request_payload"])
+                    action_type = payload.get("action_type", "create")
+
+                    if action_type == "delete":
+                        logging.info(f"🗑️ DELETE operation detected in process_workflow_status_update, skipping disk operations")
+
+                        # 刪除資料庫中的 VM 記錄
+                        delete_success = delete_vm_from_database(workflow_id)
+                        if not delete_success:
+                            logging.warning(f"⚠️ Failed to delete VM from database, but continuing with Jira creation")
+
+                        ensure_jira_after_success(db_conn, workflow_id)
+                        update_request_status(workflow_id, target_status)
+                        logging.info(f"✅ Updated workflow {workflow_id} status to {target_status}")
+                        return  # 提前返回
+            finally:
+                cur.close()
+
+            # 非 DELETE 操作，正常處理
             ensure_disks_after_success(db_conn, workflow_id)
             ensure_jira_after_success(db_conn, workflow_id)
 
@@ -946,19 +1008,40 @@ def monitor_pipelines(app):
 
                     # 特殊處理 DEPLOYING 狀態
                     if current_status == "DEPLOYING":
+                        # 檢查是否為 DELETE 操作
+                        cur_check = db_conn.cursor(dictionary=True)
+                        try:
+                            cur_check.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+                            check_row = cur_check.fetchone()
+                            is_delete = False
+                            if check_row and check_row.get("request_payload"):
+                                check_payload = json.loads(check_row["request_payload"])
+                                check_action = check_payload.get("action_type", "create")
+                                is_delete = (check_action == "delete")
+                        finally:
+                            cur_check.close()
+
+                        # DELETE 操作：直接標記為 SUCCESS，不處理磁碟
+                        if is_delete:
+                            print(f"🗑️ [delete_skip] wf={workflow_id} is DELETE operation, skipping disk check")
+                            update_request_status(workflow_id, "SUCCESS")
+                            ensure_jira_after_success(db_conn, workflow_id)
+                            print(f"🔧 [delete_complete] wf={workflow_id} DELETE completed, moving to SUCCESS")
+                            continue  # 跳過後續處理
+
+                        # 非 DELETE 操作：正常處理磁碟
                         print(f"🔧 [disk_check] wf={workflow_id} processing pending disks")
-                        
                         ensure_disks_after_success(db_conn, workflow_id)
-                        
+
                         state_info = get_workflow_state_info(db_conn, workflow_id)
                         c = state_info['effective_counts']
-                        
+
                         pending_disks = (
                             c['PENDING_CREATION'] + c['CREATING'] +
                             c['PENDING_RESIZE']   + c['RESIZING'] +
                             c['PENDING_DELETE']   + c['DELETING']
                         )
-                        
+
                         if pending_disks == 0 and c['FAILED'] == 0:
                             update_request_status(workflow_id, "SUCCESS")
                             ensure_jira_after_success(db_conn, workflow_id)
@@ -968,20 +1051,20 @@ def monitor_pipelines(app):
                             print(f"🔧 [disk_failed] wf={workflow_id} has failed disks, marking as FAILED")
                         else:
                             print(f"🔧 [disk_pending] wf={workflow_id} still has {pending_disks} pending disks")
-                        
+
                         continue
 
                     # 統一處理所有 GitLab 狀態查詢與更新邏輯
                     # 這一塊程式碼將取代你原有的 if/else 分支
                     print(f"🔍 [poll] wf={workflow_id} pid={pipeline_id} DB={db_status} → query GitLab")
-                    
+
                     gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
                     if gitlab_result.get("success"):
                         # 無論狀態是否終態，都更新資料庫
                         update_gitlab_pipeline_details(db_conn, pipeline_id, gitlab_result)
                         fresh_status = (gitlab_result.get("status") or "").lower()
                         print(f"⚙️ [poll] wf={workflow_id} pid={pipeline_id} GitLab={fresh_status}")
-                        
+
                         # 從資料庫重新讀取 workflow 狀態，確保是最新的
                         cur_now = db_conn.cursor(dictionary=True)
                         try:
