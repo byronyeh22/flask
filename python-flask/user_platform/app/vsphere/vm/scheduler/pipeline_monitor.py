@@ -263,6 +263,11 @@ def _get_vm_config_id_by_workflow(db_conn, workflow_id: int) -> int:
             form_data = payload.get("new_config", payload)
         elif action_type == "delete":
             form_data = payload.get("original_config", payload)
+            environment_value = (form_data.get("environment") or "").strip()
+            vm_name_prefix_value = (form_data.get("vm_name_prefix") or "").strip()
+            if not environment_value or not vm_name_prefix_value:
+                logging.info(f"🗑️ [VM_CONFIG] Workflow {workflow_id} is DELETE operation with missing VM info, returning dummy ID")
+                return 0  # 返回特殊值 0 表示這是 DELETE 操作但缺少完整資訊
         else:
             # create 或其他操作
             form_data = payload.get("new_config", payload)
@@ -327,6 +332,28 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
       - PENDING_RESIZE   → RESIZING → SUCCESS/FAILED
       - PENDING_DELETE   → DELETING → row deleted / FAILED
     """
+
+    # 首先檢查是否為 DELETE 操作
+    cur = db_conn.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
+        row = cur.fetchone()
+        if row and row.get("request_payload"):
+            try:
+                payload = json.loads(row["request_payload"])
+                action_type = payload.get("action_type", "create")
+
+                # 如果是 DELETE 操作，直接返回，不進行後續處理
+                if action_type == "delete":
+                    logging.info(f"🗑️ [DISK_SKIP] Workflow {workflow_id} is DELETE operation, skipping disk operations")
+                    return
+            except json.JSONDecodeError:
+                logging.warning(f"⚠️ Invalid JSON in request_payload for workflow {workflow_id}")
+    except Exception as e:
+        logging.warning(f"⚠️ Failed to check action_type in ensure_disks_after_success for workflow {workflow_id}: {e}")
+    finally:
+        cur.close()
+
     # 使用獨立的 cursor 處理鎖
     lock_cur = db_conn.cursor(dictionary=True)
     lock_acquired = False
@@ -704,6 +731,18 @@ def _summarize_disk_batch_state(db_conn, workflow_id: int):
     counts 是 dict：包含 pending / working / final 狀態
     """
     vm_configuration_id = _get_vm_config_id_by_workflow(db_conn, workflow_id)
+
+    # 加入這段代碼：
+    # 如果配置 ID 為 0（表示 DELETE 操作且缺少完整資訊），直接返回空計數
+    if vm_configuration_id == 0:
+        empty_counts = {
+            'PENDING_CREATION': 0, 'CREATING': 0,
+            'PENDING_RESIZE': 0, 'RESIZING': 0,
+            'PENDING_DELETE': 0, 'DELETING': 0,
+            'SUCCESS': 0, 'FAILED': 0
+        }
+        return vm_configuration_id, empty_counts
+
     cur = db_conn.cursor(dictionary=True)
     try:
         cur.execute(

@@ -26,6 +26,7 @@ from ..jira_api.create_jira_ticket import _generate_create_summary
 from ..gitlab_api.trigger_gitlab_pipeline import trigger_gitlab_pipeline
 from ..gitlab_api.run_manual_job import run_manual_job
 from ..gitlab_api.cancel_manual_jobs import cancel_manual_jobs
+from ..vsphere_api.disk_manager import get_vm_disks, remove_disk_from_vm
 
 # --- 輔助函數 ---
 def _current_username():
@@ -565,6 +566,49 @@ def workflow_execute(workflow_id):
 
     try:
         apply_request_to_db(workflow_id)
+
+        # ========== 新增：DELETE 操作時先刪除所有磁碟 ==========
+        # 讀取 workflow 的 request_payload 判斷 action_type
+        workflow = get_workflow_by_id(workflow_id)
+        if workflow and workflow.get('request_payload'):
+            payload = json.loads(workflow['request_payload'])
+            action_type = payload.get('action_type', '').lower()
+            
+            if action_type == 'delete':
+                logging.info(f"🗑️ [DELETE] Starting disk removal for workflow {workflow_id}")
+                
+                # 取得 VM 名稱
+                original_config = payload.get('original_config', {})
+                vm_name_prefix = original_config.get('vm_name_prefix')
+
+                if vm_name_prefix:
+                    try:
+                        # 1. 取得所有磁碟（會自動跳過 OS 盤 0:0）
+                        disks = get_vm_disks(vm_name_prefix)
+                        logging.info(f"📀 Found {len(disks)} additional disks to remove for VM '{vm_name_prefix}'")
+
+                        # 2. 逐一刪除磁碟
+                        for disk in disks:
+                            disk_key = disk.get('key')
+                            disk_label = disk.get('label', f'key-{disk_key}')
+                            try:
+                                logging.info(f"🔄 Removing disk: {disk_label} (key: {disk_key})")
+                                remove_disk_from_vm(vm_name_prefix, disk_key)
+                                logging.info(f"✅ Successfully removed disk: {disk_label}")
+                            except Exception as disk_error:
+                                logging.error(f"❌ Failed to remove disk {disk_label}: {disk_error}")
+                                raise Exception(f"Failed to remove disk {disk_label}: {str(disk_error)}")
+
+                        logging.info(f"✅ All disks removed successfully for VM '{vm_name_prefix}'")
+
+                    except Exception as disk_removal_error:
+                        logging.error(f"❌ Disk removal failed for workflow {workflow_id}: {disk_removal_error}")
+                        update_request_status(workflow_id, "FAILED", failed_message=f"Disk removal failed: {str(disk_removal_error)}")
+                        flash(f"Failed to remove disks: {disk_removal_error}", "danger")
+                        raise
+                else:
+                    logging.warning(f"⚠️ VM name not found in workflow {workflow_id}, skipping disk removal")
+        # ========== 新增結束 ==========
 
         pipeline = get_pipeline_details_by_workflow_id(workflow_id)
         if not pipeline or not pipeline.get('pipeline_id'):
