@@ -285,7 +285,7 @@ def vsphere_submit_request():
             # 為了確保所有 GitLab Pipeline 需要的欄位都存在，從 original_config 補充缺失的欄位
             for key in ['os_type', 'vm_os_type', 'vm_instance_type', 'vsphere_template', 
                        'vsphere_network', 'vsphere_datastore', 'netbox_prefix', 'netbox_tenant', 
-                       'vm_ipv4_gateway']:
+                       'vm_ipv4_gateway', 'vm_memory', 'vm_num_cpus']:
                 if (key not in form_data or not form_data.get(key)) and key in original_config:
                     form_data[key] = original_config.get(key)
 
