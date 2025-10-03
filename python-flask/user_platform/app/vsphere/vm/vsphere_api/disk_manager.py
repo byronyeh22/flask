@@ -482,26 +482,26 @@ def remove_disk_from_vm(si, vm_name: str, disk_key: int) -> str:
         if r.status_code == 404:
             raise ValueError(f"Disk with key {disk_key} not found.")
         r.raise_for_status()
-        
-        # 執行操作後重新查詢並同步最新狀態
-        try:
-            r_disks = requests.get(f"{_mock_base()}/vsphere/vms/{vm_name}/disks", timeout=10)
-            if r_disks.status_code == 200:
-                updated_disks = r_disks.json() or []
-                sync_data = []
-                for disk in updated_disks:
-                    sync_data.append({
-                        "key": disk.get("key"),
-                        "controller_bus": disk.get("controller_bus"),
-                        "unit_number": disk.get("unit_number"),
-                        "label_text": disk.get("label_text"),
-                        "label_number": disk.get("label_number"),
-                        "vmdk_path": disk.get("vmdk_path")
-                    })
-                sync_disk_labels_to_database(vm_name, sync_data)
-        except Exception as e:
-            logging.warning(f"Failed to sync disk labels in local mode: {e}")
-        
+
+        # # 執行操作後重新查詢並同步最新狀態
+        # try:
+        #     r_disks = requests.get(f"{_mock_base()}/vsphere/vms/{vm_name}/disks", timeout=10)
+        #     if r_disks.status_code == 200:
+        #         updated_disks = r_disks.json() or []
+        #         sync_data = []
+        #         for disk in updated_disks:
+        #             sync_data.append({
+        #                 "key": disk.get("key"),
+        #                 "controller_bus": disk.get("controller_bus"),
+        #                 "unit_number": disk.get("unit_number"),
+        #                 "label_text": disk.get("label_text"),
+        #                 "label_number": disk.get("label_number"),
+        #                 "vmdk_path": disk.get("vmdk_path")
+        #             })
+        #         sync_disk_labels_to_database(vm_name, sync_data)
+        # except Exception as e:
+        #     logging.warning(f"Failed to sync disk labels in local mode: {e}")
+
         return f"Successfully removed disk (key: {disk_key})."
 
     # ------- 真實 pyVmomi -------
@@ -523,15 +523,12 @@ def remove_disk_from_vm(si, vm_name: str, disk_key: int) -> str:
     spec.deviceChange = [dev_spec]
 
     wait_for_task(vm.ReconfigVM_Task(spec=spec))
-    # 重新讀取所有磁盤狀態並同步到資料庫
-    all_disks = _sync_all_disk_labels_after_operation(vm)
+    # # 重新讀取所有磁盤狀態並同步到資料庫
+    # all_disks = _sync_all_disk_labels_after_operation(vm)
 
-    sync_disk_labels_to_database(vm_name, all_disks)
+    # sync_disk_labels_to_database(vm_name, all_disks)
 
-    return {
-        "message": f"Successfully removed disk (key: {disk_key}) from '{vm_name}'",
-        "all_updated_disks": all_disks
-    }
+    return f"Successfully removed disk (key: {disk_key}) from '{vm_name}'"
 
 @_with_connection
 def update_disk_size(si, vm_name: str, disk_key: int, new_size_gb: int) -> str:
