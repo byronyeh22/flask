@@ -19,7 +19,6 @@ from app.vsphere.vm.jira_api.issue_updates import jira_add_comment, jira_transit
 
 # ---------- vSphere ----------
 from app.vsphere.vm.db.delete_vm_from_database import delete_vm_from_database
-from app.vsphere.vm.vsphere_api.disk_manager import get_vm_disks
 from app.vsphere.vm.db.vm_provisioning_manager import sync_disk_labels_to_database
 
 # Update workflow status
@@ -27,10 +26,10 @@ from app.vsphere.vm.db.workflow_manager import update_request_status
 from mysql.connector import Error as MySQLError
 
 # ---------- vSphere Disk Manager ----------
-# *若你的 disk_manager 實作名稱不同，改這兩行 import 名稱即可，其餘程式碼不需更動*
 from app.vsphere.vm.vsphere_api.disk_manager import add_disk_to_vm
-from app.vsphere.vm.vsphere_api.disk_manager import update_disk_size  # 你的函式若叫 resize_vm_disk，請改名於此
-from app.vsphere.vm.vsphere_api.disk_manager import remove_disk_from_vm  # 你的函式若叫 remove_disk_from_vm，請改名於此
+from app.vsphere.vm.vsphere_api.disk_manager import update_disk_size
+from app.vsphere.vm.vsphere_api.disk_manager import remove_disk_from_vm
+from app.vsphere.vm.vsphere_api.disk_manager import get_vm_disks
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 PIPELINE_MANUAL_STATUS = "manual"
