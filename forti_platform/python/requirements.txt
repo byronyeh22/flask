@@ -1,7 +1,0 @@
-Flask
-redis
-rq
-requests
-mysql-connector-python
-bcrypt
-ldap3
