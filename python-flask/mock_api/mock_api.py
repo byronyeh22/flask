@@ -138,6 +138,13 @@ def get_pipeline_status(project_id, pipeline_id):
 
     # 若已 canceled
     if p.get("status") == 'canceled':
+        # ✅ 確保 duration 有值
+        if not p.get("duration"):
+            if p.get('started_at_dt'):
+                p["duration"] = int((now - p['started_at_dt']).total_seconds())
+            else:
+                p["duration"] = 0
+
         return jsonify({
             "id": p["id"],
             "status": "canceled",
@@ -148,7 +155,7 @@ def get_pipeline_status(project_id, pipeline_id):
             "updated_at": iso_z(now),
             "started_at": p["started_at"],
             "finished_at": p.get("finished_at") or iso_z(now),
-            "duration": p.get("duration")
+            "duration": p.get("duration")  # ✅ 現在一定有值
         }), 200
 
     # 尚未 Play
@@ -236,15 +243,56 @@ def cancel_gitlab_pipeline(project_id, pipeline_id):
     if not pipeline:
         return jsonify({"message": "404 Pipeline Not Found"}), 404
 
+    now = _utc_now()
     pipeline['status'] = 'canceled'
-    pipeline['finished_at'] = utc_now_iso()
+    pipeline['finished_at'] = iso_z(now)  # ✅ 使用 iso_z 格式化
+    
+    # ✅ 計算 duration（從 started_at 到現在）
+    if pipeline.get('started_at_dt'):
+        duration_seconds = int((now - pipeline['started_at_dt']).total_seconds())
+        pipeline['duration'] = duration_seconds
+    else:
+        # 如果沒有 started_at_dt，給個預設值
+        pipeline['duration'] = 0
 
     return jsonify({
         "id": pipeline_id,
         "project_id": project_id,
         "status": "canceled",
         "web_url": f"http://mock-gitlab.com/pipelines/{pipeline_id}",
+        "finished_at": pipeline['finished_at'],  # ✅ 回傳 finished_at
+        "duration": pipeline['duration']  # ✅ 回傳 duration
     }), 200
+
+
+@mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/jobs/<int:job_id>/cancel', methods=['POST'])
+def cancel_gitlab_job(project_id, job_id):
+    pipeline_id = job_id // 100
+    pipeline = PIPELINES.get(pipeline_id)
+    if not pipeline:
+        return jsonify({"message": "404 Pipeline Not Found"}), 404
+
+    # ✅ 同步更新 pipeline 狀態為 canceled
+    now = _utc_now()
+    pipeline['status'] = 'canceled'
+    pipeline['finished_at'] = iso_z(now)
+    
+    # ✅ 計算 duration（從 started_at 到現在）
+    if pipeline.get('started_at_dt'):
+        duration_seconds = int((now - pipeline['started_at_dt']).total_seconds())
+        pipeline['duration'] = duration_seconds
+    else:
+        pipeline['duration'] = 0
+    
+    print(f"🚫 [MOCK] Canceled job {job_id}, pipeline {pipeline_id} status set to canceled")
+
+    return jsonify({
+        "id": job_id,
+        "status": "canceled",
+        "name": "terraform-apply",
+        "stage": "apply",
+    }), 200
+
 
 @mock_app.route('/mock/gitlab/api/v4/projects/<int:project_id>/jobs/<int:job_id>/play', methods=['POST'])
 def run_manual_job(project_id, job_id):

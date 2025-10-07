@@ -22,7 +22,7 @@ from app.vsphere.vm.db.delete_vm_from_database import delete_vm_from_database
 from app.vsphere.vm.db.vm_provisioning_manager import sync_disk_labels_to_database
 
 # Update workflow status
-from app.vsphere.vm.db.workflow_manager import update_request_status
+from app.vsphere.vm.db.workflow_manager import update_request_status, get_workflow_status
 from mysql.connector import Error as MySQLError
 
 # ---------- vSphere Disk Manager ----------
@@ -841,6 +841,17 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
     """
     ps = (pipeline_status or "").strip().lower()
     logging.info(f"🔍 Determining status for workflow {workflow_id}, pipeline_status={ps}")
+
+    # 先檢查 workflow 當前狀態，如果已經是 RETURNED，保持不變
+    status_result = get_workflow_status(workflow_id)
+    if status_result.get("success"):
+        current_status = (status_result.get("status") or "").upper()
+        if current_status == "RETURNED":
+            logging.info(f"⭐️ Workflow {workflow_id} is RETURNED, preserving status despite pipeline={ps}")
+            return "RETURNED"
+    else:
+        logging.warning(f"⚠️ Failed to get status for workflow {workflow_id}: {status_result.get('error')}")
+
     # 判斷 gitlab pipeline 狀態來返回 workflow 狀態
     if ps == "failed":
         return "FAILED"
@@ -994,7 +1005,7 @@ def monitor_pipelines(app):
                         """
                         SELECT workflow_id, status
                           FROM workflow_runs
-                         WHERE status NOT IN ('SUCCESS','FAILED','CANCELED')
+                         WHERE status NOT IN ('SUCCESS','FAILED','CANCELED','RETURNED')
                            AND created_at >= NOW() - INTERVAL 7 DAY
                          ORDER BY workflow_id DESC
                         """
@@ -1010,8 +1021,10 @@ def monitor_pipelines(app):
                         """
                         SELECT DISTINCT gp.workflow_id
                           FROM gitlab_pipelines gp
+                          JOIN workflow_runs wr ON gp.workflow_id = wr.workflow_id
                          WHERE (gp.finished_at IS NULL OR gp.duration IS NULL)
                            AND gp.started_at >= NOW() - INTERVAL 7 DAY
+                           AND wr.status NOT IN ('SUCCESS','FAILED','CANCELED','RETURNED')
                          ORDER BY gp.workflow_id DESC
                         """
                     )
@@ -1031,6 +1044,26 @@ def monitor_pipelines(app):
                 for wr in workflows_todo:
                     workflow_id = wr["workflow_id"]
                     current_status = wr["status"]
+
+                    # 🔐 重新從資料庫確認最新狀態，避免處理已經變成終態的 workflow
+                    cur_check = db_conn.cursor(dictionary=True)
+                    try:
+                        cur_check.execute(
+                            "SELECT status FROM workflow_runs WHERE workflow_id = %s",
+                            (workflow_id,)
+                        )
+                        check_row = cur_check.fetchone()
+                        if check_row:
+                            latest_status = (check_row.get("status") or "").upper()
+                            if latest_status in ("SUCCESS", "FAILED", "CANCELED", "RETURNED"):
+                                print(f"⏭️ [skip] wf={workflow_id} is in final state {latest_status}, skipping")
+                                continue
+                            current_status = latest_status
+                        else:
+                            print(f"⚠️ [skip] wf={workflow_id} not found in database")
+                            continue
+                    finally:
+                        cur_check.close()
 
                     cur_p = db_conn.cursor(dictionary=True)
                     try:
@@ -1160,7 +1193,7 @@ def monitor_pipelines(app):
 
                         continue
 
-                    # 統一處理所有 GitLab 狀態查詢與更新邏輯
+                    # 統一處理所有 GitLab 狀態查詢與更新邏輯 (主要監控邏輯)
                     print(f"🔍 [poll] wf={workflow_id} pid={pipeline_id} DB={db_status} → query GitLab")
 
                     gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
@@ -1184,7 +1217,7 @@ def monitor_pipelines(app):
                         if target_status is None:
                             logging.error(f"❗ determine_workflow_status_after_pipeline returned None (wf={workflow_id}, fresh_status={fresh_status})")
 
-                        final_states = ("SUCCESS", "FAILED", "CANCELED")
+                        final_states = ("SUCCESS", "FAILED", "CANCELED", "RETURNED")
                         if current_workflow_status in final_states:
                             # 如果 workflow 已是終態，不要再更新或降級
                             print(f"⭐ [skip] wf={workflow_id} in final state {current_workflow_status}, skip status update")
@@ -1198,6 +1231,46 @@ def monitor_pipelines(app):
                             db_conn, workflow_id, "GITLAB_API",
                             f"Pipeline query failed: {gitlab_result.get('error')}",
                         )
+
+                # 同步已終止 workflow 的 pipeline 狀態 (補充同步邏輯)
+                try:
+                    sync_cur = db_conn.cursor(dictionary=True)
+                    try:
+                        sync_cur.execute(
+                            """
+                            SELECT DISTINCT gp.workflow_id, gp.pipeline_id
+                              FROM gitlab_pipelines gp
+                              JOIN workflow_runs wr ON gp.workflow_id = wr.workflow_id
+                             WHERE wr.status IN ('SUCCESS','FAILED','CANCELED','RETURNED')
+                               AND (gp.finished_at IS NULL OR gp.duration IS NULL)
+                               AND gp.updated_at >= NOW() - INTERVAL 1 HOUR
+                             ORDER BY gp.workflow_id DESC
+                             LIMIT 50
+                            """
+                        )
+                        pipelines_to_sync = sync_cur.fetchall()
+                    finally:
+                        sync_cur.close()
+
+                    for row in (pipelines_to_sync or []):
+                        wf_id = row['workflow_id']
+                        pipe_id = row['pipeline_id']
+
+                        print(f"🔄 [sync_only] Syncing pipeline {pipe_id} for final workflow {wf_id}")
+
+                        try:
+                            gitlab_result = get_pipeline_status_from_gitlab(pipe_id)
+                            if gitlab_result.get("success"):
+                                # 只更新 gitlab_pipelines，不觸碰 workflow_runs
+                                update_gitlab_pipeline_details(db_conn, pipe_id, gitlab_result)
+                                print(f"✅ [sync_only] Updated pipeline {pipe_id} status to {gitlab_result.get('status')}")
+                            else:
+                                print(f"⚠️ [sync_only] Failed to sync pipeline {pipe_id}: {gitlab_result.get('error')}")
+                        except Exception as sync_err:
+                            print(f"❌ [sync_only] Error syncing pipeline {pipe_id}: {sync_err}")
+
+                except Exception as sync_error:
+                    print(f"❌ Pipeline sync error: {sync_error}")
 
             except Exception as e:
                 print(f"❌ Pipeline monitoring error: {e}")

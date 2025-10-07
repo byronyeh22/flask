@@ -79,6 +79,41 @@ def get_workflow_by_id(workflow_id):
         if db_conn:
             db_conn.close()
 
+def get_workflow_status(workflow_id):
+    """
+    查詢 workflow 當前狀態
+    Args:
+        workflow_id (int): Workflow ID
+    Returns:
+        dict: 包含 success 和 status 的字典
+    """
+    db_conn = get_db_connection()
+    try:
+        with db_conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                "SELECT status FROM workflow_runs WHERE workflow_id = %s",
+                (workflow_id,)
+            )
+            row = cur.fetchone()
+            if row:
+                return {
+                    "success": True,
+                    "status": row.get("status", "")
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Workflow {workflow_id} not found"
+                }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+    finally:
+        if db_conn:
+            db_conn.close()
+
 def update_request_status(workflow_id, new_status, approver=None, failed_message=None):
     """更新工作流狀態"""
     try:

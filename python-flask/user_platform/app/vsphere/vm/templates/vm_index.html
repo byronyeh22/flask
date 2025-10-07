@@ -88,6 +88,29 @@
 document.addEventListener('DOMContentLoaded', function () {
     const actionTabs = document.querySelectorAll('#actionTypeTabs button[data-bs-toggle="tab"]');
 
+    // 檢查是否為編輯模式（透過後端傳遞的 workflow_id 變數判斷）
+    const isEditMode = {{ 'true' if workflow_id else 'false' }};
+    const activeTab = "{{ active_tab|default('create') }}";
+    
+    // Debug 訊息
+    console.log('=== VM Index Debug ===');
+    console.log('isEditMode:', isEditMode);
+    console.log('activeTab:', activeTab);
+    console.log('workflow_id:', "{{ workflow_id }}");
+
+    // 如果是編輯模式，隱藏其他不相關的頁籤
+    if (isEditMode) {
+        console.log('編輯模式：開始隱藏其他頁籤');
+        document.querySelectorAll('#actionTypeTabs .nav-item').forEach(item => {
+            const tabType = item.getAttribute('data-tab');
+            console.log('檢查頁籤:', tabType, '是否等於', activeTab);
+            if (tabType !== activeTab) {
+                item.style.display = 'none';
+                console.log('已隱藏頁籤:', tabType);
+            }
+        });
+    }
+
     // 只負責分頁切換時，啟用/停用欄位，與 required 標記
     function updateFormState(activePaneSelector) {
         // 先停用所有 pane 的所有 fields，並移除 required
@@ -118,8 +141,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // 初始狀態：顯示 Create pane 並套用 required
-    const activeTab = "{{ active_tab|default('create') }}";  // 預設 create
+    // 初始狀態：顯示對應的 pane 並套用 required
     const initialTab = document.getElementById(activeTab + "-tab");
     if (initialTab) {
         const tab = new bootstrap.Tab(initialTab);
