@@ -183,21 +183,22 @@ def delete_draft_by_workflow_id(workflow_id):
         if db_conn:
             db_conn.close()
 
-def return_request(workflow_id, reason, returned_by):
-    """將 workflow_runs 設為 RETURNED"""
+def return_request(workflow_id, reason, returned_by, target_status="RETURNED"):
+    """將 workflow_runs 設為 RETURNED 或 CANCELED"""
     db_conn = get_db_connection()
     try:
         with db_conn.cursor() as cursor:
+            # 使用傳入的 target_status
             cursor.execute("""
                 UPDATE workflow_runs
-                SET status = 'RETURNED',
+                SET status = %s,
                     returned_by = %s,
                     returned_reason = %s,
                     updated_at = NOW()
                 WHERE workflow_id = %s
-            """, (returned_by, reason, workflow_id))
+            """, (target_status, returned_by, reason, workflow_id))
         db_conn.commit()
-        logging.info(f"✅ Workflow {workflow_id} set to RETURNED by {returned_by}, reason={reason}")
+        logging.info(f"✅ Workflow {workflow_id} set to {target_status} by {returned_by}, reason={reason}")
     except Error as e:
         if db_conn and db_conn.is_connected():
             db_conn.rollback()

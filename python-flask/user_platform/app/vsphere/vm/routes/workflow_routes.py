@@ -640,20 +640,23 @@ def workflow_return(workflow_id):
     """
     Return (退件) 流程：
     1. 取消關聯的 GitLab Pipeline
-    2. 更新 workflow_runs 狀態為 'RETURNED'
+    2. 更新 workflow_runs 狀態為 'RETURNED' 或 'CANCELED'（根據理由判斷）
     """
-    # [修正] 確保 from_modal 變數被定義
     from_modal = (request.args.get("from_modal") == "1") or (request.form.get("from_modal") == "1")
-
     reason = ""
+    target_status = "RETURNED"  # 預設狀態
+
     try:
         if request.is_json:
             body = request.get_json(silent=True) or {}
             reason = (body.get("returned_reason") or body.get("reason") or "").strip()
+            target_status = body.get("target_status", "RETURNED")  # 接收前端傳來的狀態
         else:
             reason = (request.form.get("returned_reason") or request.form.get("reason") or "").strip()
+            target_status = request.form.get("target_status", "RETURNED")
     except Exception:
         pass
+
     if not reason:
         reason = "No reason provided."
 
@@ -665,7 +668,6 @@ def workflow_return(workflow_id):
         if pipeline and pipeline.get("pipeline_id"):
             pipeline_id_to_cancel = pipeline["pipeline_id"]
             logging.info(f"Attempting to cancel pipeline #{pipeline_id_to_cancel} for returned workflow #{workflow_id}.")
-
             try:
                 cancel_result = cancel_manual_jobs(pipeline_id_to_cancel)
                 if cancel_result.get("success"):
@@ -676,14 +678,17 @@ def workflow_return(workflow_id):
                 logging.error(f"[WORKFLOW_RETURN] Exception during cancel_manual_jobs call for pipeline #{pipeline_id_to_cancel}: {e}", exc_info=True)
                 flash(f"An unexpected error occurred while canceling pipeline #{pipeline_id_to_cancel}: {str(e)}", "danger")
 
-        # 步驟 2: 更新 workflow 狀態為 RETURNED
-        return_request(workflow_id, reason, returned_by=returned_by)
+        # 步驟 2: 更新 workflow 狀態（傳入 target_status）
+        return_request(workflow_id, reason, returned_by=returned_by, target_status=target_status)
 
         # 步驟 3: 記錄日誌並給予最終反饋
         logging.info(
-            f"[WORKFLOW_RETURN] workflow_id={workflow_id}, reason={reason}, returned_by={returned_by}"
+            f"[WORKFLOW_RETURN] workflow_id={workflow_id}, reason={reason}, returned_by={returned_by}, status={target_status}"
         )
-        flash(f"Workflow {workflow_id} has been returned.", "warning")
+
+        # 根據狀態顯示不同訊息
+        status_msg = "canceled" if target_status == "CANCELED" else "returned"
+        flash(f"Workflow {workflow_id} has been {status_msg}.", "warning")
 
     except Exception as e:
         logging.exception(f"[WORKFLOW_RETURN] failed for workflow_id={workflow_id}")

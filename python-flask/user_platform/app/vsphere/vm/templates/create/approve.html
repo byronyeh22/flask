@@ -190,10 +190,10 @@
           <label for="cannedReasonSelect" class="form-label">Canned Response (Optional)</label>
           <select id="cannedReasonSelect" class="form-select">
             <option value="">-- Select a reason --</option>
-            <option value="Incorrect resource configuration (CPU, Memory, Disk).">Incorrect resource configuration</option>
-            <option value="This appears to be a duplicate request.">Duplicate request</option>
-            <option value="Request has been canceled.">Request has been canceled</option>
-            <option value="Other (please specify below).">Other</option>
+            <option value="Incorrect resource configuration (CPU, Memory, Disk)." data-action="return">Incorrect resource configuration</option>
+            <option value="This appears to be a duplicate request." data-action="cancel">Duplicate request</option>
+            <option value="Request has been canceled." data-action="cancel">Request has been canceled</option>
+            <option value="Other (please specify below)." data-action="return">Other</option>
           </select>
         </div>
         <label for="returnReason" class="form-label">Comment</label>
@@ -226,19 +226,17 @@
     // 監聽下拉選單的變動
     if (cannedSelect && reasonText) {
       cannedSelect.addEventListener('change', function() {
-        // 如果選擇的不是第一個空選項，就將其值填入下方的文字輸入框
         if (this.value) {
           reasonText.value = this.value;
-          // 當選擇 "Other" 時，清空文字框並讓使用者可以輸入
           if (this.value === "Other (please specify below).") {
-              reasonText.value = "";
+            reasonText.value = "";
           }
-          reasonText.focus(); // 方便使用者直接編輯
+          reasonText.focus();
         }
       });
     }
-    // =============================================================
 
+    // 確認按鈕處理
     if (!btnConfirm) return;
     btnConfirm.addEventListener('click', async () => {
       const reason = (reasonText?.value || '').trim();
@@ -246,7 +244,15 @@
         alert('Please provide a reason.');
         return;
       }
-      if (!confirm('Are you sure you want to RETURN this request?')) {
+
+      // 取得 RETURN 選擇的選項及其 data-action
+      const selectedOption = cannedSelect.options[cannedSelect.selectedIndex];
+      const action = selectedOption?.getAttribute('data-action') || 'return';
+      const targetStatus = (action === 'cancel') ? 'CANCELED' : 'RETURNED';
+
+      // 確認 RETURN 選項根據動作改變
+      const actionText = (targetStatus === 'CANCELED') ? 'CANCEL' : 'RETURN';
+      if (!confirm(`Are you sure you want to ${actionText} this request?`)) {
         return;
       }
 
@@ -257,15 +263,21 @@
         const resp = await fetch(url, {
           method: 'POST',
           headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
-          body: JSON.stringify({ returned_reason: reason })
+          body: JSON.stringify({
+            returned_reason: reason,
+            target_status: targetStatus
+          })
         });
+
         if (!resp.ok) {
           const txt = await resp.text();
           throw new Error(txt || 'Return failed.');
         }
+
         // 成功：關 modal 並讓父頁刷新 / 導回 overview
         try { window.top.location = "{{ url_for('vm.overview_index') }}"; }
         catch (e) { window.parent.location = "{{ url_for('vm.overview_index') }}"; }
+
       } catch (err) {
         console.error(err);
         alert('Return failed: ' + err.message);

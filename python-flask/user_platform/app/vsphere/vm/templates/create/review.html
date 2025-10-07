@@ -57,6 +57,23 @@
   </div>
 {% endif %}
 
+{% if workflow and workflow.status == 'CANCELED' %}
+  <div class="alert alert-warning d-flex align-items-start gap-3 mt-3" role="alert">
+    <i class="bi bi-dash-circle fs-4"></i>
+    <div>
+      <div class="fw-bold">This request was canceled</div>
+      <div class="small text-muted">
+        by <span class="fw-semibold">{{ workflow.returned_by or 'unknown' }}</span>
+        {% if workflow.updated_at %} at <span>{{ workflow.updated_at }}</span>{% endif %}
+      </div>
+      <div class="mt-2">
+        <div class="fw-semibold mb-1">Reason</div>
+        <pre class="mb-0" style="white-space:pre-wrap">{{ workflow.returned_reason or '-' }}</pre>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
   <!-- Workflow Info -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-light fw-bold">Workflow Info</div>
