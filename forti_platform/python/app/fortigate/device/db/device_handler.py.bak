@@ -1,0 +1,144 @@
+from __future__ import annotations
+from typing import Any, Dict, List, Optional, Tuple
+from app.db.mysql import get_db_connection
+
+
+def list_devices() -> List[Dict[str, Any]]:
+    conn = get_db_connection(); cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT id, name, host, port, is_active, verify_ssl, created_at
+        FROM forti_devices
+        ORDER BY id DESC
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+
+def get_device(device_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection(); cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT id, name, host, port, api_token, is_active, verify_ssl, created_at
+        FROM forti_devices WHERE id=%s
+    """, (device_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    return row
+
+
+def create_device(name: str, host: str, port: int, api_token: str,
+                  is_active: int = 1, verify_ssl: int = 1) -> int:
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO forti_devices (name, host, port, api_token, is_active, verify_ssl)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (name, host, port, api_token, is_active, verify_ssl))
+    new_id = cur.lastrowid
+    conn.commit(); cur.close(); conn.close()
+    return new_id
+
+
+def update_device(device_id: int, name: str, host: str, port: int,
+                  is_active: int, verify_ssl: int, api_token: Optional[str] = None) -> None:
+    """
+    若 api_token 為 None，表示不改 token；否則一併更新（例如 UI 提供「留白則不變」）。
+    """
+    conn = get_db_connection(); cur = conn.cursor()
+    if api_token is None:
+        cur.execute("""
+            UPDATE forti_devices
+               SET name=%s, host=%s, port=%s, is_active=%s, verify_ssl=%s
+             WHERE id=%s
+        """, (name, host, port, is_active, verify_ssl, device_id))
+    else:
+        cur.execute("""
+            UPDATE forti_devices
+               SET name=%s, host=%s, port=%s, api_token=%s, is_active=%s, verify_ssl=%s
+             WHERE id=%s
+        """, (name, host, port, api_token, is_active, verify_ssl, device_id))
+    conn.commit(); cur.close(); conn.close()
+
+
+def delete_device(device_id: int) -> None:
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("DELETE FROM forti_devices WHERE id=%s", (device_id,))
+    conn.commit(); cur.close(); conn.close()
+
+
+def list_device_vdoms(device_id: int) -> List[str]:
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT vdom FROM forti_device_vdoms
+        WHERE device_id=%s AND is_active=1
+        ORDER BY vdom ASC
+    """, (device_id,))
+    vdoms = [r[0] for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return vdoms
+
+
+def _fetch_all_vdoms(conn, device_id: int) -> List[Tuple[str, int]]:
+    """取出所有 vdom 與其 is_active（為差異更新做準備）"""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT vdom, is_active FROM forti_device_vdoms
+        WHERE device_id=%s
+    """, (device_id,))
+    rows = cur.fetchall()
+    cur.close()
+    return rows
+
+
+def upsert_device_vdoms(device_id: int, vdoms: List[str]) -> None:
+    """
+    將原本的「先刪再插」改成『差異更新』：
+    - 新清單有、DB 沒有 → INSERT is_active=1
+    - DB 有但目前未列入 → 將 is_active=0（soft delete）
+    - DB 有且在清單 → 確保 is_active=1（若原本為 0 則恢復）
+    """
+    # 正規化、去重、排序
+    want = sorted({(v or "").strip() for v in vdoms if (v or "").strip()}, key=str.lower)
+
+    conn = get_db_connection()
+    original_autocommit = getattr(conn, "autocommit", True)
+    try:
+        conn.autocommit = False
+        have_rows = _fetch_all_vdoms(conn, device_id)
+        have = {r[0]: int(r[1]) for r in have_rows}  # vdom -> is_active
+
+        to_insert = [v for v in want if v not in have]
+        to_activate = [v for v in want if have.get(v) == 0]
+        to_deactivate = [v for v in have.keys() if v not in want and have.get(v) == 1]
+
+        cur = conn.cursor()
+
+        if to_insert:
+            cur.executemany("""
+                INSERT INTO forti_device_vdoms (device_id, vdom, is_active)
+                VALUES (%s, %s, 1)
+            """, [(device_id, v) for v in to_insert])
+
+        if to_activate:
+            cur.executemany("""
+                UPDATE forti_device_vdoms SET is_active=1
+                WHERE device_id=%s AND vdom=%s
+            """, [(device_id, v) for v in to_activate])
+
+        if to_deactivate:
+            cur.executemany("""
+                UPDATE forti_device_vdoms SET is_active=0
+                WHERE device_id=%s AND vdom=%s
+            """, [(device_id, v) for v in to_deactivate])
+
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        try:
+            conn.autocommit = original_autocommit
+        except Exception:
+            pass
+        conn.close()
+

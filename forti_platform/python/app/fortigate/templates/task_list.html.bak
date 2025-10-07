@@ -1,0 +1,635 @@
+{% extends "base.html" %}
+{% block title %}Task List{% endblock %}
+
+{% block scripts %}
+  <!-- 第三方元件樣式／腳本 -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/tom-select/tom-select.bootstrap5.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.css') }}">
+  <script src="{{ url_for('static', filename='vendor/tom-select/tom-select.complete.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/sortablejs/Sortable.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.js') }}"></script>
+
+  <style>
+    /* ===== 版面與表格 ===== */
+    .page-wrap { padding: 1.25rem 0; }
+    .card.card-bg { background: #fff; border: 1px solid #e9ecef; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+    .table thead th { vertical-align: middle; font-weight: 600; letter-spacing:.2px; }
+    .table-hover tbody tr:hover { background: #f7f9fc; }
+    .form-label { font-weight: 600; }
+    .btn-ghost { background: transparent; border-color: #dee2e6; }
+    .sort-link { cursor:pointer; user-select:none; white-space:nowrap; }
+    .sort-link .bi { opacity:.6; }
+    .sort-link.active { color:#0d6efd; }
+    .sort-link.active .bi { opacity:1; }
+
+    /* ===== Tom Select 與 .form-control 對齊 ===== */
+    #status + .ts-wrapper { width: 100%; }
+    #status + .ts-wrapper .ts-control {
+      min-height: calc(2.5rem + 2px);
+      padding: .375rem .75rem;
+      border-radius: .375rem;
+    }
+    #status + .ts-wrapper .ts-control input{ height: 1.25rem; }
+    #status + .ts-wrapper .item { line-height: 1.25rem; }
+
+    /* ===== 任務狀態 badge 顏色 ===== */
+    .badge-queued { background-color: #e7f1ff; color: #0b5ed7; border: 1px solid #b6d4fe; }
+
+    /* ===== 膠囊（通用） ===== */
+    .pill {
+      display:inline-block; padding:.2rem .55rem; border-radius:999px;
+      font-weight:600; font-size:.86rem; line-height:1.1rem; border:1px solid transparent;
+      white-space:nowrap; vertical-align: middle;
+    }
+    .pill + .pill{ margin-left:.25rem; }
+
+    .pill-group{
+      display:flex; justify-content:center; align-items:center; gap:.25rem; flex-wrap:wrap;
+      min-height:1.6rem;
+    }
+
+    /* 通用色系 */
+    .pill-muted   { background:#f8f9fa; color:#495057; border-color:#e9ecef; }
+    .pill-info    { background:#e7f1ff; color:#0b5ed7; border-color:#b6d4fe; }
+    .pill-primary { background:#e7f1ff; color:#0b5ed7; border-color:#b6d4fe; }
+    .pill-success { background:#e9f7ef; color:#13795b; border-color:#c7eed8; }
+    .pill-warning { background:#fff4e6; color:#9a6700; border-color:#ffe0b2; }
+    .pill-danger  { background:#fdecea; color:#b42318; border-color:#f5c2c7; }
+    .pill-dark    { background:#e9ecef; color:#212529; border-color:#dee2e6; }
+
+    /* 特殊：等寬字 & 時間膠囊 & 小晶片 */
+    .pill-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace; }
+    .pill-time { background:#f1f3f5; color:#2b2f33; border-color:#e9ecef; }
+    .pill-chip { background:#f8f9fa; color:#374151; border-color:#e5e7eb; }
+
+    /* ===== Action Type 專用配色（柔和底色＋高對比字體） ===== */
+    .pill-type-create  { background:#e9f7ef; color:#13795b; border-color:#c7eed8; }
+    .pill-type-update  { background:#e7f1ff; color:#0b5ed7; border-color:#b6d4fe; }
+    .pill-type-delete  { background:#fdecea; color:#b42318; border-color:#f5c2c7; }
+    .pill-type-plan    { background:#eef2ff; color:#3730a3; border-color:#c7d2fe; }
+    .pill-type-apply,
+    .pill-type-deploy,
+    .pill-type-commit  { background:#e7f1ff; color:#0b5ed7; border-color:#b6d4fe; }
+    .pill-type-rollback{ background:#fff4e6; color:#9a6700; border-color:#ffe0b2; }
+    .pill-type-validate,
+    .pill-type-check,
+    .pill-type-test    { background:#f5f0ff; color:#6b21a8; border-color:#e9d5ff; }
+    .pill-type-backup,
+    .pill-type-restore { background:#f8f9fa; color:#495057; border-color:#e9ecef; }
+    .pill-type-default { background:#f1f3f5; color:#374151; border-color:#e5e7eb; }
+
+    /* ===== 大彈窗（載入任意 HTML） ===== */
+    .modal-xxl .modal-dialog { max-width: min(95vw, 1400px); }
+    .iframe-holder { width:100%; min-height:72vh; border:0; }
+
+    /* ===== JSON Modal Tabs ===== */
+    .nav-pills .nav-link.active { font-weight: 600; }
+    .json-box { background:#0f172a; color:#e2e8f0; border-radius:.5rem; padding:1rem; font-family: ui-monospace, monospace; font-size:.9rem; overflow:auto; }
+    .json-raw { white-space:pre-wrap; word-break:break-word; }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid page-wrap">
+  <!-- ===== Header ===== -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div class="d-flex align-items-center gap-3">
+      <h3 class="mb-0"><i class="bi bi-list-check me-2"></i>Fortigate Task List</h3>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge text-bg-secondary">pending</span>
+      <span class="badge badge-queued">queued</span>
+      <span class="badge text-bg-warning text-dark">running</span>
+      <span class="badge text-bg-success">success</span>
+      <span class="badge text-bg-danger">failed</span>
+      <span class="badge text-bg-dark">canceled</span>
+    </div>
+  </div>
+
+  <!-- ===== Filters ===== -->
+  <div class="card card-bg mb-3">
+    <div class="card-body">
+      <form id="filterForm" class="row g-3 align-items-end">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Keyword</label>
+          <input id="kw" class="form-control" placeholder="Task/Draft/User/Pipeline/Job/SHA">
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label">Task Status</label>
+          <select id="status" class="form-select" multiple>
+            <option value="pending">pending</option>
+            <option value="queued">queued</option>
+            <option value="running">running</option>
+            <option value="success">success</option>
+            <option value="failed">failed</option>
+            <option value="canceled">canceled</option>
+          </select>
+        </div>
+
+        <div class="col-6 col-md-2">
+          <label class="form-label">From</label>
+          <input id="fromDate" type="text" class="form-control" placeholder="YYYY-MM-DD HH:mm:ss">
+          <input id="fromISO" type="hidden">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">To</label>
+          <input id="toDate" type="text" class="form-control" placeholder="YYYY-MM-DD HH:mm:ss">
+          <input id="toISO" type="hidden">
+        </div>
+
+        <div class="col-12 d-flex gap-2">
+          <button class="btn btn-primary" type="submit"><i class="bi bi-search me-1"></i>Search</button>
+          <button class="btn btn-ghost" id="resetBtn" type="button"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== Table ===== -->
+  <div class="card card-bg">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0" id="taskTable">
+        <thead class="table-light">
+          <tr>
+            <th><span class="sort-link" data-sort="draft_id">Request ID <i class="bi bi-arrow-down-up ms-1"></i></span></th>
+            <th><span class="sort-link" data-sort="task_id">Task ID <i class="bi bi-arrow-down-up ms-1"></i></span></th>
+            <th>Pipeline ID</th>
+            <th><span class="sort-link" data-sort="task_status">Status <i class="bi bi-arrow-down-up ms-1"></i></span></th>
+            <th><span class="sort-link" data-sort="first_started_at">Start Time <i class="bi bi-arrow-down-up ms-1"></i></span></th>
+            <th><span class="sort-link" data-sort="last_finished_at">Finish Time <i class="bi bi-arrow-down-up ms-1"></i></span></th>
+            <th>Operate</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="pager" class="p-3"></div>
+  </div>
+
+  <!-- ===== Big Modal（可載入任意 HTML/JSON） ===== -->
+  <div class="modal fade modal-xxl" id="bigModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content card-bg">
+        <div class="modal-header border-0">
+          <h5 class="modal-title" id="bigModalTitle">Preview</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="bigModalBody">
+          <div class="text-secondary">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== JSON Modal ===== -->
+  <div class="modal fade" id="jsonModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content card-bg">
+        <div class="modal-header border-0">
+          <h5 class="modal-title">JSON Preview</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <!-- Tabs -->
+        <ul class="nav nav-pills px-3 pt-2" id="jsonTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="pretty-tab" data-bs-toggle="pill" data-bs-target="#pretty-pane" type="button" role="tab">Pretty</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="raw-tab" data-bs-toggle="pill" data-bs-target="#raw-pane" type="button" role="tab">Raw</button>
+          </li>
+        </ul>
+
+        <div class="modal-body">
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="pretty-pane" role="tabpanel" aria-labelledby="pretty-tab">
+              <pre id="jsonPretty" class="json-box mb-0"></pre>
+            </div>
+            <div class="tab-pane fade" id="raw-pane" role="tabpanel" aria-labelledby="raw-tab">
+              <pre id="jsonRaw" class="json-box json-raw mb-0"></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer border-0">
+          <button class="btn btn-ghost" id="copyJson"><i class="bi bi-clipboard me-1"></i>Copy</button>
+          <button class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  'use strict';
+
+  /* ======================
+   * Helpers
+   * ====================== */
+
+  const statusBadge = (s) => ({
+    pending : '<span class="badge text-bg-secondary">pending</span>',
+    queued  : '<span class="badge badge-queued">queued</span>',
+    running : '<span class="badge text-bg-warning text-dark">running <span class="spinner-border spinner-border-sm ms-1"></span></span>',
+    success : '<span class="badge text-bg-success">success</span>',
+    failed  : '<span class="badge text-bg-danger">failed</span>',
+    canceled: '<span class="badge text-bg-dark">canceled</span>',
+  })[s] || `<span class="badge text-bg-secondary">${s||'—'}</span>`;
+
+  function toQuery(obj){
+    const p = new URLSearchParams();
+    Object.entries(obj||{}).forEach(([k,v])=>{
+      if(v===undefined || v===null || v==='') return;
+      p.set(k, Array.isArray(v) ? v.join(',') : v);
+    });
+    return p.toString();
+  }
+
+  function typePill(t){
+    const key = String(t||'').toLowerCase();
+    const cls =
+      key === 'create'                        ? 'pill-type-create'   :
+      key === 'update'                        ? 'pill-type-update'   :
+      key === 'delete' || key === 'remove'    ? 'pill-type-delete'   :
+      key === 'plan'                          ? 'pill-type-plan'     :
+      (key === 'apply' || key === 'deploy' || key === 'commit')
+                                              ? 'pill-type-commit'   :
+      key === 'rollback'                      ? 'pill-type-rollback' :
+      (key === 'validate' || key === 'check' || key === 'test' || key === 'pre-check' || key === 'precheck')
+                                              ? 'pill-type-validate' :
+      (key === 'backup' || key === 'restore' || key === 'import' || key === 'export')
+                                              ? 'pill-type-backup'   :
+                                              'pill-type-default';
+    return t ? `<span class="pill ${cls}">${t}</span>` : '';
+  }
+
+  function fmtSlashLocal(isoLike){
+    if(!isoLike) return '';
+    const d = new Date(isoLike);
+    const y = d.getFullYear();
+    const m = d.getMonth()+1;
+    const day = d.getDate();
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+    const ss = String(d.getSeconds()).padStart(2,'0');
+    return `${y}/${m}/${day} ${hh}:${mm}:${ss}`;
+  }
+  function fmtSlash(isoLike){
+    if(window.parseAsInstant && window.tzFormatSlash){
+      const d = window.parseAsInstant(isoLike);
+      return window.tzFormatSlash(d) || '';
+    }
+    return fmtSlashLocal(isoLike);
+  }
+
+  async function fetchTasks({status, q, date_from, date_to, draft_id, limit=20, offset=0, sort_by, sort_dir}={}){
+    const qs = toQuery({ status, q, date_from, date_to, draft_id, limit, offset, sort_by, sort_dir });
+    const r = await fetch(`/fortigate/task_list?${qs}`, { credentials:'same-origin' });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error || 'fetch failed');
+    return j;
+  }
+  async function fetchTaskActions(taskId){
+    const r = await fetch(`/fortigate/task_list/${taskId}/actions`, { credentials:'same-origin' });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error || 'fetch failed');
+    return j.items || [];
+  }
+
+  function rowHtml(r){
+    const pipeline = r.gitlab_pipeline_url
+      ? `<a href="${r.gitlab_pipeline_url}" target="_blank" rel="noopener">${r.gitlab_pipeline_id||'N/A'}</a>`
+      : (r.gitlab_pipeline_id||'N/A');
+
+    const start  = r.first_started_at ? `<span data-iso="${r.first_started_at}" data-format="slash"></span>` : '';
+    const finish = r.last_finished_at  ? `<span data-iso="${r.last_finished_at}"  data-format="slash"></span>` : '';
+
+    return `
+    <tr class="task-row" data-task-id="${r.task_id}" data-draft-id="${r.draft_id||''}">
+      <td>${
+        r.draft_id
+          ? `<a href="#" class="text-decoration-none" data-action="open-request" title="Open request">${r.draft_id}</a>`
+          : '—'
+      }</td>
+      <td><a class="text-decoration-none" href="#" data-action="detail" title="Task detail">${r.task_id}</a></td>
+      <td>${pipeline}</td>
+      <td>${statusBadge(r.task_status)}</td>
+      <td>${start}</td>
+      <td>${finish}</td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-ghost me-1" data-action="expand" title="Expand actions"><i class="bi bi-caret-down"></i></button>
+        <button class="btn btn-sm btn-outline-secondary me-1" data-action="cancel" ${r.task_status==='running'?'':'disabled'} title="Cancel">❎ Cancel</button>
+        <button class="btn btn-sm btn-outline-primary" data-action="rerun" title="Re-run">⟳ Re-run</button>
+      </td>
+    </tr>
+    <tr class="expand-row d-none">
+      <td colspan="7">
+        <div class="fw-bold mb-2">Recent Actions</div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Action ID</th><th>Type</th>
+                <th>Device / VDOM</th><th>Resource ID</th><th>Status</th>
+                <th>Started</th><th>Finished</th><th>Rollback</th>
+              </tr>
+            </thead>
+            <tbody class="action-body">
+              <tr><td colspan="8" class="text-secondary">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  function renderTable(list){
+    const tbody = document.querySelector('#taskTable tbody');
+    tbody.innerHTML = (list||[]).map(rowHtml).join('') || `
+      <tr><td colspan="7" class="text-center text-secondary py-4">No data</td></tr>
+    `;
+  }
+
+  function renderPager(total, limit, offset){
+    const el = document.getElementById('pager');
+    const page = Math.floor(offset/limit) + 1;
+    const pages = Math.max(1, Math.ceil((total||0)/limit));
+    el.innerHTML = `
+      <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-sm btn-ghost" ${page<=1?'disabled':''} id="pgPrev">Prev</button>
+        <span>Page ${page} / ${pages} (Total ${total})</span>
+        <button class="btn btn-sm btn-ghost" ${page>=pages?'disabled':''} id="pgNext">Next</button>
+      </div>`;
+    el.querySelector('#pgPrev')?.addEventListener('click', () => { paging.offset = Math.max(0, offset - limit); loadAndRender(); });
+    el.querySelector('#pgNext')?.addEventListener('click', () => { paging.offset = offset + limit; loadAndRender(); });
+  }
+
+  function setSortIndicator(){
+    document.querySelectorAll('.sort-link').forEach(el=>{
+      el.classList.remove('active');
+      el.querySelector('.bi')?.classList.remove('bi-arrow-up','bi-arrow-down');
+      el.querySelector('.bi')?.classList.add('bi-arrow-down-up');
+    });
+    const cur = document.querySelector(`.sort-link[data-sort="${sort.by}"]`);
+    if(cur){
+      cur.classList.add('active');
+      const icon = cur.querySelector('.bi');
+      icon.classList.remove('bi-arrow-down-up');
+      icon.classList.add(sort.dir === 'asc' ? 'bi-arrow-up' : 'bi-arrow-down');
+    }
+  }
+
+  async function loadAndRender(){
+    const form = document.getElementById('filterForm');
+    form.classList.add('loading');
+    try{
+      const kw = document.getElementById('kw').value.trim();
+      const selected = statusTom ? statusTom.getValue() : [];
+      const status = Array.isArray(selected) ? selected : (selected ? [selected] : []);
+      const date_from = document.getElementById('fromISO').value || '';
+      const date_to   = document.getElementById('toISO').value   || '';
+
+      const data = await fetchTasks({
+        status, q: kw, date_from, date_to,
+        limit: paging.limit, offset: paging.offset,
+        sort_by: sort.by, sort_dir: sort.dir
+      });
+
+      renderTable(data.items || []);
+      renderPager(data.total, data.limit, data.offset);
+      setSortIndicator();
+      window.renderAllTZ && window.renderAllTZ();
+    }catch(err){
+      console.error(err);
+      renderTable([]);
+      renderPager(0, paging.limit, paging.offset);
+      window.appToast?.push('Failed to load task list.', 'danger');
+    }finally{
+      form.classList.remove('loading');
+    }
+  }
+
+  /* ======================
+   * 初始化 & 事件
+   * ====================== */
+  let paging = { limit: 20, offset: 0 };
+  let statusTom;
+  let sort = { by: 'task_id', dir: 'desc' };
+  let fpFrom, fpTo;
+
+  const withEmbed = (url)=> url + (url.includes('?')?'&':'?') + 'embed=1';
+  async function openBigModalSmart(url, title){
+    const titleEl = document.getElementById('bigModalTitle');
+    const bodyEl  = document.getElementById('bigModalBody');
+    const modalEl = document.getElementById('bigModal');
+
+    // 防禦：若 DOM 缺失，直接結束（避免報錯）
+    if(!titleEl || !bodyEl || !modalEl) return;
+
+    titleEl.textContent = title || 'Preview';
+    bodyEl.innerHTML = `<div class="text-secondary">Loading…</div>`;
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+
+    try{
+      const r = await fetch(url, { credentials: 'same-origin' });
+      if(!r.ok) throw new Error(String(r.status));
+      const ct = (r.headers.get('content-type')||'').toLowerCase();
+
+      if(ct.includes('text/html')){
+        bodyEl.innerHTML = `<iframe class="iframe-holder" src="${withEmbed(url)}"></iframe>`;
+      }else{
+        const text = await r.text();
+        let pretty = text;
+        try{ pretty = JSON.stringify(JSON.parse(text), null, 2); }catch{}
+        bodyEl.innerHTML = `<pre class="json-box mb-0">${pretty}</pre>`;
+      }
+    }catch(err){
+      bodyEl.innerHTML = `<div class="text-danger">Load failed (${err.message||'error'})</div>`;
+    }
+  }
+
+  function openRequestDraft(draftId){
+    const url = `/fortigate/drafts/${encodeURIComponent(draftId)}?t=${Date.now()}`;
+    openBigModalSmart(url, `Request #${draftId}`);
+  }
+
+  function syncToISO(srcInput, hiddenISO, dateObj){
+    if(!dateObj){ hiddenISO.value=''; return; }
+    const d = new Date(dateObj.getTime());
+    const pad = n => String(n).padStart(2,'0');
+    const y = d.getFullYear();
+    const m = pad(d.getMonth()+1);
+    const day = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mm = pad(d.getMinutes());
+    const ss = pad(d.getSeconds());
+    hiddenISO.value = `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    statusTom = new TomSelect('#status', {
+      plugins: ['remove_button'],
+      maxItems: null,
+      persist: false,
+      hideSelected: true,
+      create: false,
+      placeholder: 'Select status…'
+    });
+
+    const fromInput = document.getElementById('fromDate');
+    const toInput   = document.getElementById('toDate');
+    const fromISO   = document.getElementById('fromISO');
+    const toISO     = document.getElementById('toISO');
+
+    fpFrom = flatpickr(fromInput, {
+      enableTime: true, time_24hr: true, enableSeconds: true,
+      dateFormat: 'Y-m-d H:i:S', allowInput: true,
+      onChange: (sel)=>syncToISO(fromInput, fromISO, sel[0]||null),
+      onClose:  (sel)=>syncToISO(fromInput, fromISO, sel[0]||null)
+    });
+    fpTo = flatpickr(toInput, {
+      enableTime: true, time_24hr: true, enableSeconds: true,
+      dateFormat: 'Y-m-d H:i:S', allowInput: true,
+      onChange: (sel)=>syncToISO(toInput, toISO, sel[0]||null),
+      onClose:  (sel)=>syncToISO(toInput, toISO, sel[0]||null)
+    });
+
+    loadAndRender();
+
+    document.getElementById('filterForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      paging.offset = 0;
+      loadAndRender();
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      document.getElementById('kw').value='';
+      statusTom.clear(true);
+      fpFrom.clear(); fpTo.clear();
+      document.getElementById('fromISO').value='';
+      document.getElementById('toISO').value='';
+      paging.offset = 0;
+      sort = { by: 'task_id', dir: 'desc' };
+      loadAndRender();
+    });
+
+    document.querySelectorAll('.sort-link').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const key = el.getAttribute('data-sort');
+        if(sort.by === key){ sort.dir = (sort.dir==='asc') ? 'desc' : 'asc'; }
+        else { sort.by = key; sort.dir = 'asc'; }
+        paging.offset = 0;
+        loadAndRender();
+      });
+    });
+
+    /* 表格事件委派 */
+    document.querySelector('#taskTable').addEventListener('click', async (e) => {
+      const btn = e.target.closest('button, a');
+      if (!btn) return;
+
+      const action  = btn.dataset.action;
+      const tr      = btn.closest('tr.task-row');
+      const taskId  = tr?.dataset.taskId;
+      const draftId = tr?.dataset.draftId;
+
+      if (action === 'expand') {
+        const expandRow = tr.nextElementSibling;
+        const icon = btn.querySelector('i');
+        if (expandRow.classList.contains('d-none')) {
+          const tbody = expandRow.querySelector('.action-body');
+          tbody.innerHTML = `<tr><td colspan="8" class="text-secondary">Loading…</td></tr>`;
+          try {
+            const items = await fetchTaskActions(taskId);
+            tbody.innerHTML = items.length ? items.map(a => `
+              <tr>
+                <td>${a.action_id ? `<span class="pill pill-code">${a.action_id}</span>` : ''}</td>
+                <td>${typePill(a.action_type)}</td>
+                <td>
+                  <div class="pill-group">
+                    ${(a.device_name || a.device_id) ? `<span class="pill pill-chip">${a.device_name || a.device_id}</span>` : ''}
+                    ${a.vdom != null && a.vdom !== '' ? `<span class="pill pill-muted">${a.vdom}</span>` : ''}
+                  </div>
+                </td>
+                <td>${a.resource_id != null ? `<span class="pill pill-muted">${a.resource_id}</span>` : ''}</td>
+                <td>${
+                  ({ ok:`<span class="pill pill-success">ok</span>`,
+                     error:`<span class="pill pill-danger">error</span>`,
+                     skipped:`<span class="pill pill-dark">skipped</span>` }[a.status])
+                  || (a.status ? `<span class="pill pill-muted">${a.status}</span>` : '')
+                }</td>
+                <td>${a.started_at  ? `<span class="pill pill-time"><span data-iso="${a.started_at}"  data-format="slash"></span></span>` : ''}</td>
+                <td>${a.finished_at ? `<span class="pill pill-time"><span data-iso="${a.finished_at}" data-format="slash"></span></span>` : ''}</td>
+                <td>
+                  <button class="btn btn-xs btn-ghost" data-action="show-json"
+                          data-json='${(a.rollback_meta||"").replaceAll("'", "&#39;")}'>Rollback</button>
+                </td>
+              </tr>
+            `).join('') : `<tr><td colspan="8" class="text-secondary">No actions</td></tr>`;
+            window.renderAllTZ && window.renderAllTZ();
+          } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-danger">Load failed</td></tr>`;
+            console.error(err);
+          }
+        }
+        expandRow.classList.toggle('d-none');
+        if (icon) { icon.classList.toggle('bi-caret-down'); icon.classList.toggle('bi-caret-up'); }
+        return;
+      }
+
+      /* 直接開 request 預覽（不要容錯） */
+      if (action === 'open-request') {
+        e.preventDefault();
+        openRequestDraft(draftId);
+        return;
+      }
+
+      if (action === 'cancel') {
+        e.preventDefault();
+        btn.classList.add('disabled');
+        btn.textContent = 'Canceling…';
+        setTimeout(() => { btn.textContent = 'Canceled'; }, 800);
+        return;
+      }
+
+      if (action === 'rerun') {
+        e.preventDefault();
+        btn.classList.add('disabled');
+        btn.textContent = 'Re-scheduling…';
+        setTimeout(() => { btn.textContent = 'Queued'; }, 800);
+        return;
+      }
+
+      if (action === 'show-json' || action === 'show-report') {
+        const attr = btn.getAttribute('data-json') || '';
+        const rawStr = attr.replaceAll('&#39;', "'");
+        document.getElementById('jsonRaw').textContent = rawStr || '(empty)';
+        let pretty = '(empty)';
+        try { pretty = JSON.stringify(rawStr ? JSON.parse(rawStr) : {}, null, 2); } catch { pretty = rawStr || '(empty)'; }
+        document.getElementById('jsonPretty').textContent = pretty;
+        const tabEl = document.querySelector('#pretty-tab');
+        if (tabEl) new bootstrap.Tab(tabEl).show();
+        const jsonModalEl = document.getElementById('jsonModal');
+        if (jsonModalEl) new bootstrap.Modal(jsonModalEl).show();
+        return;
+      }
+
+      if (action === 'detail') {
+        e.preventDefault();
+        window.appToast?.push(`Task #${taskId} detail (demo)`, 'info');
+        return;
+      }
+    });
+
+    document.getElementById('copyJson').addEventListener('click', async () => {
+      const activePane = document.querySelector('.tab-pane.active');
+      const text = activePane?.querySelector('pre')?.textContent || '';
+      try { await navigator.clipboard.writeText(text); } catch {}
+    });
+  });
+</script>
+{% endblock %}
+

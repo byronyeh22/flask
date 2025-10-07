@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FORTI Platform</title>
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='font/bootstrap-icons.css') }}" rel="stylesheet">
+
+  {% block scripts %}{% endblock %}
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .layout-flex { display: flex; height: 100vh; min-height: 0; }
+    .sidebar {
+      background-color: #f7f7f9;
+      box-shadow: 2px 0 8px #0001;
+      border-top-right-radius: 16px;
+      border-bottom-right-radius: 16px;
+      min-width: 200px; max-width: 320px;
+      width: auto; height: 100vh;
+      padding: 1rem 0.5rem 1rem 1.2rem;
+      font-size: 0.97rem;
+      position: sticky; left: 0; top: 0; overflow-y: auto; z-index: 100;
+    }
+    .sidebar .nav-link {
+      border-radius: 8px; margin-bottom: 2px;
+      padding: 0.45rem 1.1rem 0.45rem 0.9rem;
+      font-weight: 500; display: flex; align-items: center; font-size: 1rem;
+      transition: background 0.15s, color 0.2s;
+    }
+    .sidebar .nav-link i { font-size: 1.25em; margin-right: 0.5em; opacity: 0.93; }
+    .sidebar .nav-link:hover, .sidebar .nav-link.active { background: #e0e7ef; color: #1565c0; }
+    .sidebar .nav-item { margin-bottom: 1px; }
+    .sidebar-section-title { font-size: 0.82rem; letter-spacing: 0.06em; margin: 1.1rem 0 0.3rem 0.6rem; font-weight: bold; text-transform: uppercase; color: #8c929d; }
+    .content { min-height: 100vh; flex: 1 1 0%; padding: 2.2rem 2.8rem 2rem 2.8rem; overflow-x: auto; background: #fff; }
+    .card { border-radius: 14px; box-shadow: 0 2px 16px 0 #0002; border: none; }
+    .card-center { max-width: 880px; margin-left: auto; margin-right: auto; }
+    @media (max-width: 900px) { .card-center { max-width: 100%; } }
+    @media (max-width: 767px) {
+      .sidebar { min-width: 100px; max-width: 100vw; height: auto; padding: 0.6rem 0.2rem; font-size: 0.95rem; }
+      .content { padding: 1rem; }
+    }
+    .sidebar-parent.collapsed i.bi-caret-down-fill { transform: rotate(-90deg); transition: transform 0.2s; }
+    .sidebar-parent[aria-expanded="true"] i.bi-caret-down-fill { transform: rotate(0deg); transition: 0.2s; }
+    .sidebar-child-list .nav-link { font-weight: 400; font-size: 0.97em; padding-left: 2.5em; }
+    .sidebar-child-list .nav-link.active { background: #d0e2ff; color: #094c92; }
+    .sidebar-collapse.collapse,
+    .sidebar-collapse.collapse.no-transition { transition: none !important; }
+    .toast { border-radius: 10px; min-width: 320px; box-shadow: 0 2px 16px 0 #0002; border: none; opacity: 0.97; font-size: 1.07rem; font-weight: 500; }
+    .toast .btn-close { filter: invert(0) grayscale(0) brightness(1); }
+    .table td, .table th {font-weight: 600;}
+    .table a {text-decoration: none;}
+    .table a:hover {text-decoration: underline;}
+    th {text-align: center !important; vertical-align: middle;}
+    .table th, .table td {text-align: center; vertical-align: middle;}
+    #tzBadge { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="layout-flex">
+    <!-- Sidebar -->
+    <nav class="sidebar d-flex flex-column">
+      <h5 class="mb-4 fw-bold">
+        <a href="{{ url_for('main.index') }}" class="text-decoration-none text-dark">
+          FORTI PLATFORM
+        </a>
+      </h5>
+      <ul class="nav flex-column">
+        {% for section in sidebar %}
+          <li class="nav-item mb-1">
+            <a class="nav-link sidebar-parent collapsed d-flex justify-content-between align-items-center"
+               href="#sidebar-{{ section.identifier }}"
+               data-bs-toggle="collapse"
+               role="button"
+               aria-expanded="false"
+               aria-controls="sidebar-{{ section.identifier }}">
+              <span>
+                {% if section.icon %}<i class="{{ section.icon }} me-2"></i>{% endif %}
+                {{ section.name }}
+              </span>
+              <i class="bi bi-caret-down-fill ms-1"></i>
+            </a>
+            <div class="collapse sidebar-collapse" id="sidebar-{{ section.identifier }}">
+              <ul class="nav flex-column ms-2 sidebar-child-list my-1">
+                {% for item in section["items"] %}
+                  <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == item.endpoint %}active{% endif %}"
+                       href="{{ url_for(item.endpoint) }}">
+                      {% if item.icon_class %}<i class="{{ item.icon_class }} me-1"></i>{% endif %}
+                      {{ item.name }}
+                    </a>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </nav>
+    <script>
+    /* ---- Sidebar: 早期還原展開狀態（避免先收起再展開的閃動） ---- */
+    (function restoreSidebarImmediately(){
+      try {
+        document.querySelectorAll('.sidebar-collapse').forEach(el => {
+          const id = el.id;
+          if (!id) return;
+          if (localStorage.getItem('sidebar:' + id) === 'show') {
+            // 先關掉 transition，並直接標記為展開
+            el.classList.add('show', 'no-transition');
+            el.style.height = 'auto';
+            // 同步更新觸發器狀態
+            const trigger = document.querySelector('[href="#' + id + '"]');
+            if (trigger) {
+              trigger.classList.remove('collapsed');
+              trigger.setAttribute('aria-expanded', 'true');
+            }
+          }
+        });
+      } catch (e) { /* ignore */ }
+    })();
+    </script>
+    <!-- Content Area -->
+    <main class="content w-100">
+      <!-- User dropdown + timezone -->
+      <div class="d-flex justify-content-end align-items-center mb-3">
+        <!-- 時區徽章 -->
+        <span id="tzBadge" class="badge bg-light text-dark border me-3"></span>
+
+        {% if session.get('username') %}
+        <div class="dropdown">
+          <button class="btn btn-light dropdown-toggle d-flex align-items-center gap-2"
+                  type="button"
+                  id="userDropdown"
+                  data-bs-toggle="dropdown"
+                  aria-expanded="false">
+            <i class="bi bi-person-circle"></i>
+            {% if session.get('auth_source') %}
+              {% set src = session.get('auth_source') %}
+              {% if src == 'local' %}
+                <span class="badge bg-primary">local</span>
+              {% elif src == 'ad' %}
+                <span class="badge bg-success">ad</span>
+              {% else %}
+                <span class="badge bg-secondary">{{ src }}</span>
+              {% endif %}
+            {% endif %}
+            <span>{{ session.get('username') }}</span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="min-width: 220px;">
+            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#tzModal">
+              <i class="bi bi-globe me-1"></i> Time zone…
+            </a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal">Change Password</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">Logout</a></li>
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Toast notification container -->
+      <div aria-live="polite" aria-atomic="true"
+           style="position: fixed; bottom: 24px; right: 24px; z-index: 1080; min-width: 320px;">
+        <div id="toast-container"></div>
+      </div>
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <!-- ===== Timezone Modal ===== -->
+  <div class="modal fade" id="tzModal" tabindex="-1" aria-labelledby="tzModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="tzModalLabel"><i class="bi bi-globe me-2"></i>Select Time Zone</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Region</label>
+            <select id="tzRegion" class="form-select"></select>
+          </div>
+          <div>
+            <label class="form-label">City / Zone</label>
+            <select id="tzZone" class="form-select" size="10" style="max-height: 260px; overflow:auto;"></select>
+            <div class="form-text">Pick a zone; no typing required.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button id="tzApplyBtn" class="btn btn-primary">Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap -->
+  <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+
+  <script>
+  document.addEventListener("DOMContentLoaded", () => {
+    // 每個 section collapse 都監聽
+    document.querySelectorAll('.sidebar-collapse').forEach(el => {
+      const id = el.id;
+      if (!id) return;
+
+      // 監聽展開
+      el.addEventListener("shown.bs.collapse", () => {
+        localStorage.setItem("sidebar:" + id, "show");
+      });
+
+      // 監聽收起
+      el.addEventListener("hidden.bs.collapse", () => {
+        localStorage.setItem("sidebar:" + id, "hide");
+      });
+    });
+
+    requestAnimationFrame(() => {
+      document.querySelectorAll('.sidebar-collapse.no-transition').forEach(el => {
+        el.classList.remove('no-transition');
+        // 清理為了強制展開加的高度
+        if (el.style.height === 'auto') el.style.removeProperty('height');
+      });
+    });
+  });
+
+  (function(){
+    // ---- 把 DB 時間尾碼 "UTC" / "GMT" 清理 ----
+    function cleanDbDatetime(raw){
+      if (!raw) return '';
+      let v = String(raw).trim();
+      v = v.replace(/\s+(UTC|GMT)\s*([+-]\d{2}:\d{2})$/i, ' $2');
+      v = v.replace(/\s+(UTC|GMT)$/i, '');
+      return v;
+    }
+
+    // ---- parse ----
+    function parseAsInstant(s){
+      if (!s) return null;
+      if (s instanceof Date) return s;
+      const v = String(s).trim();
+      if (/Z$|[+-]\d{2}:\d{2}$|GMT|UTC/i.test(v)) {
+        return new Date(v);
+      }
+      const d = new Date(v);
+      return isNaN(d) ? null : d;
+    }
+
+    // ---- format ----
+    function tzFormat(dateLike){
+      const d = (dateLike instanceof Date) ? dateLike : parseAsInstant(cleanDbDatetime(dateLike));
+      if (!d || isNaN(d)) return '';
+      const fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: window.CURRENT_TZ || 'UTC',
+        year:'numeric', month:'2-digit', day:'2-digit',
+        hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23'
+      });
+      const parts = Object.fromEntries(fmt.formatToParts(d).map(p=>[p.type,p.value]));
+      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+    }
+
+    window.renderAllTZ = function(){
+      document.querySelectorAll('[data-iso]').forEach(el=>{
+        el.textContent = tzFormat(el.getAttribute('data-iso'));
+      });
+    }
+
+    // ---- 控制 ----
+    const tzBadge = document.getElementById('tzBadge');
+    function setTZ(z){
+      try {
+        window.CURRENT_TZ = (z && String(z).trim()) || 'Asia/Taipei';
+        localStorage.setItem('tz', window.CURRENT_TZ);
+        if (tzBadge) tzBadge.textContent = window.CURRENT_TZ;
+        renderAllTZ();
+      } catch(e) {
+        console.error('Failed to save timezone:', e);
+      }
+    }
+
+    // 初始化
+    window.CURRENT_TZ = localStorage.getItem('tz') || null;
+    if (!window.CURRENT_TZ) {
+      fetch("/settings/timezone", { headers:{'Accept':'application/json'} })
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(j => {
+          if (j && (j.timezone || j.tz)) {
+            setTZ(j.timezone || j.tz);
+          } else {
+            setTZ({{ (server_timezone or 'Asia/Taipei')|tojson }});
+          }
+        })
+        .catch(() => setTZ({{ (server_timezone or 'Asia/Taipei')|tojson }}));
+    } else {
+      setTZ(window.CURRENT_TZ);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      window.renderAllTZ();
+    });
+
+    // modal
+    const tzModalEl = document.getElementById('tzModal');
+    const tzRegion  = document.getElementById('tzRegion');
+    const tzZone    = document.getElementById('tzZone');
+    const tzApply   = document.getElementById('tzApplyBtn');
+    const COMMON_TZ = [
+      "UTC","Asia/Taipei","Asia/Shanghai","Asia/Tokyo","Asia/Hong_Kong","Asia/Singapore",
+      "Europe/London","Europe/Berlin","America/Los_Angeles","America/New_York","Australia/Sydney"
+    ];
+    const ALL_TZ = (Intl.supportedValuesOf && Intl.supportedValuesOf('timeZone')) || COMMON_TZ;
+
+    function regionOf(tz){ return String(tz).split('/')[0] || 'Other'; }
+    function zonesOfRegion(region){ return ALL_TZ.filter(z => regionOf(z) === region); }
+    function uniqueRegions(){
+      const s = new Set(ALL_TZ.map(regionOf));
+      const order = ["UTC","Asia","Europe","America","Australia","Africa","Indian","Pacific","Atlantic","Antarctica","Etc"];
+      return Array.from(s).sort((a,b)=> order.indexOf(a) - order.indexOf(b));
+    }
+    function populateRegions(){
+      tzRegion.innerHTML = "";
+      uniqueRegions().forEach(r=>{
+        const opt = document.createElement('option');
+        opt.value = r; opt.textContent = r;
+        tzRegion.appendChild(opt);
+      });
+    }
+    function populateZones(region, preselect){
+      tzZone.innerHTML = "";
+      const list = zonesOfRegion(region);
+      list.forEach(z=>{
+        const opt = document.createElement('option');
+        opt.value = z; opt.textContent = z.substring(region.length + 1);
+        if (z === preselect) opt.selected = true;
+        tzZone.appendChild(opt);
+      });
+      if (!tzZone.value && list.length) tzZone.selectedIndex = 0;
+    }
+
+    tzModalEl?.addEventListener('shown.bs.modal', ()=>{
+      populateRegions();
+      const r = regionOf(window.CURRENT_TZ);
+      tzRegion.value = r;
+      populateZones(r, window.CURRENT_TZ);
+      tzZone.focus();
+    });
+    tzRegion?.addEventListener('change', ()=> populateZones(tzRegion.value, null));
+
+    tzApply?.addEventListener('click', ()=>{
+      const chosen = tzZone.value || window.CURRENT_TZ;
+      setTZ(chosen);
+      fetch("/settings/timezone", {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ timezone: chosen })
+      }).catch(()=>{});
+      bootstrap.Modal.getInstance(tzModalEl)?.hide();
+    });
+
+
+    renderAllTZ();
+  })();
+  </script>
+</body>
+</html>
+

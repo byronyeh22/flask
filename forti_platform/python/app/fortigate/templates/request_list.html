@@ -1,0 +1,3737 @@
+{% extends "base.html" %}
+{% block title %}Policy Requests{% endblock %}
+{% block content %}
+
+{# 本地 CSS #}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/tom-select/tom-select.bootstrap5.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.css') }}">
+
+{# 本地 JS #}
+<script src="{{ url_for('static', filename='vendor/tom-select/tom-select.complete.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/sortablejs/Sortable.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.js') }}"></script>
+
+<style>
+/* =========================================================
+   Base & Utilities
+   ========================================================= */
+:root{
+  /* Unified palette for step chips & timeline statuses */
+  --c-blue-bg1:#eaf4ff;  --c-blue-bg2:#e1efff;  --c-blue-bd:#9ec5fe;  --c-blue-tx:#084298;   /* 淺藍 */
+  --c-green-bg1:#edf7ed; --c-green-bg2:#e6f4ea; --c-green-bd:#b7dfb7; --c-green-tx:#0f5132;  /* 淺綠 */
+  --c-brightg-bg1:#d8fadb; --c-brightg-bg2:#c9f6cf; --c-brightg-bd:#82d29a; --c-brightg-tx:#0a3622; /* 亮綠 */
+  --c-red-bg1:#fdecea;   --c-red-bg2:#fbe2e1;   --c-red-bd:#f1aeb5;   --c-red-tx:#842029;    /* 淺紅 */
+  --c-gray-bg1:#f5f5f5;  --c-gray-bg2:#f1f3f5;  --c-gray-bd:#ced4da;  --c-gray-tx:#495057;   /* 淺灰 */
+  --c-amber-bg1:#fff6e5; --c-amber-bd:#ffd8a8;  --c-amber-tx:#7a5900; /* 琥珀 */
+
+  /* Drafts table row states */
+  --row-hover-bg:#f8fbff;
+  --row-active-bg:#e7f1ff;
+}
+
+.page-wide{ max-width:1480px; }
+@media (min-width:1680px){ .page-wide{ max-width:1600px; } }
+
+.scroll-box{
+  border:1px solid #dee2e6; border-radius:.5rem; background:#fff;
+  max-height:560px; overflow:auto; box-shadow:0 .25rem .75rem rgba(0,0,0,.05);
+}
+
+.table th,.table td{ vertical-align:middle; }
+.text-start-important{ text-align:left!important; }
+#qStatus{ min-width:180px; }
+
+/* 小按鈕（純 icon） */
+.btn-icon{
+  width:34px; height:34px; padding:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  line-height:1; border-radius:.5rem;
+}
+.btn-icon i{ font-size:1rem; }
+
+/* 工具列細節 */
+.toolbar-soft .form-control-sm,
+.toolbar-soft .form-select-sm{ box-shadow: inset 0 1px 2px rgba(0,0,0,.02); }
+
+/* 自動更新按鈕視覺 */
+#btnAutoSwitch.btn-icon.active{
+  background:#0d6efd; color:#fff; border-color:#0a58ca;
+}
+
+/* Invalid 樣式（TomSelect + input） */
+.ts-control.is-invalid,
+.ts-wrapper.is-invalid .ts-control,
+input.is-invalid{
+  border-color:#dc3545 !important;
+  box-shadow:0 0 0 .2rem rgba(220,53,69,.15) !important;
+}
+
+/* =========================================================
+   Tables: Action Plan / Plan Result / Diff
+   ========================================================= */
+#ap-rows td,#ap-rows th{ white-space:normal; vertical-align:top; }
+#ap-rows .cell-wrap{ word-break:break-word; }
+#ap-rows thead th{ position:sticky; top:0; background:#f8f9fa; z-index:1; }
+
+/* Diff block（合併重複定義） */
+.diff-block{
+  border:1px solid #dee2e6; border-radius:.5rem; margin:.5rem 0;
+  box-shadow:0 .25rem .75rem rgba(0,0,0,.04);
+}
+.diff-block .diff-head{
+  background:#f8f9fa; border-bottom:1px solid #dee2e6;
+  padding:.4rem .6rem; font-weight:600;
+  display:flex; align-items:center;
+  gap:.5rem; flex-wrap:wrap;
+}
+.diff-block .table{ margin:0; }
+#m-diff-rows td,#m-diff-rows th{ white-space:normal; }
+#m-diff-rows .cell-wrap{ word-break:break-word; }
+#m-diff-rows .result-badge{
+  min-width:92px; display:inline-block; text-align:center;
+  border:1px solid transparent; border-radius:999px; padding:.2rem .6rem;
+  font-weight:800; text-transform:uppercase; letter-spacing:.02em;
+  display:inline-flex; align-items:center; justify-content:center;
+}
+#m-diff-rows .result-badge i{ font-size:.95em; margin-right:.35rem; }
+
+/* Diff row 狀態色 */
+#m-diff-rows tr.table-success td{ background:#edf7ed!important; }
+#m-diff-rows tr.table-warning td{ background:#fff6e5!important; }
+#m-diff-rows tr.table-danger  td{ background:#fdecea!important; }
+
+/* Diff 欄寬微調（最後一欄置中） */
+#m-diff-rows table thead th:nth-child(1),
+#m-diff-rows table tbody td:nth-child(1){ width:18%; }
+#m-diff-rows table thead th:nth-child(2),
+#m-diff-rows table tbody td:nth-child(2),
+#m-diff-rows table thead th:nth-child(3),
+#m-diff-rows table tbody td:nth-child(3){ width:33%; }
+#m-diff-rows table thead th:nth-child(4),
+#m-diff-rows table tbody td:nth-child(4){ width:16%; text-align:center; }
+
+/* Diff 徽章主題 */
+.badge-res-changed{
+  background:linear-gradient(180deg,var(--c-amber-bg1),#ffe8cc);
+  border-color:var(--c-amber-bd); color:var(--c-amber-tx);
+  box-shadow:0 0 0 2px rgba(255,200,0,.2);
+}
+.badge-res-added{    background:var(--c-green-bg1); border:1px solid var(--c-green-bd); color:var(--c-green-tx); }
+.badge-res-removed{  background:var(--c-red-bg1);   border:1px solid var(--c-red-bd);   color:var(--c-red-tx); }
+.badge-res-unchanged{background:var(--c-gray-bg1);  border:1px solid var(--c-gray-bd);  color:var(--c-gray-tx); }
+.diff-row-nochg{ opacity:.85; }
+.diff-row-chg td:first-child{ border-left:4px solid #ff922b; }
+
+/* 行動版簡表 */
+.table.ap-compact th, .table.ap-compact td { padding:.45rem .6rem; }
+.badge-chip{border:1px solid #dee2e6;background:linear-gradient(180deg,#fff,#f8f9fa);font-weight:600;--bs-badge-color:#495057;color:#495057;}
+.badge-act-create{color:#0f5132;border-color:#b7dfb7;background:linear-gradient(180deg,#edf7ed,#e6f4ea)}
+.badge-act-update{color:#084298;border-color:#9ec5fe;background:linear-gradient(180deg,#eaf4ff,#e1efff)}
+.badge-act-delete{color:#842029;border-color:#f1aeb5;background:linear-gradient(180deg,#fdecea,#fbe2e1)}
+.badge-kind{background:var(--c-blue-bg1);border:1px solid var(--c-blue-bd);color:var(--c-blue-tx);font-weight:700;}
+.badge-vdom{background:#f8f9fa;border:1px solid #dee2e6;color:#495057}
+.badge-ok{background:#e6f4ea;border:1px solid #b7dfb7;color:#0f5132}
+.badge-skip{background:#f1f3f5;border:1px solid #ced4da;color:#495057}
+.badge-err{background:#fbe2e1;border:1px solid #f1aeb5;color:#842029}
+
+/* =========================================================
+   Search & Sync (Policy List)
+   ========================================================= */
+.policy-scroll{ max-height:360px; overflow:auto; border:1px solid #dee2e6; border-radius:.5rem; }
+#policyTable{ table-layout:fixed; width:100%; }
+#policyTable th,#policyTable td{
+  padding:.55rem .8rem; vertical-align:middle; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#policyTable thead th{ position:sticky; top:0; background:#f8f9fa; z-index:1; }
+#col-id{ width:110px; } #col-name{ width:40%; } #col-status{ width:120px; } #col-schedule{ width:140px; } #col-nat{ width:80px; }
+.row-selectable tbody tr{ cursor:pointer; }
+.row-selectable tbody tr.table-active td{ background:var(--row-active-bg)!important; }
+
+/* =========================================================
+   Plans board (drag UI)
+   ========================================================= */
+#planBoard{
+  min-height:48px; border:1px dashed #b6c1d2; border-radius:.5rem; padding:.5rem; background:#fbfdff;
+}
+.plan-card{
+  background:#fff; border:1px solid #dee2e6; border-radius:.5rem; padding:.5rem; margin:.4rem 0;
+  display:flex; gap:.75rem; align-items:flex-start; transition:transform .16s ease, box-shadow .16s ease;
+}
+.plan-grip{ cursor:grab; user-select:none; line-height:1; display:flex; align-items:center; padding:.15rem .2rem; border-radius:.375rem; }
+.plan-grip:hover{ background:#f1f3f5; }
+.plan-grip .bar{ width:4px; height:18px; background:#ced4da; border-radius:2px; margin:0 2px; }
+.plan-card.dragging{ opacity:.6; }
+.plan-placeholder{
+  border:2px dashed #a3b2c7; border-radius:.5rem; margin:.4rem 0; height:56px;
+  background:repeating-linear-gradient(45deg,#f6f9ff,#f6f9ff 8px,#f0f4ff 8px,#f0f4ff 16px);
+}
+.plan-main{ flex:1; }
+.plan-title{ font-weight:600; }
+.plan-sub{ font-size:.9em; color:#6c757d; }
+.plan-meta{ font-size:.9em; }
+.plan-actions{ display:flex; gap:.4rem; }
+.plan-actions .btn{ padding:.15rem .4rem; }
+.empty-hint{ color:#6c757d; font-style:italic; }
+
+/* SortableJS visual */
+.sortable-ghost{ opacity:.35; }
+.sortable-chosen{ box-shadow:0 .5rem 1rem rgba(0,0,0,.15); }
+.sortable-drag{ opacity:.85; }
+
+/* =========================================================
+   Modal Z-index stack
+   ========================================================= */
+#draftModal.modal{ z-index:1058; }
+#editModal.modal{ z-index:1060; }            /* Create/Edit */
+#policyPreviewModal.modal{ z-index:1062; }   /* Preview > Edit */
+#planFormModal.modal{ z-index:1064; }        /* Form on top */
+#rejectModal.modal{ z-index:1064; }
+
+/* =========================================================
+   TomSelect tweaks
+   ========================================================= */
+.ts-dropdown .optgroup-header{
+  position:sticky; top:0; background:#f8f9fa; font-weight:600; font-size:.85rem;
+  border-bottom:1px solid #e9ecef; color:#495057; z-index:1; padding:.2rem .5rem;
+}
+.ts-dropdown .optgroup{ padding-top:.25rem; margin-top:.25rem; }
+.ts-optline{ display:flex; align-items:center; gap:.5rem; }
+.ts-ico{ width:1.2em; display:inline-flex; align-items:center; justify-content:center; opacity:.9; }
+
+/* =========================================================
+   Workflow: steps & timeline
+   ========================================================= */
+.flow-chip.current{ box-shadow:0 0 0 2px rgba(13,110,253,.18); }
+
+/* CURRENT 主題色（Request / Submit / Approved / Deploy / Done） */
+.flow-steps .flow-chip.current.chip-Request{
+  background:linear-gradient(180deg,var(--c-blue-bg1),var(--c-blue-bg2));
+  border-color:var(--c-blue-bd); color:var(--c-blue-tx);
+}
+.flow-steps .flow-chip.current.chip-Submit{
+  background:linear-gradient(180deg,var(--c-green-bg1),var(--c-green-bg2));
+  border-color:var(--c-green-bd); color:var(--c-green-tx);
+}
+.flow-steps .flow-chip.current.chip-Approved{
+  background:linear-gradient(180deg,var(--c-brightg-bg1),var(--c-brightg-bg2));
+  border-color:var(--c-brightg-bd); color:var(--c-brightg-tx);
+}
+.flow-steps .flow-chip.current.chip-Deploy{
+  background:linear-gradient(180deg,var(--c-blue-bg1),var(--c-blue-bg2));
+  border-color:var(--c-blue-bd); color:var(--c-blue-tx);
+}
+.flow-steps .flow-chip.current.chip-Done{
+  background:linear-gradient(180deg,var(--c-green-bg1),var(--c-green-bg2));
+  border-color:var(--c-green-bd); color:var(--c-green-tx);
+}
+
+/* 失敗終點：同樣只在 current 時上色（紅/灰） */
+.flow-steps .flow-chip.current.chip-Rejected{
+  background:linear-gradient(180deg,var(--c-red-bg1),var(--c-red-bg2));
+  border-color:var(--c-red-bd); color:var(--c-red-tx);
+}
+.flow-steps .flow-chip.current.chip-Canceled{
+  background:linear-gradient(180deg,var(--c-gray-bg1),var(--c-gray-bg2));
+  border-color:var(--c-gray-bd); color:var(--c-gray-tx);
+}
+/* Timeline (left status box + line) */
+.flow-tl{
+  --tl-colw:12rem; --line-x:14px; --dot:10px; --ico-w:1.2em;
+  position:relative; display:grid; row-gap:.6rem; padding-left:calc(var(--line-x) + .5rem);
+}
+.flow-tl::before{
+  content:""; position:absolute; left:var(--line-x); top:.25rem; bottom:.25rem; width:2px; background:#e9ecef;
+}
+.flow-tl .tl-item{
+  position:relative; display:grid; grid-template-columns:var(--tl-colw) minmax(0,1fr);
+  column-gap:.75rem; align-items:start; padding:.35rem 0 .45rem; border-left:none!important; margin-left:0!important;
+}
+.flow-tl .tl-item::before{
+  content:""; position:absolute; left:calc(var(--line-x) - var(--dot)/2 + 1px);
+  top:.95rem; width:var(--dot); height:var(--dot); background:#adb5bd; border-radius:50%;
+  box-shadow:0 0 0 2px #fff, 0 0 0 4px #e9ecef;
+}
+.flow-tl .status{
+  width:100%; min-width:0; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  text-align:center; font-weight:700; padding:.18rem .6rem; border:1px solid #dee2e6; border-radius:.75rem;
+  background:linear-gradient(180deg,#fff,#f8f9fa); font-variant-numeric:tabular-nums;
+  display:inline-flex; align-items:center; justify-content:center; gap:.35rem;
+}
+.flow-tl .status i{ display:inline-block; width:var(--ico-w); min-width:var(--ico-w); text-align:center; line-height:1; }
+.flow-tl .meta{ font-size:.95rem; color:#495057; line-height:1.35; }
+.flow-tl .meta .k{ color:#6c757d; font-weight:600; margin-right:.25rem; }
+.flow-tl .note{ font-size:.9rem; color:#6c757d; padding-top:.15rem; }
+
+/* Timeline status themes */
+.flow-tl .s-Pending_Submit  .status,
+.flow-tl .s-Preparing_Deploy .status{ background:linear-gradient(180deg,var(--c-blue-bg1),var(--c-blue-bg2)); border-color:var(--c-blue-bd); color:var(--c-blue-tx); }
+.flow-tl .s-Submitted .status,
+.flow-tl .s-Awaiting_Approval .status,
+.flow-tl .s-Deploy_Succeeded .status{ background:linear-gradient(180deg,var(--c-brightg-bg1),var(--c-brightg-bg2)); border-color:var(--c-brightg-bd); color:var(--c-brightg-tx); }
+.flow-tl .s-Approved .status{ background:linear-gradient(180deg,var(--c-brightg-bg1),var(--c-brightg-bg2)); border-color:var(--c-brightg-bd); color:var(--c-brightg-tx); }
+.flow-tl .s-Deploying .status{ background:linear-gradient(180deg,var(--c-brightg-bg1),var(--c-brightg-bg2)); border-color:var(--c-brightg-bd); color:var(--c-brightg-tx); }
+.flow-tl .s-Rejected .status,
+.flow-tl .s-Deploy_Failed .status,
+.flow-tl .s-Partial_Failed .status,
+.flow-tl .s-Verify_Failed .status{ background:linear-gradient(180deg,var(--c-red-bg1),var(--c-red-bg2)); border-color:var(--c-red-bd); color:var(--c-red-tx); }
+.flow-tl .s-Canceled .status{ background:linear-gradient(180deg,var(--c-gray-bg1),var(--c-gray-bg2)); border-color:var(--c-gray-bd); color:var(--c-gray-tx); }
+
+/* Timeline dots */
+.flow-tl .s-Pending_Submit::before,
+.flow-tl .s-Preparing_Deploy::before{ background:#0d6efd; }
+.flow-tl .s-Submitted::before,
+.flow-tl .s-Awaiting_Approval::before,
+.flow-tl .s-Deploy_Succeeded::before{ background:#12824d; }
+.flow-tl .s-Approved::before{ background:#12824d; }
+.flow-tl .s-Deploying::before{ background:#12824d; }
+.flow-tl .s-Rejected::before,
+.flow-tl .s-Deploy_Failed::before,
+.flow-tl .s-Partial_Failed::before,
+.flow-tl .s-Verify_Failed::before{ background:#dc3545; }
+.flow-tl .s-Canceled::before{ background:#adb5bd; }
+
+/* =========================================================
+   Workflow: steps (base) + arrows
+   ========================================================= */
+.flow-steps{
+  display:flex; flex-wrap:wrap; align-items:center; gap:.45rem;
+}
+.flow-steps .flow-arrow{
+  opacity:.6; color:#6c757d; user-select:none;
+}
+
+/* 步驟 chip：基本樣式（未選/已完成用這個基底） */
+.flow-steps .flow-chip{
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding:.22rem .6rem; border-radius:999px; font-weight:700;
+  border:1px solid #dee2e6;
+  background:linear-gradient(180deg,#fff,#f8f9fa);
+  color:#495057;
+  line-height:1; white-space:nowrap;
+}
+.flow-steps .flow-chip i{ font-size:1rem; line-height:1; }
+
+/* 已完成（done）：淡化一點、但仍保留邊框與底色 */
+.flow-steps .flow-chip.done{
+  border-color:#ced4da;
+  background:linear-gradient(180deg,#f8f9fa,#f1f3f5);
+  color:#495057; opacity:.95;
+}
+
+/* 失敗終點（fail）：使用紅/灰基底，current 的顏色由下方主題規則覆寫 */
+.flow-steps .flow-chip.fail{
+  border-color:#f1aeb5;
+  background:linear-gradient(180deg,#fdecea,#fbe2e1);
+  color:#842029;
+}
+
+/* 高亮目前（current）的陰影 */
+.flow-chip.current{ box-shadow:0 0 0 2px rgba(13,110,253,.18); }
+
+@media (max-width:576px){ .flow-tl{ --tl-colw:9.5rem; } }
+
+/* Toast：info 文字改白 */
+.app-toast .toast.info,
+.app-toast .toast.info .toast-body { color:#fff !important; }
+.app-toast .toast.info { background:#0d6efd !important; border-color:#0a58ca !important; }
+.app-toast .toast.info .btn-close { filter: invert(1); }
+
+/* =========================================================
+   Request Form modal 尺寸
+   ========================================================= */
+#planFormModal .modal-dialog{ max-width:min(1000px, 92vw); height:83vh; }
+#planFormModal .modal-content{ height:100%; display:flex; flex-direction:column; }
+#planFormModal.modal .modal-body{ flex:1 1 auto; overflow:auto; }
+
+/* ===== Action Type select color themes ===== */
+.badge-soft-danger{background:linear-gradient(180deg,var(--c-red-bg1),var(--c-red-bg2));border:1px solid var(--c-red-bd);color:var(--c-red-tx);}
+
+/* option 列表本身上色（支援度取決於瀏覽器，但安全） */
+#d_type option[value="create"]{ background:var(--c-green-bg1); color:var(--c-green-tx); }
+#d_type option[value="update"]{ background:var(--c-blue-bg1);  color:var(--c-blue-tx); }
+#d_type option[value="delete"]{ background:var(--c-red-bg1);   color:var(--c-red-tx); }
+
+/* 已選取後，整個 select 也依值換色（現代瀏覽器可用 :has，並附 JS 後援類別） */
+#d_type:has(option[value="create"]:checked),
+#d_type.sel-act-create{
+  background:linear-gradient(180deg,var(--c-green-bg1),var(--c-green-bg2));
+  border-color:var(--c-green-bd); color:var(--c-green-tx);
+}
+#d_type:has(option[value="update"]:checked),
+#d_type.sel-act-update{
+  background:linear-gradient(180deg,var(--c-blue-bg1),var(--c-blue-bg2));
+  border-color:var(--c-blue-bd); color:var(--c-blue-tx);
+}
+#d_type:has(option[value="delete"]:checked),
+#d_type.sel-act-delete{
+  background:linear-gradient(180deg,var(--c-red-bg1),var(--c-red-bg2));
+  border-color:var(--c-red-bd); color:var(--c-red-tx);
+}
+.badge-brightg{
+  /* GitHub Actions 類型的綠色 */
+  --success-bg: #2ea44f;
+  --success-bd: #2c974b;
+
+  background: var(--success-bg);
+  border: 1px solid var(--success-bd);
+  color: #fff;
+  font-weight: 700;
+
+  border-radius: 999px;          /* 膠囊 */
+  padding: .22rem .6rem;         /* 舒服的內距 */
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.05);
+}
+/* Fortigate Requests：統一 Status 的膠囊外觀（沿用 Deploy_Succeeded 風格） */
+.badge.bg-info,
+.badge.bg-danger,
+.badge.bg-warning,
+.badge-soft-danger,
+.badge-brightg{ /* 也把 .badge-brightg 納進來統一形制 */
+  border-radius: 999px;
+  padding: .22rem .6rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-weight: 700;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.05);
+  border: 1px solid transparent;
+  color: #fff; /* 全部白字（與 Deploy_Succeeded 一致） */
+}
+.badge.bg-secondary{
+  background: linear-gradient(180deg,#f1f3f5,#e9ecef);
+  border-color: #ced4da;
+  color: #495057;                 /* 深色字，對比清楚 */
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.04);
+}
+/* 顏色主題（只換底色/邊框，形制一致） */
+.badge.bg-info{       background:#0d6efd; border-color:#0a58ca; }   /* Pending / Awaiting */
+.badge.bg-secondary{  background:#6c757d; border-color:#5c636a; }   /* Preparing / Deploying / Canceled */
+.badge.bg-danger{     background:#dc3545; border-color:#b02a37; }   /* Rejected / Deploy_Failed */
+.badge.bg-warning{    background:#f59f00; border-color:#e67700; }   /* Partial_Failed */
+.badge-soft-danger{   background:#dc3545; border-color:#b02a37; }   /* Verify_Failed → 與 danger 同紅 */
+
+/* =========================================================
+   Controls-right（右側工具列自動換行）
+   ========================================================= */
+@media (min-width:768px){
+  .controls-right{
+    display:flex; flex-wrap:nowrap; align-items:center; gap:.5rem; justify-content:flex-end;
+  }
+  .controls-right::after{ content:""; order:98; flex-basis:100%; }
+  .controls-right #btnOpenCreate{ order:99; margin-left:auto; align-self:flex-end; }
+}
+
+/* =========================================================
+   Drafts 表格（釘選 + Meta 欄 + Hover/Active 整列高亮）
+   ========================================================= */
+#draftsTable{
+  table-layout:fixed; width:100%;
+  /* 釘選位置與行為色 */
+  --pin1:130px;
+}
+#draftsTable th,#draftsTable td{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#draftsTable td.title-cell{ text-align:left!important; }
+#draftsTable td.title-cell a{ display:block; white-space:inherit; overflow:hidden; text-overflow:ellipsis; }
+
+/* 釘選前兩欄（左側） */
+#draftsTable th.pin-1, #draftsTable td.pin-1{
+  position:sticky; left:0; z-index:3; background:#fff; box-shadow:2px 0 0 rgba(0,0,0,.03);
+}
+#draftsTable th.pin-2, #draftsTable td.pin-2{
+  position:sticky; left:var(--pin1); z-index:2; background:#fff; box-shadow:2px 0 0 rgba(0,0,0,.02);
+}
+
+/* 手機 Meta 欄（小字、可換行） */
+#draftsTable td.col-meta{ white-space:normal; font-size:.9em; color:#6c757d; }
+#draftsTable td.col-meta b{ color:#495057; font-weight:600; margin-right:.25rem; }
+
+/* 鍵盤聚焦的高亮*/
+#draftsTable tbody tr:hover > td{
+  background-color: transparent !important;
+}
+#draftsTable tbody tr:focus-within > td{
+  background-color: var(--row-hover-bg) !important;
+}
+
+/* 選取狀態（.table-active）整列高亮 */
+#draftsTable tbody tr.table-active > td{
+  background-color: var(--row-active-bg) !important;
+}
+
+/* sticky 鍵盤聚焦 */
+#draftsTable tbody tr:hover > td.pin-1,
+#draftsTable tbody tr:hover > td.pin-2{
+  background-color: transparent !important;
+}
+#draftsTable tbody tr:focus-within > td.pin-1,
+#draftsTable tbody tr:focus-within > td.pin-2{
+  background-color: var(--row-hover-bg) !important;
+}
+
+#draftsTable tbody tr.table-active > td.pin-1,
+#draftsTable tbody tr.table-active > td.pin-2{
+  background-color: var(--row-active-bg) !important;
+}
+
+#draftsTable{ --bs-table-hover-bg: transparent; }
+
+/* ===== Sortable headers & pager ===== */
+th.sortable{ cursor:pointer; user-select:none; }
+th.sortable .sort-ico{ margin-left:.25rem; opacity:.5; transition:transform .12s ease, opacity .12s ease; }
+th.sortable[aria-sort="asc"]  .sort-ico{ opacity:1; transform:rotate(180deg); } /* ↑ */
+th.sortable[aria-sort="desc"] .sort-ico{ opacity:1; }                           /* ↓ */
+.pagebar{ display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
+.pagebar .form-select{ width:auto; }
+.pagebar .pagination{ margin:0; }
+
+
+.js-busy{ z-index: 10; pointer-events: auto; }
+
+</style>
+
+<div class="container-xxl py-3 page-wide">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="m-0 bi-sliders">Fortigate Requests</h3>
+  </div>
+
+  <!-- Quick filter -->
+  <div class="row g-2 mb-2 align-items-center">
+    <div class="col-12 col-md-6">
+      <input id="qText" class="form-control form-control-sm" placeholder="Quick filter (ID, Title, Status, Time, Created By)…">
+    </div>
+    <div class="col-6 col-md-3">
+      <select id="qStatus" class="form-select form-select-sm">
+        <option value="">Status (any)</option>
+        <option value="Pending_Submit">Pending_Submit</option>
+        <option value="Preparing_Deploy">Preparing_Deploy</option>
+        <option value="Awaiting_Approval">Awaiting_Approval</option>
+	<option value="Deploying">Deploying</option>
+        <option value="Verify_Failed">Verify_Failed</option>
+        <option value="Rejected">Rejected</option>
+        <option value="Deploy_Succeeded">Deploy_Succeeded</option>
+        <option value="Deploy_Failed">Deploy_Failed</option>
+        <option value="Partial_Failed">Partial_Failed</option>
+        <option value="Canceled">Canceled</option>
+      </select>
+    </div>
+        <div class="col-6 col-md-3">
+          <div class="d-flex align-items-center">
+            <div class="d-flex gap-2">
+              <button id="btnQuickSearch" class="btn btn-sm btn-outline-secondary">Search</button>
+              <button id="btnQuickClear"  class="btn btn-sm btn-outline-secondary">Clear</button>
+            </div>
+	    <div class="dropdown ms-2">
+              <button class="btn btn-sm btn-outline-secondary btn-icon" data-bs-toggle="dropdown" title="Columns">
+                <i class="bi bi-sliders"></i>
+              </button>
+              <div class="dropdown-menu p-2" style="min-width:220px">
+                <label class="dropdown-item small">
+                  <input class="form-check-input me-2 js-coltog" type="checkbox" data-col="created" checked> Created Time
+                </label>
+                <label class="dropdown-item small">
+                  <input class="form-check-input me-2 js-coltog" type="checkbox" data-col="approved" checked> Decided Time
+                </label>
+                <label class="dropdown-item small">
+                  <input class="form-check-input me-2 js-coltog" type="checkbox" data-col="by" checked> Created By
+                </label>
+              </div>
+            </div>
+            <input class="form-check-input d-none" type="checkbox" id="togAutoRefresh" aria-label="Auto Refresh">
+            <button id="btnAutoSwitch" type="button"
+                    class="btn btn-sm btn-outline-secondary btn-icon ms-auto"
+                    data-bs-toggle="tooltip" data-bs-title="Auto Refresh" aria-pressed="false">
+              <i class="bi bi-toggle-off"></i>
+            </button>
+          </div>
+        </div>
+    </div>
+  <!-- Quick filter: Time range -->
+  <div class="row g-2 mb-2 align-items-center">
+    <div class="col-12 col-md-3">
+      <select id="qTimeField" class="form-select form-select-sm">
+        <option value="">Time (any)</option>
+        <option value="created">Created Time</option>
+        <option value="approved">Decided Time</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-3">
+      <input id="qTimeFrom" type="datetime-local" class="form-control form-control-sm" placeholder="From">
+    </div>
+    <div class="col-6 col-md-3">
+      <input id="qTimeTo" type="datetime-local" class="form-control form-control-sm" placeholder="To">
+    </div>
+  <div class="col-12 col-md-3 d-grid d-md-flex justify-content-md-end">
+	  <button id="btnOpenCreate"
+                  class="btn btn-sm btn-primary btn-icon mt-1 mt-md-0"
+                  data-bs-toggle="tooltip" data-bs-title="Create Request" aria-label="Create Request">
+          <i class="bi bi-plus-lg"></i>
+          </button>
+    </div>
+  </div>
+  <div class="scroll-box mb-4">
+    <table class="table table-sm table-hover mb-0" id="draftsTable">
+      <thead class="table-light">
+        <tr>
+          <th style="width:130px;" class="sortable js-sort" data-sort="id" aria-sort="none">
+            <span>Request ID</span><i class="bi bi-arrow-down-up sort-ico"></i>
+          </th>
+          <th class="text-start-important">Title</th>
+          <th style="width:160px;">Status</th>
+
+	  <th class="d-table-cell d-md-none" data-col="meta" style="width:240px;">Meta</th>
+
+          <th class="d-none d-md-table-cell sortable js-sort" data-sort="created"  aria-sort="none" style="width:170px;">
+            <span>Created Time</span><i class="bi bi-arrow-down-up sort-ico"></i>
+	  </th>
+	  <th class="d-none d-md-table-cell sortable js-sort" data-sort="approved" aria-sort="none" style="width:170px;">
+            <span>Decided Time</span><i class="bi bi-arrow-down-up sort-ico"></i>
+          </th>
+	  <th class="d-none d-md-table-cell sortable js-sort" data-sort="by"       aria-sort="none" style="width:180px;">
+            <span>Created By</span><i class="bi bi-arrow-down-up sort-ico"></i>
+          </th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="listEmpty" class="text-muted small p-2">No request.</div>
+  </div>
+</div>
+<div class="pagebar mb-4">
+  <div class="d-flex align-items-center gap-2">
+    <label class="form-label small m-0">Rows per page</label>
+    <select id="pageSize" class="form-select form-select-sm">
+      <option value="20">20</option>
+      <option value="50">50</option>
+      <option value="100">100</option>
+    </select>
+  </div>
+  <nav aria-label="Requests pages">
+    <ul class="pagination pagination-sm" id="pager"></ul>
+  </nav>
+</div>
+<!-- ===== Review Draft modal ===== -->
+<div class="modal fade" id="draftModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header flex-wrap">
+        <div class="flex-grow-1">
+          <h5 class="modal-title mb-0">Request -  <span id="m-draft-id"></span> · <span id="m-title"></span></h5>
+          <div class="small text-muted">
+            Status: <span id="m-status"></span>
+            · Created by: <span id="m-created-by"></span>
+            · Created at: <span id="m-created-at"></span>
+          </div>
+        </div>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Workflow card -->
+        <div id="m-flow-card" class="card mb-3">
+         <div class="card-header py-2">
+          <span class="fw-semibold">Workflow</span>
+         </div>
+      <div class="card-body py-2">
+        <div id="m-flow-steps" class="flow-steps"></div>
+        <div id="m-flow-msg" class="small mt-2 text-muted"></div>
+	<div id="m-flow-tl" class="flow-tl"></div>
+      </div>
+    </div>
+        <!-- Action Plan summary -->
+        <div id="m-ap-wrap" class="mt-1" style="display:none;">
+          <h6 class="mb-2">Action Plan</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:110px;">Action ID</th>
+                  <th style="width:120px;">Device</th>
+                  <th style="width:90px;">VDOM</th>
+                  <th style="width:90px;">Kind</th>
+		  <th style="width:120px;">Resource</th>
+                  <th style="width:90px;">Type</th>
+                </tr>
+              </thead>
+              <tbody id="ap-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Plan Result (DB results; hidden until Approved/Deploy stage) -->
+        <div id="m-pr-wrap" class="mt-3">
+          <h6 class="mb-2">Plan Result</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:110px;">Action ID</th>
+                  <th style="width:90px;">Kind</th>
+                  <th style="width:100px;">Type</th>
+                  <th style="width:160px;">Device</th>
+                  <th style="width:100px;">VDOM</th>
+                  <th style="width:120px;">Resource ID</th>
+                  <th style="width:120px;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="pr-rows"></tbody>
+            </table>
+           </div>
+          <div id="pr-empty" class="text-muted small">No results yet.</div>
+        </div>
+        <!-- Diff Compare (server-rendered only) -->
+        <div id="m-diff-wrap" class="mt-3" style="display:none;">
+          <h6 class="mb-2 d-flex align-items-center gap-2">
+            Diff Compare
+	    <div class="form-check form-switch ms-auto" title="Only show changed fields">
+	      <input class="form-check-input" type="checkbox" id="togDiffOnlyChanges">
+	      <label class="form-check-label small" for="togDiffOnlyChanges">Only changes</label>
+	    </div>
+	  </h6>
+          <div id="m-diff-rows"></div>
+        </div>
+      </div>
+      <!-- ＊所有操作鍵移到底部（依狀態顯示） -->
+      <div class="modal-footer">
+        <div class="d-flex flex-wrap gap-2 w-100 justify-content-end" id="m-footer-actions">
+          <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="m-btn-edit">Edit</button>
+          <button type="button" class="btn btn-sm btn-outline-primary d-none" id="m-btn-submit">Submit</button>
+          <button type="button" class="btn btn-sm btn-outline-danger d-none" id="m-btn-delete">Delete</button>
+          <button type="button" class="btn btn-sm btn-success d-none" id="m-btn-approve">Approve</button>
+          <button type="button" class="btn btn-sm btn-danger d-none" id="m-btn-reject">Return</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Reject modal ===== -->
+<div class="modal fade" id="rejectModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Reject Request</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Reason</label>
+          <select id="rej_reason" class="form-select">
+            <option value="">-- choose --</option>
+            <option value="wrong">1. Rejected, Wrong value setting</option>
+            <option value="cancel">2. Canceled, Request Cancel</option>
+            <option value="comment">3. Rejected, Comment</option>
+          </select>
+        </div>
+        <div class="mb-2 d-none" id="rej_comment_wrap">
+          <label class="form-label">Comment</label>
+          <textarea id="rej_comment" class="form-control" rows="3" placeholder="Enter comment..."></textarea>
+        </div>
+        <div class="text-muted small">
+          Selecting “2” will set the Request to Canceled. Selecting “3” will show a comment textbox.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="rej_save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Policy Preview modal ===== -->
+<div class="modal fade" id="policyPreviewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Policy Detail · <span id="pp-title"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-sm"><tbody id="pp-body"></tbody></table>
+        <div class="small text-muted">* Applying will open the Request Form and fill all fields, <b>including Device/VDOM</b>.</div>
+      </div>
+      <div class="modal-footer">
+        <button id="pp-apply" type="button" class="btn btn-primary btn-sm">Apply to Form</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Create / Edit Draft modal (A. Search & Sync + B. Plans) ===== -->
+<div class="modal fade" id="editModal" data-bs-backdrop="false" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><span id="editModalTitle">Create Request</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- A. Search & Sync -->
+        <div class="card mb-3" id="searchCard">
+          <div class="card-header py-2">
+            <div class="d-flex align-items-center justify-content-between">
+              <span class="fw-semibold">Search & Sync</span>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="btnToggleList"
+                        data-bs-toggle="collapse" data-bs-target="#searchCardBody" aria-expanded="false">
+                  Policy List
+                </button>
+                <button id="btnReload" type="button" class="btn btn-sm btn-outline-secondary">Clear Search Value</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Collapse body (hidden by default) -->
+          <div id="searchCardBody" class="collapse">
+            <div class="card-body">
+              <form id="filterForm" class="row g-2 align-items-end">
+                <div class="col-12 col-md-4">
+                  <label class="form-label mb-1">Device</label>
+                  <select id="s_device" class="form-select"></select>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label mb-1">VDOM</label>
+                  <select id="s_vdom" class="form-select"></select>
+                  <input id="s_vdom_fallback" class="form-control d-none mt-1" placeholder="Manual VDOM">
+                  <div id="s_vdom_help" class="form-text"></div>
+                </div>
+                <div class="col-6 col-md-2">
+                  <label class="form-label mb-1">Action</label>
+                  <select id="f_action" class="form-select">
+                    <option value="">(any)</option>
+                    <option value="accept">accept</option>
+                    <option value="deny">deny</option>
+                  </select>
+                </div>
+                <div class="col-6 col-md-2">
+                  <label class="form-label mb-1">Status</label>
+                  <select id="f_status" class="form-select">
+                    <option value="">(any)</option>
+                    <option value="enable">enable</option>
+                    <option value="disable">disable</option>
+                  </select>
+                </div>
+                <div class="col-6 col-md-2">
+                  <label class="form-label mb-1">Seq Min</label>
+                  <input id="f_seq_min" type="number" class="form-control">
+                </div>
+                <div class="col-6 col-md-2">
+                  <label class="form-label mb-1">Seq Max</label>
+                  <input id="f_seq_max" type="number" class="form-control">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label mb-1">Name contains</label>
+                  <input id="f_name" type="text" class="form-control">
+                </div>
+                <div class="col-12 col-md-2 ms-auto d-grid">
+                  <button type="submit" class="btn btn-primary">Search</button>
+                </div>
+              </form>
+
+              <div class="mt-3">
+                <div class="policy-scroll">
+                  <div class="table-responsive">
+                    <table id="policyTable" class="table table-sm table-hover row-selectable">
+                      <thead>
+                        <tr>
+                          <th id="col-id">Policy ID</th>
+                          <th id="col-name">Name</th>
+                          <th id="col-status">Status</th>
+                          <th id="col-schedule">Schedule</th>
+                          <th id="col-nat">NAT</th>
+                        </tr>
+                      </thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="policyEmpty" class="text-muted small">No policies.</div>
+                <div id="selectedPolicyHint" class="alert alert-info py-2 px-3 mt-2 d-none">
+                  Selected: <span id="selectedPolicyText" class="fw-semibold"></span>
+                  <span class="ms-2 small text-muted">(Click <b>Apply to Form</b> in the preview to fill fields)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- B. Plans -->
+        <div class="card" id="plansCard">
+          <div class="card-header py-2 d-flex align-items-center justify-content-between">
+            <span class="fw-semibold">Plans</span>
+            <div class="d-flex gap-2">
+              <button id="btnAddPlan" type="button" class="btn btn-sm btn-outline-primary">+ Add Plan</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <small class="text-muted d-block mb-2">Drag by the handle · First runs first</small>
+            <div id="planBoard">
+              <div id="planEmpty" class="empty-hint px-2">No plans yet. Click <b>+ Add Plan</b> to create.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button id="btnSaveDraft" class="btn btn-sm btn-primary">Save Request</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Draft Form modal (create / edit Plan) ===== -->
+<div class="modal fade" id="planFormModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Request Form</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="d_edit_index"><!-- -1: create -->
+
+        <div class="row g-2">
+          <div class="col-12 col-md-4">
+            <label class="form-label mb-1">Device</label>
+            <select id="d_device" class="form-select"></select>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label mb-1">VDOM</label>
+            <select id="d_vdom" class="form-select"></select>
+            <input id="d_vdom_fallback" class="form-control d-none mt-1" placeholder="Manual VDOM">
+            <div id="d_vdom_help" class="form-text"></div>
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Action Type</label>
+            <select id="d_type" class="form-select" required>
+              <option value="" disabled selected>-- Select Action --</option>
+              <option value="create">create</option>
+              <option value="update">update</option>
+              <option value="delete">delete</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Target Policy ID</label>
+            <input id="d_target" type="number" class="form-control" placeholder="for update/delete">
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label mb-1">Name</label>
+            <input id="d_name" type="text" class="form-control" placeholder="Policy name">
+          </div>
+
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Action</label>
+            <select id="d_action" class="form-select">
+              <option value="accept">accept</option>
+              <option value="deny">deny</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Status</label>
+            <select id="d_status" class="form-select">
+              <option value="enable">enable</option>
+              <option value="disable">disable</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">NAT</label>
+            <select id="d_nat" class="form-select">
+              <option value="enable">enable</option>
+              <option value="disable">disable</option>
+            </select>
+          </div>
+
+          <div class="col-12"><hr class="my-2"></div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label mb-1">Src Addresses</label>
+            <input id="d_src_addrs" placeholder="Add or select addresses">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label mb-1">Dst Addresses</label>
+            <input id="d_dst_addrs" placeholder="Add or select addresses">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label mb-1">Services</label>
+            <input id="d_services" placeholder="Add or select services">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label mb-1">Web Filter (list)</label>
+            <input id="d_webfilter" placeholder="Add or select profiles">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label mb-1">Src Interfaces</label>
+            <input id="d_src_intfs" placeholder="Add or select interfaces">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label mb-1">Dst Interfaces</label>
+            <input id="d_dst_intfs" placeholder="Add or select interfaces">
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelPlan" type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button id="btnSavePlan" type="button" class="btn btn-primary btn-sm">Save Plan</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 與你現有程式碼相容：直接標記已 ready，並呼叫原本的初始化 hook（若有定義）
+  window.__TS_READY__ = true;
+  window.__SORTABLE_READY__ = true;
+  window.__FP_READY__ = true;
+  if (typeof window.__INIT_TS__ === 'function') window.__INIT_TS__();
+  if (typeof window.__INIT_SORTABLE__ === 'function') window.__INIT_SORTABLE__();
+  if (typeof window.__INIT_TIMEPICKER__ === 'function') window.__INIT_TIMEPICKER__();
+</script>
+
+<script>
+;(() => {
+  'use strict';
+
+  /** =========================
+   * 共用小工具
+   * ========================= */
+  const $  = (id) => document.getElementById(id);
+  const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
+  const clear = (el) => { if (!el) return; while (el.firstChild) el.removeChild(el.firstChild); };
+  const isProbablyHTML = (txt) => /^\s*</.test(txt || '');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const escAttr = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const shortUser = (u) => (String(u || '').trim().match(/^([^@]+)@/) || [,''])[1] || (u||'');
+  const fmtTime = (s) => { if(!s) return ''; const d = new Date(String(s).replace(' ','T')); return isNaN(+d) ? '' : d.toLocaleString(undefined, {hour12:false}); };
+  const debounce = (fn, delay) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), delay); }; };
+
+  // Toast helpers（若外層未提供 appToast 也不會壞）
+  const toastError = (m)=> window.appToast ? window.appToast.push(m, 'danger')  : console.error(m);
+  const toastWarn  = (m)=> window.appToast ? window.appToast.push(m, 'warning') : console.warn(m);
+  const toastInfo  = (m)=> window.appToast ? window.appToast.push(m, 'info')    : console.info(m);
+
+  // 安全後援：目前使用者名稱（若外層未提供）
+  function currentUserName(){
+    try{
+      if (window.currentUser) return window.currentUser.name || window.currentUser.email || window.currentUser.username || '';
+      const meta = document.querySelector('meta[name="current-user"]');
+      return meta?.content || '';
+    }catch(_){ return ''; }
+  }
+
+  // 拿到後端回傳的新 id
+  function getDraftIdFromResponse(data){
+    return Number(
+      data?.id ??
+      data?.data?.id ??
+      data?.draft_id ??
+      data?.draft?.id ??
+      data?.item?.id ??
+      0
+    );
+  }
+
+  function listSignature(items){
+    // 只取會影響畫面/排序的欄位；核准時間要納入多種欄位名
+    return JSON.stringify((items||[]).map(d => [
+      d.id,
+      d.title || '',
+      d.status || '',
+      d.created_at || '',
+      d.decided_at || '',,
+      (d.created_by_name || d.created_by_username || d.created_by || '')
+    ]));
+  }
+  // ----- Action Type select 著色（給不支援 :has 的瀏覽器） -----
+  function paintActionType(){
+    if(!window.dType){ return; }
+    const v = dType.value;
+    dType.classList.remove('sel-act-create','sel-act-update','sel-act-delete');
+    if (v === 'create' || v === 'update' || v === 'delete') {
+      dType.classList.add('sel-act-' + v);
+    }
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    window.dType = $('d_type');
+    on(dType, 'change', paintActionType);
+  });
+
+  /** =========================
+   * 後端 Flash → Toast + 統一 fetch
+   * ========================= */
+  async function fetchWithFlash(url, opts){
+    const res = await fetch(url, Object.assign({ cache: 'no-store' }, opts || {
+      headers:{}
+    }));
+    let j = {};
+    try { j = await res.json(); } catch (_){ j = {}; }
+    if (window.showFlashesFromJSON) window.showFlashesFromJSON(j);
+    if (!res.ok || j.ok === false) throw new Error(j.error || res.statusText || 'Request failed');
+    return j;
+  }
+  async function fetchJSON(url, opts){
+    opts = opts || {};
+    const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+    return fetchWithFlash(url, Object.assign({}, opts, { headers }));
+  }
+
+  /** =========================
+   * API endpoints
+   * ========================= */
+  const API = {
+    list_requests: "/fortigate/policy/api/requests",
+    drafts_create: "/fortigate/drafts",
+    drafts_get:    (id) => `/fortigate/drafts/${id}`,
+    drafts_plan_results: (id) => `/fortigate/drafts/${id}/plan_results`,
+    drafts_submit: (id) => `/fortigate/drafts/${id}/submit`,
+    drafts_approve:(id) => `/fortigate/drafts/${id}/approve`,
+    drafts_reject: (id) => `/fortigate/drafts/${id}/reject`,
+    drafts_cancel: (id) => `/fortigate/drafts/${id}/cancel`,
+    drafts_delete: (id) => `/fortigate/drafts/${id}/delete`,
+    devices: "/fortigate/device/devices",
+    device_vdoms: (device_id) => `/fortigate/device/devices/${encodeURIComponent(device_id)}/vdoms`,
+    list_policies: "/fortigate/policy/api/list",
+    policy_objects: "/fortigate/policy/api/objects",
+    sync_policies: "/fortigate/policy/api/sync"
+  };
+
+  /** =========================
+   * Fuzzy 搜尋工具（Quick Filter）
+   * ========================= */
+  const normalizeStr = (s)=> String(s||'')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase();
+
+  function isSubsequence(hay, needle){
+    hay = normalizeStr(hay); needle = normalizeStr(needle);
+    let i = 0;
+    for (const ch of needle){ i = hay.indexOf(ch, i); if (i === -1) return false; i++; }
+    return true;
+  }
+  function levenshtein(a,b){
+    a = normalizeStr(a); b = normalizeStr(b);
+    if (a === b) return 0;
+    if (!a || !b) return Math.max(a.length, b.length);
+    const m = new Array(b.length+1).fill(0).map((_,i)=>i);
+    for (let i=1;i<=a.length;i++){
+      let prev = i-1, cur = i;
+      for (let j=1;j<=b.length;j++){
+        const t = cur;
+        cur = Math.min(m[j]+1, cur+1, prev + (a[i-1]===b[j-1]?0:1));
+        prev = m[j]; m[j] = t;
+      }
+      m[0] = i;
+    }
+    return m[b.length];
+  }
+  function fuzzyTokenMatch(hay, token){
+    const h = normalizeStr(hay), q = normalizeStr(token);
+    if (!q) return true;
+    if (h.includes(q) || isSubsequence(h,q)) return true;
+    const words = h.split(/[^a-z0-9\u4e00-\u9fff]+/i).filter(Boolean);
+    for (const w of words){
+      const d = levenshtein(q,w);
+      if ((q.length<=3 && d<=1) || (q.length<=6 && d<=2) || d <= Math.ceil(w.length*0.3)) return true;
+    }
+    return false;
+  }
+  const fuzzyMatch = (hay, q) => normalizeStr(q).split(/\s+/).filter(Boolean).every(t => fuzzyTokenMatch(hay, t));
+
+  /** =========================
+   * 裝置名稱快取
+   * ========================= */
+  const DEVICE_NAME = new Map();
+  async function loadDevicesMap(){
+    try {
+      const j = await fetchJSON(API.devices, {headers:{'Accept':'application/json'}});
+      (j.items||[]).forEach(it => DEVICE_NAME.set(String(it.id), it.name || ('device_'+it.id)));
+    }catch(_){}
+  }
+  const devNameOf = (id) => DEVICE_NAME.get(String(id ?? '')) || String(id ?? '') || '';
+
+  /** =========================
+   * 狀態徽章
+   * ========================= */
+  function statusBadge(s){
+    const spin = (s === 'Preparing_Deploy' || s === 'Deploying');
+    let icon = '';
+    if (s === 'Deploy_Succeeded') { icon = '<i class="bi bi-check2"></i>'; } else if (s === 'Rejected') { icon = '<i class="bi bi-x-lg"></i>'; }
+
+    const clsMap = {
+      'Pending_Submit'   : 'bg-info',
+      'Preparing_Deploy' : 'bg-secondary',
+      'Awaiting_Approval': 'bg-info',
+      'Deploying'        : 'bg-secondary',
+      'Verify_Failed'    : 'badge-soft-danger',
+      'Rejected'         : 'bg-danger',
+      'Deploy_Succeeded' : 'badge-brightg',
+      'Deploy_Failed'    : 'bg-danger',
+      'Partial_Failed'   : 'bg-warning',
+      'Canceled'         : 'bg-secondary',
+      '__DEPLOYING__'    : 'bg-secondary'
+    };
+    const label = (s === 'Deploying') ? 'Deploying…' : (s || '-');
+    const cls = clsMap[s] || 'bg-secondary';
+    return `<span class="badge ${cls}">` + (spin ? '<span class="spinner-border spinner-border-sm me-1"></span>' : '') + icon + esc(label) + `</span>`;
+  }
+
+  function visualStatusFor(rawStatus){
+    return String(rawStatus ?? '').trim();
+  }
+
+  function applyReviewButtons(statusRaw){
+    const s = String(statusRaw || '');
+
+    const isEditable  = (s === 'Pending_Submit' || s === 'Verify_Failed' || s === 'Rejected');
+    const isAwaiting  = (s === 'Awaiting_Approval');
+    const isPreparing = (s === 'Preparing_Deploy' || s === 'Deploying');
+    const isClosed    = ['Deploy_Succeeded','Deploy_Failed','Partial_Failed','Canceled'].includes(s);
+
+    // 先確保都可點（後面會按情境隱藏）
+    [btnEdit,btnSubmit,btnDelete,btnApprove,btnReject].forEach(b=> b && (b.disabled=false));
+
+    // 部署中或結案態：全部隱藏
+    if (isPreparing || isClosed){
+      [btnEdit,btnSubmit,btnDelete,btnApprove,btnReject].forEach(b=> b.classList.add('d-none'));
+      return;
+    }
+
+    // Edit/Submit 依 isEditable 顯示
+    btnEdit.classList.toggle('d-none',   !isEditable);
+    btnSubmit.classList.toggle('d-none', !isEditable);
+
+    // ★ Rejected 狀態：隱藏 Delete；其它可編輯狀態仍顯示
+    const showDelete = isEditable && s !== 'Rejected';
+    btnDelete.classList.toggle('d-none', !showDelete);
+
+    // 審核鍵僅在 Awaiting_Approval 顯示
+    btnApprove.classList.toggle('d-none', !isAwaiting);
+    btnReject.classList.toggle('d-none',  !isAwaiting);
+  }  
+
+  // Plan Result 專用狀態徽章（OK=綠, error=紅, skipped=淺灰）
+  function planResultBadge(s){
+    const raw = (s == null ? '' : String(s).trim());
+    if (!raw){
+      return `
+        <span class="badge badge-chip">
+          <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+          <span class="visually-hidden">Loading…</span>
+        </span>`;
+    }
+    const t = raw.toLowerCase();
+    if (['pending','processing','in_progress','in-progress','running','deploying','preparing'].includes(t)){
+      return `
+        <span class="badge badge-chip">
+          <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>${esc(raw)}
+        </span>`;
+    }
+    if (t === 'ok' || t === 'success' || t === 'succeeded') {
+      return `<span class="badge badge-ok"><i class="bi bi-check2-circle"></i>OK</span>`;
+    }
+    if (t === 'error' || t === 'err' || t === 'failed' || t === 'fail') {
+      return `<span class="badge badge-err"><i class="bi bi-x-circle"></i>Error</span>`;
+    }
+    if (t === 'skipped' || t === 'skip') {
+      return `<span class="badge badge-skip"><i class="bi bi-dash-circle"></i>Skipped</span>`;
+    }
+    return `<span class="badge badge-chip">${esc(raw)}</span>`;
+  }
+
+  function resourceIdBadge(v){
+    const s = (v == null ? '' : String(v).trim());
+    if (!s){
+      return `
+        <span class="badge badge-chip">
+          <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+          <span class="visually-hidden">Loading…</span>
+        </span>`;
+    }
+    return `<span class="badge badge-chip">${esc(s)}</span>`;
+  }
+   /** =========================
+   * Busy overlay（共用）
+   * ========================= */
+  function setOverlayBusy(container, on){
+    if (!container) return;
+    container.classList.toggle('position-relative', true);
+    let ov = container.querySelector('.js-busy');
+    if (on){
+      if (!ov){
+        ov = document.createElement('div');
+        ov.className = 'js-busy position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center';
+        ov.style.background = 'rgba(255,255,255,.6)';
+        ov.innerHTML = '<div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div>';
+        container.appendChild(ov);
+      }
+      container.classList.add('user-select-none');
+      container.setAttribute('aria-busy','true');
+    } else {
+      if (ov) ov.remove();
+      container.classList.remove('user-select-none');
+      container.removeAttribute('aria-busy');
+    }
+  }
+  const setListBusy   = (on)=> setOverlayBusy(document.querySelector('.scroll-box'), on);
+  const setPolicyBusy = (on)=> setOverlayBusy(document.querySelector('.policy-scroll'), on);
+  const setEditBusy   = (on)=> setOverlayBusy($('editModal')?.querySelector('.modal-body'), on);
+  const setPlanFormBusy = (on)=> setOverlayBusy($('planFormModal')?.querySelector('.modal-body'), on);
+  const setReviewBusy = (on)=> setOverlayBusy($('draftModal')?.querySelector('.modal-body'), on);
+
+// ===== Sort & Pagination state =====
+  const pagerEl = $('pager');
+  const pageSizeSel = $('pageSize');
+
+  const SORT_PARAM_MAP = { id:'id', created:'created_at', approved:'decided_at', by:'created_by' };
+  const SORT_DEFAULT = { key:'id', dir:'desc' }; // 預設用 ID 遞減
+  let CURRENT_SORT  = (()=>{ try{ return JSON.parse(localStorage.getItem('forti:policy:sort')||''); }catch(_){ return null; } })() || SORT_DEFAULT;
+  let PAGE_SIZE     = Number(localStorage.getItem('forti:policy:pagesize') || 50);
+  let CURRENT_PAGE  = 1;
+  let TOTAL_COUNT   = 0;
+  let TOTAL_PAGES   = 1;
+
+  function setSortUI(){
+    document.querySelectorAll('#draftsTable thead th.sortable').forEach(th=>{
+      const k = th.getAttribute('data-sort');
+      const on = (CURRENT_SORT.key === k);
+      th.setAttribute('aria-sort', on ? (CURRENT_SORT.dir || 'asc') : 'none');
+      const ico = th.querySelector('.sort-ico');
+      if (ico) ico.className = 'bi ' + (on
+        ? (CURRENT_SORT.dir === 'asc' ? 'bi-sort-up sort-ico' : 'bi-sort-down sort-ico')
+        : 'bi-arrow-down-up sort-ico');
+    });
+  }
+
+  function sortItems(items, sort){
+    const key = sort?.key || 'id';
+    const dir = (sort?.dir === 'asc') ? 1 : -1;
+    const val = (d)=>{
+      if (key === 'id') return Number(d.id)||0;
+      if (key === 'created')  return +parseWhen(d.created_at || '') || 0;
+      if (key === 'approved') return +parseWhen(d.decided_at || '') || 0;
+      if (key === 'by') return (d.created_by_name || d.created_by_username || d.created_by || '').toLowerCase();
+      return d[key] ?? '';
+    };
+    return (items||[]).slice().sort((a,b)=>{
+      const va = val(a), vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+  }
+
+  function renderPager(){
+    if (!pagerEl) return;
+    const cur = CURRENT_PAGE, pages = Math.max(1, TOTAL_PAGES|0);
+    pagerEl.innerHTML = '';
+    const add = (p, label, disabled=false, active=false)=>{
+      const li = document.createElement('li');
+      li.className = `page-item ${disabled?'disabled':''} ${active?'active':''}`;
+      li.innerHTML = `<a href="#" class="page-link js-page" data-page="${p}">${label}</a>`;
+      pagerEl.appendChild(li);
+    };
+    add(Math.max(1, cur-1), '«', cur<=1, false);
+    // 簡單分頁：顯示最多 10 個
+    const span = 10, start = Math.max(1, Math.min(cur - 4, pages - span + 1)), end = Math.min(pages, start + span - 1);
+    for (let i=start;i<=end;i++) add(i, String(i), false, i===cur);
+    add(Math.min(pages, cur+1), '»', cur>=pages, false);
+  }
+
+  document.addEventListener('click', (e)=>{
+    const a = e.target.closest?.('.js-page'); if(!a) return;
+    e.preventDefault();
+    const p = Number(a.dataset.page||'1')||1;
+    fetchList(p);
+  });
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    loadDevicesMap().catch(()=>{});
+    if (pageSizeSel){
+      pageSizeSel.value = String(PAGE_SIZE);
+      pageSizeSel.addEventListener('change', ()=>{
+        PAGE_SIZE = Number(pageSizeSel.value)||50;
+        localStorage.setItem('forti:policy:pagesize', String(PAGE_SIZE));
+        fetchList(1);
+      });
+    }
+  // 排序點擊
+  document.querySelectorAll('#draftsTable thead th.sortable').forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const k = th.getAttribute('data-sort');
+      if (!k) return;
+      if (CURRENT_SORT.key === k){
+        CURRENT_SORT.dir = (CURRENT_SORT.dir === 'asc') ? 'desc' : 'asc';
+      }else{
+        CURRENT_SORT = { key:k, dir:'asc' };
+      }
+      localStorage.setItem('forti:policy:sort', JSON.stringify(CURRENT_SORT));
+      setSortUI();
+      fetchList(1);
+    });
+  });
+  setSortUI();
+  renderPager();
+  if (pageSizeSel && !pageSizeSel.value) pageSizeSel.value = '50';
+});
+  /** =========================
+   * Drafts List（載入／渲染／快篩）
+   * ========================= */
+  const tb = document.querySelector('#draftsTable tbody');
+  const listEmpty = $('listEmpty');
+  const qText = $('qText'), qStatus = $('qStatus');
+  const qTimeField = $('qTimeField'), qTimeFrom = $('qTimeFrom'), qTimeTo = $('qTimeTo');
+  const btnQuickSearch = $('btnQuickSearch'), btnQuickClear = $('btnQuickClear');
+
+  let lastPage = 1;
+  const ROW_CACHE = new Map(); // id -> row
+  let OPEN_REVIEW_DRAFT_ID = null;
+  let CURRENT_EDIT_DRAFT_ID = null;
+  const DEPLOYING_IDS = new Set();
+
+  function saveQuickState(){
+    try{
+      localStorage.setItem('forti:policy:quickState', JSON.stringify({
+        q: qText?.value || '',
+        status: qStatus?.value || '',
+        timeField: qTimeField?.value || '',
+        timeFrom: qTimeFrom?.value || '',
+        timeTo:   qTimeTo?.value || ''
+      }));
+    }catch(_){}
+  }
+  function restoreQuickState(){
+    try{
+      const st = JSON.parse(localStorage.getItem('forti:policy:quickState')||'{}');
+      if (qText) qText.value = st.q || '';
+      if (qStatus) qStatus.value = st.status || '';
+      if (qTimeField) qTimeField.value = st.timeField || '';
+      if (qTimeFrom) qTimeFrom.value = st.timeFrom || '';
+      if (qTimeTo) qTimeTo.value = st.timeTo || '';
+    }catch(_){}
+  }
+
+  function parseInputDT(v){
+    if (!v) return null;
+    const s = String(v).trim().replace(' ','T');
+    const d = new Date(s); return isNaN(+d) ? null : d;
+  }
+  function cellISO(tr, key){
+    const td = tr.querySelector(`td[data-col="${key}"]`); if (!td) return '';
+    const sp = td.querySelector('span[data-iso]'); return sp ? (sp.getAttribute('data-iso')||'') : '';
+  }
+  function parseWhen(s){ if (!s) return null; const d=new Date(String(s).replace(' ','T')); return isNaN(+d) ? null : d; }
+  function inRange(tr, key, from, to){
+    const iso = cellISO(tr, key); const dt = parseWhen(iso); if (!dt) return false;
+    if (from && dt < from) return false; if (to && dt > to) return false; return true;
+  }
+
+  function applyQuickFilter(){
+    const kw = (qText?.value || '').trim();
+    const st = (qStatus?.value || '');
+    const tf = qTimeField?.value || '';
+    const from = parseInputDT(qTimeFrom?.value);
+    const to   = parseInputDT(qTimeTo?.value);
+    let any = false;
+
+    const rows = tb.querySelectorAll('tr');
+    rows.forEach(tr => {
+      const statusEl = tr.querySelector('[data-status]');
+      const statusRaw = statusEl ? (statusEl.getAttribute('data-status')||'') : '';
+      const createdAt = cellISO(tr,'created') + ' ' + (tr.querySelector('td[data-col="created"]')?.textContent||'').trim();
+      const approvedAt= cellISO(tr,'approved')+ ' ' + (tr.querySelector('td[data-col="approved"]')?.textContent||'').trim();
+      const createdBy = (tr.querySelector('td[data-col="by"]')?.textContent||'').trim();
+      const hay = tr.dataset.hay || [createdAt, approvedAt, createdBy].join(' ');
+
+      const matchesKw = !kw || fuzzyMatch(hay, kw);
+      const matchesSt = !st || (statusRaw === st);
+
+      let matchesTime = true;
+      if (from || to){
+        if (tf === 'created') matchesTime = inRange(tr,'created',from,to);
+        else if (tf === 'approved') matchesTime = inRange(tr,'approved',from,to);
+        else matchesTime = inRange(tr,'created',from,to) || inRange(tr,'approved',from,to);
+      }
+
+      const show = matchesKw && matchesSt && matchesTime;
+      tr.style.display = show ? '' : 'none';
+      if (show) any = true;
+    });
+    listEmpty.style.display = any ? 'none' : '';
+    saveQuickState();
+  }
+
+  function cacheRows(items){
+    ROW_CACHE.clear();
+    (items||[]).forEach(d => ROW_CACHE.set(Number(d.id), d));
+  }
+  function renderRows(items){
+    clear(tb);
+    if (!Array.isArray(items) || !items.length){ listEmpty.style.display=''; return; }
+    listEmpty.style.display='none';
+
+    items.forEach(d => {
+      const createdBy  = d.created_by_name || d.created_by_username || d.created_by || '';
+      const createdAt  = d.created_at || '';
+      const approvedAt = d.decided_at || '';
+      const visualStatus = visualStatusFor(d.status);
+      const approvedHtml = approvedAt
+        ? `<span data-iso="${escAttr(approvedAt)}" data-format="slash"></span>`
+        : `<span class="text-muted">N/A</span>`;
+
+      const metaHtml =
+        `<div><b>Created:</b> ${createdAt?`<span data-iso="${escAttr(createdAt)}" data-format="slash"></span>`:'<span class="text-muted">N/A</span>'}</div>`+
+        `<div><b>Decided:</b> ${approvedHtml}</div>`+
+        `<div><b>By:</b> <span title="${escAttr(createdBy)}">${esc(shortUser(createdBy))}</span></div>`;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td class="pin-1" data-col="id">${d.id ?? ''}</td>`+
+        `<td class="title-cell text-start-important pin-2" data-col="title">
+           <a href="#" class="js-open" data-id="${escAttr(d.id)}" title="${escAttr(d.title||'')}">${esc(d.title||'')}</a>
+         </td>`+
+        `<td data-col="status" data-status="${escAttr(visualStatus)}">${statusBadge(visualStatus)}</td>`+
+        `<td class="d-table-cell d-md-none col-meta" data-col="meta">${metaHtml}</td>`+
+        `<td class="d-none d-md-table-cell" data-col="created"><span data-iso="${escAttr(createdAt)}" data-format="slash"></span></td>`+
+        `<td class="d-none d-md-table-cell" data-col="approved">${approvedHtml}</td>`+
+        `<td class="d-none d-md-table-cell" data-col="by" title="${escAttr(createdBy)}">${esc(shortUser(createdBy))}</td>`;
+
+      const statusNorm = visualStatus;
+      tr.dataset.hay = [d.id, d.title||'', statusNorm||'', createdAt||'', approvedAt||'', createdBy||''].join(' ');
+      tb.appendChild(tr);
+    });
+
+    applyQuickFilter();
+    window.renderAllTZ && window.renderAllTZ();
+  }
+
+  async function fetchList(page, opts){
+    if (timeFilterActive()) {
+      return fetchAllAndRenderFiltered(page);
+    }
+    if (page == null) page = 1;
+    const silent = !!(opts && opts.silent);
+    lastPage = page;
+    if (!silent) setListBusy(true);
+    try{
+      const kw = (qText?.value || '').trim();
+      const st = (qStatus?.value || '');
+      const url = new URL(API.list_requests, location.origin);
+      url.searchParams.set('page', page);
+      url.searchParams.set('page_size', PAGE_SIZE);
+      url.searchParams.set('q', kw);
+      url.searchParams.set('status', st);
+      const sortField = SORT_PARAM_MAP[CURRENT_SORT.key] || 'id';
+      const sortDir   = (CURRENT_SORT.dir === 'asc') ? 'asc' : 'desc';
+      url.searchParams.set('order_by', sortField);
+      url.searchParams.set('order', sortDir);
+
+      const j = await fetchJSON(url, { headers:{'Accept':'application/json'} });
+      const itemsRaw = j.data || j.items || [];
+
+      TOTAL_COUNT = Number(j.total ?? j.total_count ?? j.count ?? j?.meta?.total ?? j?.meta?.count ?? 0) || 0;
+      TOTAL_PAGES = Number(j.total_pages ?? j.pages ?? (TOTAL_COUNT && PAGE_SIZE ? Math.ceil(TOTAL_COUNT/PAGE_SIZE) : 1)) || 1;
+      CURRENT_PAGE = Number(page)||1;
+      renderPager();
+
+      const items = sortItems(itemsRaw, CURRENT_SORT); // 伺服器若沒排序，前端單頁也能照需求排
+
+      const sig = listSignature(items);
+      if (sig === LAST_LIST_SIG) {
+	applyQuickFilter();
+	return;
+      }
+
+      LAST_LIST_SIG = sig;
+
+      cacheRows(items);
+      patchDraftRows(items);
+
+    }catch(e){
+      toastError(e.message || 'List failed');
+    }finally{
+      if (!silent) setListBusy(false);
+    }
+  } 
+
+  // 產生列的簽章：只要這些欄位沒變，就完全不動 DOM
+  function rowSignature(d){
+    return JSON.stringify([
+      d.id,
+      d.title || '',
+      d.status || '',
+      d.created_at || '',
+      (d.decided_at || ''),
+      (d.created_by_name || d.created_by_username || d.created_by || '')
+    ]);
+  }
+	
+// 建立一列（供初次新增時使用）
+function buildDraftRow(d){
+  const createdBy  = d.created_by_name || d.created_by_username || d.created_by || '';
+  const createdAt  = d.created_at || '';
+  const approvedAt = d.decided_at || '';
+  const visualStatus = visualStatusFor(d.status);
+  const approvedHtml = approvedAt
+    ? `<span data-iso="${escAttr(approvedAt)}" data-format="slash"></span>`
+    : `<span class="text-muted">N/A</span>`;
+
+  const tr = document.createElement('tr');
+  tr.dataset.id = String(d.id);
+  tr.dataset.sig = rowSignature(d); // 存最後一次渲染的簽章
+  tr.innerHTML =
+    `<td class="pin-1" data-col="id">${d.id ?? ''}</td>`+
+    `<td class="title-cell text-start-important pin-2" data-col="title">
+       <a href="#" class="js-open" data-id="${escAttr(d.id)}" title="${escAttr(d.title||'')}">${esc(d.title||'')}</a>
+     </td>`+
+    `<td data-col="status"><span data-status="${escAttr(visualStatus)}">${statusBadge(visualStatus)}</span></td>`+
+    `<td class="d-table-cell d-md-none col-meta" data-col="meta">
+        <div><b>Created:</b> ${createdAt?`<span data-iso="${escAttr(createdAt)}" data-format="slash"></span>`:'<span class="text-muted">N/A</span>'}</div>
+        <div><b>Decided:</b> ${approvedHtml}</div>
+        <div><b>By:</b> <span title="${escAttr(createdBy)}">${esc(shortUser(createdBy))}</span></div>
+     </td>`+
+    `<td class="d-none d-md-table-cell" data-col="created"><span data-iso="${escAttr(createdAt)}" data-format="slash"></span></td>`+
+    `<td class="d-none d-md-table-cell" data-col="approved">${approvedHtml}</td>`+
+    `<td class="d-none d-md-table-cell" data-col="by" title="${escAttr(createdBy)}">${esc(shortUser(createdBy))}</td>`;
+
+  // 供快篩用的 haystack
+  const statusNorm = visualStatus;
+  tr.dataset.hay = [d.id, d.title||'', statusNorm||'', createdAt||'', approvedAt||'', createdBy||''].join(' ');
+  return tr;
+}
+
+// 專門更新既有列的內容（只在有差異時動手）
+function updateDraftRow(tr, d){
+  const oldSig = tr.dataset.sig || '';
+  const newSig = rowSignature(d);
+  if (oldSig === newSig) return; // 完全沒變，不動 DOM
+
+  // 更新標題
+  const a = tr.querySelector('td[data-col="title"] a.js-open');
+  if (a && (a.textContent !== (d.title||''))){
+    a.textContent = d.title || '';
+    a.title = d.title || '';
+  }
+
+  const statusTd = tr.querySelector('td[data-col="status"]');
+    const visualStatus = visualStatusFor(d.status);
+    const span = statusTd.querySelector('span[data-status]');
+    const norm = visualStatus || '';
+    if (!span || span.getAttribute('data-status') !== norm){
+      statusTd.innerHTML = `<span data-status="${escAttr(norm)}">${statusBadge(visualStatus)}</span>`;
+    }
+
+  // 更新時間欄位（只改 data-iso，交給既有 window.renderAllTZ 處理）
+  function setIso(tdSel, iso){
+    const td = tr.querySelector(tdSel);
+    if (!td) return;
+    const sp = td.querySelector('[data-iso]');
+    if (sp && sp.getAttribute('data-iso') !== (iso||'')){
+      sp.setAttribute('data-iso', iso||'');
+    }
+  }
+  setIso('td[data-col="created"]',  d.created_at || '');
+  setIso('td[data-col="approved"]', d.decided_at || '');
+
+  // 更新「By」
+  const byTd = tr.querySelector('td[data-col="by"]');
+  const createdBy  = d.created_by_name || d.created_by_username || d.created_by || '';
+  if (byTd && byTd.textContent !== shortUser(createdBy)){
+    byTd.textContent = shortUser(createdBy);
+    byTd.title = createdBy;
+  }
+
+  // 更新快篩 hay
+  const createdAt  = d.created_at  || '';
+  const approvedAt = d.decided_at || '';
+  const statusNorm = (d.status||'');
+  tr.dataset.hay = [d.id, d.title||'', statusNorm||'', createdAt||'', approvedAt||'', createdBy||''].join(' ');
+
+  // 刷新簽章
+  tr.dataset.sig = newSig;
+}
+
+// 把舊結構的 status 欄位一次性轉成 <span data-status>，避免之後每次重寫 innerHTML
+(() => {
+  const tbody = document.querySelector('#draftsTable tbody');
+  if (!tbody) return;
+  const domRows = Array.from(tbody.children);
+  domRows.forEach(tr => {
+    const td = tr.querySelector('td[data-col="status"]');
+    if (!td) return;
+    if (!td.querySelector('span[data-status]')) {
+      const cur = td.getAttribute('data-status') || '';
+      td.innerHTML = `<span data-status="${escAttr(cur)}">${statusBadge(cur)}</span>`;
+    }
+  });
+})();
+// 依新清單做「差異補丁」：新增 / 更新 / 移除 / 排序
+function patchDraftRows(items){
+  const tbody = document.querySelector('#draftsTable tbody');
+  if (!tbody) return;
+
+  // 建 map：現有 DOM 行
+  const domRows = Array.from(tbody.children);
+  const domMap  = new Map(domRows.map(r => [r.dataset.id, r]));
+
+  // 為了保持順序：逐一處理新的 items，必要時插入或移動；已存在的只在有差異時更新欄位
+  const wantIds = [];
+  items.forEach((d, idx) => {
+    const id = String(d.id);
+    wantIds.push(id);
+    let tr = domMap.get(id);
+    if (!tr){
+      tr = buildDraftRow(d);
+      const ref = tbody.children[idx] || null;
+      tbody.insertBefore(tr, ref);
+    }else{
+      // 移動到正確順序（只有位置不同才移動一次）
+      const ref = tbody.children[idx] || null;
+      if (tr !== ref) tbody.insertBefore(tr, ref);
+      updateDraftRow(tr, d);
+      domMap.delete(id); // 標記為已處理
+    }
+  });
+
+  // 移除不在清單的舊行
+  domMap.forEach(tr => tr.remove());
+
+  // 空清單提示
+  listEmpty.style.display = (items.length ? 'none' : '');
+
+  // 渲染時間（只處理改過 data-iso 的 span；既有函式會自理）
+  window.renderAllTZ && window.renderAllTZ();
+
+  // 既有的快篩規則不變
+  applyQuickFilter();
+}
+
+  // Quick UI events
+  on(qText, 'input', debounce(()=>{ saveQuickState(); applyQuickFilter(); }, 120));
+  on(qStatus, 'change', ()=>{ saveQuickState(); fetchList(1); });
+  on(btnQuickSearch, 'click', ()=>{ saveQuickState(); fetchList(1); });
+  on(btnQuickClear, 'click', ()=>{
+    if (qText) qText.value = '';
+    if (qStatus) qStatus.value = '';
+    if (qTimeField) qTimeField.value = '';
+    if (qTimeFrom) qTimeFrom.value = '';
+    if (qTimeTo) qTimeTo.value = '';
+    saveQuickState();
+    applyQuickFilter();
+    fetchList(1);
+  });
+  on(qTimeField, 'change', ()=>{ saveQuickState(); fetchList(1); });
+  on(qTimeFrom,  'change', ()=>{ saveQuickState(); fetchList(1); });
+  on(qTimeTo,    'change', ()=>{ saveQuickState(); fetchList(1); });
+  on(qText, 'keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveQuickState(); fetchList(1); }
+  });
+
+  // Column chooser（記憶）
+  ;(() => {
+    const STORE = 'forti:policy:cols';
+    const load = ()=> { try{ return JSON.parse(localStorage.getItem(STORE)||'{}')||{}; }catch(_){ return {}; } };
+    const save = (st)=> { try{ localStorage.setItem(STORE, JSON.stringify(st||{})); }catch(_){ } };
+    const apply = (st)=>{
+      ['created','approved','by'].forEach(key=>{
+        const on = (st[key] !== false);
+        document.querySelectorAll(`#draftsTable th[data-col="${key}"], #draftsTable td[data-col="${key}"]`).forEach(el=>{
+          el.classList.toggle('d-none', !on);
+          el.classList.toggle('d-md-table-cell', on);
+        });
+        document.querySelectorAll(`.js-coltog[data-col="${key}"]`).forEach(cb => cb.checked = on);
+      });
+    };
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const st = load(); apply(st);
+      document.body.addEventListener('change', (e)=>{
+        const cb = e.target?.closest('.js-coltog[data-col]');
+        if (!cb) return;
+        const st2 = load(); st2[cb.dataset.col] = !!cb.checked; save(st2); apply(st2);
+      });
+    });
+  })();
+
+  function timeFilterActive(){
+    return !!(qTimeField?.value || qTimeFrom?.value || qTimeTo?.value);
+  }
+  function parseWhen(s){ if(!s) return null; const d=new Date(String(s).replace(' ','T')); return isNaN(+d)?null:d; }
+  function inRangeRaw(d, key, from, to){
+    const iso = (key==='created') ? d.created_at : d.decided_at;
+    const dt = parseWhen(iso); if (!dt) return false;
+    if (from && dt < from) return false;
+    if (to   && dt > to)   return false;
+    return true;
+  }
+  function filterByTimeRaw(list){
+    if (!timeFilterActive()) return list;
+    const tf   = qTimeField.value;
+    const from = (qTimeFrom.value ? new Date(qTimeFrom.value) : null);
+    const to   = (qTimeTo.value   ? new Date(qTimeTo.value)   : null);
+    return (list||[]).filter(d=>{
+      if (tf==='created')  return inRangeRaw(d,'created',from,to);
+      if (tf==='approved') return inRangeRaw(d,'approved',from,to);
+      return inRangeRaw(d,'created',from,to) || inRangeRaw(d,'approved',from,to);
+    });
+  }
+
+  async function fetchAllAndRenderFiltered(page){
+    if (page == null) page = 1;
+    setListBusy(true);
+    try{
+      // 基本查詢（用原本的 q/status/sort，時間留給前端過濾）
+      const url = new URL(API.list_requests, location.origin);
+      url.searchParams.set('q', (qText?.value || '').trim());
+      url.searchParams.set('status', (qStatus?.value || ''));
+      const sortField = SORT_PARAM_MAP[CURRENT_SORT.key] || 'id';
+      const sortDir   = (CURRENT_SORT.dir === 'asc') ? 'asc' : 'desc';
+      url.searchParams.set('order_by', sortField);
+      url.searchParams.set('order', sortDir);
+
+      // 逐頁撈完
+      let p=1, pages=1, all=[];
+      do{
+        url.searchParams.set('page', p);
+        url.searchParams.set('page_size', PAGE_SIZE);
+        const j = await fetchJSON(url, { headers:{'Accept':'application/json'} });
+        all.push(...(j.data || j.items || []));
+        pages = Number(j.total_pages ?? j.pages ?? 1) || 1;
+        p++;
+      }while(p<=pages);
+
+      // 排序 + 時間過濾
+      const sorted   = sortItems(all, CURRENT_SORT);
+      const filtered = filterByTimeRaw(sorted);
+
+      // 依過濾結果重新分頁並渲染
+      TOTAL_COUNT = filtered.length;
+      TOTAL_PAGES = Math.max(1, Math.ceil(TOTAL_COUNT / PAGE_SIZE));
+      CURRENT_PAGE = Math.min(Math.max(1, page), TOTAL_PAGES);
+      renderPager();
+
+      const start = (CURRENT_PAGE-1)*PAGE_SIZE;
+      const pageItems = filtered.slice(start, start+PAGE_SIZE);
+
+      LAST_LIST_SIG = listSignature(pageItems);
+      cacheRows(pageItems);
+      patchDraftRows(pageItems);           // 你現有的差異更新
+    }catch(e){
+      toastError(e.message || 'List failed');
+    }finally{
+      setListBusy(false);
+    }
+  }
+  /** =========================
+   * 自動更新 & Tooltip & Modal 疊層
+   * ========================= */
+  const togAutoRefresh = $('togAutoRefresh');
+  let autoTimer = null, lastModalHiddenAt = 0;
+
+  const anyModalOpen = ()=> !!document.querySelector('.modal.show');
+  const uiBusy = ()=>{
+    if (document.hidden) return true;
+    if (anyModalOpen()) return true;
+    if (Date.now() - lastModalHiddenAt < 1500) return true;
+    return false;
+  };
+  document.addEventListener('hidden.bs.modal', () => {
+    lastModalHiddenAt = Date.now();
+    if (document.querySelector('.modal.show')) document.body.classList.add('modal-open');
+    doRefresh();
+  });
+
+  function doRefresh(){ fetchList(lastPage, { silent:true }); }
+
+  function setupAutoRefresh(){
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    if (togAutoRefresh && togAutoRefresh.checked){
+      autoTimer = setInterval(()=>{ if (!uiBusy()) doRefresh(); }, 10000);
+    }
+  }
+  on(togAutoRefresh, 'change', ()=>{
+    localStorage.setItem('forti:policy:autoRefresh', togAutoRefresh.checked ? '1' : '0');
+    setupAutoRefresh(); syncAutoIcon();
+  });
+  document.addEventListener('DOMContentLoaded', ()=>{
+    togAutoRefresh && (togAutoRefresh.checked = localStorage.getItem('forti:policy:autoRefresh') === '1');
+    setupAutoRefresh();
+    // Tooltip
+    const tts = [...document.querySelectorAll('[data-bs-toggle="tooltip"]')];
+    tts.forEach(el => new bootstrap.Tooltip(el, { container:'body' }));
+  });
+
+  // Auto refresh icon button
+  const btnAuto = $('btnAutoSwitch');
+  function syncAutoIcon(){
+    const cb = $('togAutoRefresh'); const btn = $('btnAutoSwitch'); if (!cb || !btn) return;
+    const on = !!cb.checked;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const ico = btn.querySelector('i'); if (ico) ico.className = 'bi ' + (on ? 'bi-toggle-on' : 'bi-toggle-off');
+  }
+  document.addEventListener('DOMContentLoaded', syncAutoIcon);
+  on(btnAuto, 'click', ()=>{
+    const cb = $('togAutoRefresh'); if (!cb) return;
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change', {bubbles:true}));
+  });
+
+  // Modal host resolver（如有 #zoom-root 需求可在此調整）
+  function moveModal(id){
+    const el = $(id); const host = document.body;
+    if (el && el.parentElement !== host) host.appendChild(el);
+  }
+  document.addEventListener('DOMContentLoaded', ()=>{
+    ['policyPreviewModal','draftModal','rejectModal','editModal','planFormModal'].forEach(moveModal);
+    window.__INIT_TIMEPICKER__ && window.__INIT_TIMEPICKER__();
+  });
+
+  /** =========================
+   * Review Modal（僅渲染伺服器報告）
+   * ========================= */
+  const draftModalEl = $('draftModal');
+  const apRows = $('ap-rows');
+  const mDraftId = $('m-draft-id');
+  const mTitle = $('m-title');
+  const mStatus = $('m-status');
+  const mCreatedBy = $('m-created-by');
+  const mCreatedAt = $('m-created-at');
+  const btnEdit = $('m-btn-edit');
+  const btnSubmit = $('m-btn-submit');
+  const btnDelete = $('m-btn-delete');
+  const btnApprove = $('m-btn-approve');
+  const btnReject = $('m-btn-reject');
+
+// 記錄每個 draft 最後渲染過的 plan 簽章，避免重複重繪
+const LAST_PLAN_SIG = new Map();
+const LAST_STATUS   = new Map();
+const LAST_DIFF_SIG = new Map();
+const LAST_PR_SIG   = new Map();
+const LAST_TL_SIG   = new Map();
+let REVIEW_POLL_TIMER = null;
+let LAST_LIST_SIG = '';
+const REVIEW_POLL_MS = 5000; // 每 5 秒檢查一次
+
+function tlSignature(events){
+  try{
+    return JSON.stringify((events||[]).map(e => [
+      e?.type||'', e?.status||'',
+      e?.at||'', e?.range?.start||'', e?.range?.end||''
+    ]));
+  }catch(_){ return String(Math.random()); }
+}
+
+function prSignature(items){
+  try{
+    return JSON.stringify((items||[]).map(r => ({
+      id: r.action_id,
+      order: r.action_order || 0,
+      status: String(r.status||'').toLowerCase(),
+      kind: r.kind||'',
+      type: r.action_type||'',
+      dev: r.device_id||'',
+      vdom: r.vdom||'',
+      res: r.resource_id||''
+    })));
+  }catch(_){ return String(Math.random()); }
+}
+
+function makeDiffSig(report){
+  try{
+    const obj = (typeof report === 'string') ? JSON.parse(report) : (report || {});
+    const acts = Array.isArray(obj.actions) ? obj.actions.slice()
+               : Array.isArray(obj.diff)    ? obj.diff.slice()
+               : [];
+
+    // 依 action_order、action_id 做穩定排序，避免順序抖動
+    acts.sort((a,b)=> (a.action_order||0) - (b.action_order||0) ||
+                      String(a.action_id||'').localeCompare(String(b.action_id||'')));
+
+    // 挑會影響畫面的關鍵欄位來產生簽章（避免不相干欄位導致重繪）
+    const shape = acts.map(a => {
+      const rows = Array.isArray(a.diff) ? a.diff
+                : Array.isArray(a.changes) ? a.changes
+                : Array.isArray(a.details) ? a.details
+                : [];
+      return {
+        id: a.action_id,
+        order: a.action_order||0,
+        dev: a.device_id||'',
+        vdom: a.vdom||'',
+        kind: a.kind||'',
+        type: a.action_type||'',
+        rows: rows.map(ch => ({
+          f: (ch.field||ch.name||ch.key||''),
+          cur: (ch.current ?? ch.before ?? ch.from ?? null),
+          dr:  (ch.draft   ?? ch.after  ?? ch.to   ?? null),
+          res: (ch.result || ch.change || ch.type || '')
+        }))
+      };
+    });
+
+    return JSON.stringify(shape);
+  }catch(_){
+    return '';
+  }
+}
+
+async function refreshDiffIfChanged(draftId, freshData){
+  const id = Number(draftId); if(!id) return;
+  let fresh = freshData;
+  if (!fresh){
+    try{ fresh = await fetchDraftDetail(id); }catch(_){ return; }
+  }
+  const newSig = makeDiffSig(fresh.check_report);
+  const oldSig = LAST_DIFF_SIG.get(id) || '';
+  if (newSig && newSig !== oldSig){
+    LAST_DIFF_SIG.set(id, newSig);
+    const box = $('m-diff-rows');
+    if (box){
+      try{ renderDiffFromCheckReport(box, parseReportSafe(fresh.check_report)); }catch(_){}
+    }
+  }
+}
+
+
+function parseReportSafe(r){
+  try{ return (typeof r==='string') ? JSON.parse(r) : (r||null); }catch(_){ return null; }
+}
+// 產生用來唯一定位列的 key（避免整列重建）
+function prRowKey(r){
+  return [
+    r.action_id, r.kind, r.action_type,
+    r.device_id, r.vdom, r.resource_id||''
+  ].join('|');
+}
+
+// 只做差異更新：就地更新、需要時才插入/移除/重新排序
+function patchPlanResultRows(tbody, items){
+  const want = (items||[]);
+  const nowRows = Array.from(tbody.querySelectorAll('tr'));
+  const nowMap = new Map(nowRows.map(tr => [tr.dataset.key, tr]));
+
+  // 逐列就地更新或插入
+  want.forEach((r, idx) => {
+    const key = prRowKey(r);
+    let tr = nowMap.get(key);
+    const t = String(r.action_type||'').toLowerCase();
+    const typeClass = {create:'badge-act-create',update:'badge-act-update',delete:'badge-act-delete'}[t] || 'badge-chip';
+
+    if (!tr){
+      // 新增列（只在不存在時建立）
+      tr = document.createElement('tr');
+      tr.dataset.key = key;
+      tr.innerHTML =
+        `<td><span class="badge ${typeClass}">${esc(r.action_id||'')}</span></td>`+
+        `<td><span class="badge badge-kind">${esc(r.kind||'')}</span></td>`+
+        `<td><span class="badge ${typeClass} text-uppercase">${esc(r.action_type||'')}</span></td>`+
+        `<td><span class="badge badge-chip text-dark">${esc(devNameOf(r.device_id))}</span></td>`+
+        `<td><span class="badge badge-vdom">${esc(r.vdom||'')}</span></td>`+
+        `<td data-col="resid">${resourceIdBadge(r.resource_id)}</td>`+
+        `<td data-col="status"></td>`;
+      // 插到應在的位置（就算中間有別列，也只移動一次）
+      const ref = tbody.children[idx] || null;
+      tbody.insertBefore(tr, ref);
+    } else {
+      // 就地搬動到目標順序（避免整體重建）
+      const ref = tbody.children[idx] || null;
+      if (tr !== ref) tbody.insertBefore(tr, ref);
+      nowMap.delete(key); // 標記為已處理
+    }
+
+    // Resource ID（無值時顯示 spinner）
+    const tdRes  = tr.querySelector('td[data-col="resid"]');
+    const newRes = (r.resource_id == null ? '' : String(r.resource_id));
+    if (tdRes.__last !== newRes){
+      tdRes.innerHTML = resourceIdBadge(r.resource_id);
+      tdRes.__last = newRes;
+    }
+
+    // 只在狀態真的變化時改最後一欄，避免重畫抖動
+    const tdStatus = tr.querySelector('td[data-col="status"]');
+    const newStatus = String(r.status||'');
+    if (tdStatus.__last !== newStatus){
+      tdStatus.innerHTML = planResultBadge(newStatus);
+      tdStatus.__last = newStatus;
+    }
+  });
+
+  // 移除不在清單中的舊列
+  nowMap.forEach(tr => tr.remove());
+}
+
+function planSignature(plan){
+  try{
+    // 精簡簽章（與畫面有關的欄位即可）
+    return JSON.stringify((Array.isArray(plan)?plan:[]).map(p=>({
+      id:p.action_id, dev:p.device_id, vd:p.vdom, k:p.kind, r:p.resource_id, t:p.action_type, pl:p.payload
+    })));
+  }catch(_){ return String(Math.random()); }
+}
+
+async function updateActionPlanIfChanged(draftId){
+  if (!draftId) return;
+  try{
+    const numId = Number(draftId);
+    const fresh = await fetchDraftDetail(numId);     // 拿最新單筆
+    ROW_CACHE.set(numId, fresh);                     // 同步本地快取
+
+    // 1) Action Plan（僅簽章不同才重繪，避免閃爍）
+    let da = fresh.draft_action || {};
+    if (typeof da === 'string'){ try{ da = JSON.parse(da); }catch(_){ da = {}; } }
+    const plan = Array.isArray(da.action_plan) ? da.action_plan : [];
+    LAST_PLAN_SIG.set(numId, planSignature(plan));
+
+    // 2) 狀態 + 步驟 + Timeline（狀態改變才重繪）
+    const st = String(fresh.status || '');
+    const events = Array.isArray(fresh.timeline) ? fresh.timeline : [];
+    const vis = visualStatusFor(st);
+
+    const tlSig = tlSignature(events);
+    const needRerender = (LAST_STATUS.get(numId) !== st) || (LAST_TL_SIG.get(numId) !== tlSig);
+    if (needRerender){
+      LAST_STATUS.set(numId, st);
+      LAST_TL_SIG.set(numId, tlSig);
+      mStatus.innerHTML = statusBadge(vis);
+      const hist = adaptTimelineToFlowItems(events, vis);
+      renderWorkflowCard(vis, hist);
+      renderFlowTimelineFromServer($('m-flow-tl'), events, vis);
+      applyReviewButtons(vis);
+    }
+    // 3) Plan Result（部署中/結束態就顯示並每次輪詢都刷新）
+    const shouldShowPR =
+      ['Preparing_Deploy','Deploying','Deploy_Succeeded','Deploy_Failed','Partial_Failed'].includes(st);
+    showPlanResult(shouldShowPR);
+    if (shouldShowPR) await loadPlanResults(numId);
+
+    // 4) Diff（server report 有變才重繪）
+    const newSig = makeDiffSig(fresh.check_report);
+    if (newSig && LAST_DIFF_SIG.get(numId) !== newSig){
+      LAST_DIFF_SIG.set(numId, newSig);
+      const diffRows = $('m-diff-rows');
+      if (diffRows){
+        renderDiffFromCheckReport(diffRows, parseReportSafe(fresh.check_report));
+      }
+    }
+  }catch(_){ /* 靜默失敗即可，避免干擾 UI */ }
+}
+
+function startReviewPoll(draftId){
+  stopReviewPoll();
+  let inflight = false;
+  const tick = async () => {
+    if (inflight) return;
+    inflight = true;
+    try {
+      console.debug('[review poll] tick', new Date().toISOString(), draftId);
+      await updateActionPlanIfChanged(draftId);
+    } finally { inflight = false; }
+  };
+  REVIEW_POLL_TIMER = setInterval(tick, REVIEW_POLL_MS);
+  tick(); 
+}
+function stopReviewPoll(){
+  if (REVIEW_POLL_TIMER){ clearInterval(REVIEW_POLL_TIMER); REVIEW_POLL_TIMER = null; }
+}
+
+/* Modal lifecycle：關閉時停掉輪詢，避免背景持續打 API */
+draftModalEl?.addEventListener('hidden.bs.modal', ()=>{ stopReviewPoll(); });
+
+/* 當列表刷新時，如果有正在檢視的 draft，也順便比對一次（即使沒開 modal 也能同步快取 -> 下一次打開立即是新的） */
+  const _fetchList_orig = fetchList;
+  fetchList = async function(page, opts){
+    const r = await _fetchList_orig(page, opts);
+  if (OPEN_REVIEW_DRAFT_ID) updateActionPlanIfChanged(OPEN_REVIEW_DRAFT_ID);
+  return r;
+};
+
+  async function fetchDraftDetail(id){
+    const j = await fetchWithFlash(API.drafts_get(id) + `?t=${Date.now()}`, { headers:{'Accept':'application/json'} });
+    return j.data || j;
+  }
+  async function refreshDraftAndModal(id){
+    try{
+      const fresh = await fetchDraftDetail(id);
+      ROW_CACHE.set(Number(id), fresh);
+      if (OPEN_REVIEW_DRAFT_ID === Number(id)) openDraft(fresh);
+    } finally {
+      fetchList(lastPage);
+    }
+  }
+
+  function fillActionPlanSummary(plan){
+    clear(apRows);
+    const tbl = apRows.closest('table'); tbl && tbl.classList.add('ap-compact');
+
+    if (!Array.isArray(plan) || !plan.length){
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="6" class="text-muted">No actions.</td>';
+      apRows.appendChild(tr);
+      return;
+    }
+
+    // 依 action_order 排序，次序相同時再以 action_id 排
+    const list = (Array.isArray(plan) ? plan.slice() : [])
+      .sort((a,b)=> (a.action_order||0) - (b.action_order||0) ||
+                    String(a.action_id||'').localeCompare(String(b.action_id||'')));
+
+    list.forEach((act, idx) => {
+      const displayId = 'plan-' + String(idx + 1).padStart(2, '0');
+      const t = String(act.action_type||'').toLowerCase();
+      const typeBadge = {create:'badge-act-create',update:'badge-act-update',delete:'badge-act-delete'}[t] || 'badge-chip';
+
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td><span class="badge ${typeBadge}">${esc(displayId)}</span></td>`+
+        `<td><span class="badge badge-chip text-dark">${esc(devNameOf(act.device_id))}</span></td>`+
+        `<td><span class="badge badge-vdom">${esc(act.vdom||'')}</span></td>`+
+        `<td><span class="badge badge-kind">${esc(act.kind||'policy')}</span></td>`+
+        `<td><span class="badge badge-chip">${esc(act.resource_id ?? '')}</span></td>`+
+        `<td><span class="badge ${typeBadge} text-uppercase">${esc(act.action_type||'')}</span></td>`;
+      apRows.appendChild(tr);
+    });
+  }
+  // Plan Result
+  const prWrap = $('m-pr-wrap'), prBody = $('pr-rows'), prEmpty = $('pr-empty');
+ 
+  function showPlanResult(on = true){
+    if (!prWrap) return;
+    prWrap.style.display = on ? '' : 'none';
+    const ap = $('m-ap-wrap');
+    if (ap) ap.style.display = on ? 'none' : '';
+  }
+
+  async function loadPlanResults(draftId){
+    if (!prBody) return;
+
+    try{
+      // 先保留現有 DOM，不要一開始就 prEmpty/clear
+      const j = await fetchWithFlash(API.drafts_plan_results(draftId) + `?t=${Date.now()}`, { headers:{'Accept':'application/json'} });
+      let items = j.items || j.data || [];
+
+      // 同你原本的排序邏輯
+      items = items.sort((a,b)=>
+        (a.action_order||0) - (b.action_order||0) ||
+        (parseInt(String(a.action_id||'').match(/\d+$/)?.[0]||'0',10) -
+         parseInt(String(b.action_id||'').match(/\d+$/)?.[0]||'0',10))
+      );
+
+      // 簽章相同就完全不動 DOM（不會閃）
+      const sig = prSignature(items);
+      if (LAST_PR_SIG.get(draftId) === sig){
+        prEmpty.style.display = items.length ? 'none' : '';
+        return;
+      }
+
+      // 差異更新：僅變動的列會被更新
+      patchPlanResultRows(prBody, items);
+      prEmpty.style.display = items.length ? 'none' : '';
+
+      LAST_PR_SIG.set(draftId, sig);
+    }catch(e){
+      toastError('Load results failed: '+(e.message||e));
+    }
+  } 
+
+  // Diff（只渲染 server report；過濾時不隱藏 block）
+  let DIFF_ONLY_CHANGES = false;
+  try{ DIFF_ONLY_CHANGES = localStorage.getItem('forti:diffOnly') === '1'; }catch(_){}
+  function badgeInfo(changeType){
+    const t = String(changeType||'').toLowerCase();
+    if (['added','add','create','created','new'].includes(t))    return {text:'+Added', tr:'table-success'};
+    if (['removed','remove','delete','deleted'].includes(t))     return {text:'-Removed', tr:'table-danger'};
+    if (['changed','change','update','updated','modified'].includes(t)) return {text:'Changed', tr:'table-warning'};
+    return {text:'No Change', tr:''};
+  }
+  function buildServerDiffBlock(container, act){
+    const block = document.createElement('div'); block.className='diff-block';
+    const head  = document.createElement('div'); head.className='diff-head';
+    const devText = devNameOf(act.device_id) || act.device_id;
+
+    // 標題徽章與文字
+    const t = String(act.action_type||'').toLowerCase();
+    const typeCls = { create:'badge-act-create', update:'badge-act-update', delete:'badge-act-delete' }[t] || 'badge-chip';
+    const typeIco = { create:'bi-plus-lg',       update:'bi-pencil-square',  delete:'bi-trash' }[t] || 'bi-dot';
+    const zhAct   = { create:'Add',              update:'Update',               delete:'Delete' }[t] || (act.action_type||'-');
+    const kind    = (act.kind || 'policy');
+
+    // ✅ 只用 diffRows，別再宣告/使用 rows
+    let diffRows = act.diff || act.changes || act.details || [];
+    if (!Array.isArray(diffRows)) diffRows = [];
+
+    const nameRow = diffRows.find(ch => /name/i.test(String(ch.field||ch.name||ch.key||'')));
+    const draftName = (()=> {
+      if (!nameRow) return '';
+      const dr = (nameRow.draft ?? nameRow.after ?? nameRow.to ?? nameRow.current ?? nameRow.before ?? nameRow.from);
+      return dr ? `「${esc(dr)}」` : '';
+    })();
+
+    head.innerHTML = `
+      <span class="badge ${typeCls} text-uppercase me-1">
+        <i class="bi ${typeIco}"></i>${esc(zhAct)}
+      </span>
+      <b>${esc(kind)}</b>
+      ${act.resource_id!=null ? ` #${esc(act.resource_id)}` : ''}
+      ${draftName ? ` · ${draftName}` : ''}
+      <span class="text-muted ms-1">on</span>
+      <span class="fw-semibold ms-1">${esc(devText)}${act.vdom?` / ${esc(act.vdom)}`:''}</span>
+    `;
+
+    const wrap = document.createElement('div'); wrap.className='table-responsive';
+    const tbl  = document.createElement('table'); tbl.className='table table-sm table-bordered align-middle';
+    tbl.innerHTML = '<thead class="table-light"><tr><th>Field</th><th>Current</th><th>Request</th><th>Result</th></tr></thead><tbody></tbody>';
+    const tbody = tbl.querySelector('tbody');
+
+    if (!diffRows.length){
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="4" class="text-muted">No detailed diff in server report.</td>';
+      tbody.appendChild(tr);
+    } else {
+      diffRows.forEach(ch=>{
+        const field = ch.field || ch.name || ch.key || '';
+        const cur = (ch.current != null ? ch.current : (ch.before != null ? ch.before : ch.from));
+        const dr  = (ch.draft   != null ? ch.draft   : (ch.after  != null ? ch.after  : ch.to));
+        const tag = ch.result || ch.type || ch.change || '';
+        const info = badgeInfo(tag);
+
+        const curS = Array.isArray(cur) ? cur.join(', ') : (cur==null?'':String(cur));
+        const drS  = Array.isArray(dr)  ? dr.join(', ')  : (dr==null?'':String(dr));
+
+        const tr = document.createElement('tr');
+        if (info.tr) tr.className = info.tr;
+        const isChange = (info.text !== 'No Change');
+        tr.classList.add('diff-row', isChange ? 'diff-row-chg' : 'diff-row-nochg');
+
+        let badgeCls = 'badge result-badge ';
+        if (info.text==='Added')        badgeCls += 'badge-res-added';
+        else if (info.text==='Removed') badgeCls += 'badge-res-removed';
+        else if (info.text==='Changed') badgeCls += 'badge-res-changed';
+        else                            badgeCls += 'badge-res-unchanged';
+
+        tr.innerHTML =
+          `<td><b>${esc(field)}</b></td>`+
+          `<td><div class="cell-wrap">${curS || '<span class="text-muted">—</span>'}</div></td>`+
+          `<td><div class="cell-wrap">${drS  || '<span class="text-muted">—</span>'}</div></td>`+
+          `<td><span class="${badgeCls}">${info.text==='Changed' ? '<i class="bi bi-arrow-left-right"></i>Changed' : info.text}</span></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    wrap.appendChild(tbl);
+    block.appendChild(head);
+    block.appendChild(wrap);
+    container.appendChild(block);
+  }
+
+  function applyDiffFilter(){
+    const box = $('m-diff-rows'); if (!box) return;
+    const on = DIFF_ONLY_CHANGES; let anyShown = false;
+    box.querySelectorAll('.diff-block').forEach(block=>{
+      const rows = block.querySelectorAll('tbody tr.diff-row'); let visibleCount = 0;
+      rows.forEach(tr=>{
+        const isChg = tr.classList.contains('diff-row-chg');
+        tr.style.display = (on && !isChg) ? 'none' : '';
+        if (tr.style.display !== 'none') visibleCount++;
+      });
+      block.style.display = ''; // 保留每個 block 標題
+      if (visibleCount) anyShown = true;
+    });
+    let hint = box.querySelector('.diff-empty-hint');
+    if (!anyShown){
+      if (!hint){
+        hint = document.createElement('div');
+        hint.className = 'diff-empty-hint text-muted small';
+        hint.textContent = 'No changes under current filter.';
+        box.appendChild(hint);
+      }
+    } else { hint && hint.remove(); }
+  }
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const diffTog = $('togDiffOnlyChanges'); if (!diffTog) return;
+    diffTog.checked = !!DIFF_ONLY_CHANGES;
+    on(diffTog, 'change', ()=>{
+      DIFF_ONLY_CHANGES = !!diffTog.checked;
+      try{ localStorage.setItem('forti:diffOnly', DIFF_ONLY_CHANGES ? '1':'0'); }catch(_){}
+      applyDiffFilter();
+    });
+    applyDiffFilter();
+  });
+
+  function renderDiffFromCheckReport(container, report){
+    clear(container);
+    let actions = [];
+    if (report && Array.isArray(report.actions)) actions = report.actions;
+    else if (report && Array.isArray(report.diff)) actions = report.diff;
+
+    if (Array.isArray(actions) && actions.length){
+      actions.sort((a,b)=> (a.action_order||0)-(b.action_order||0) || String(a.action_id||'').localeCompare(String(b.action_id||'')));
+      actions.forEach(a => buildServerDiffBlock(container, a));
+      applyDiffFilter(); return true;
+    }
+    const empty = document.createElement('div');
+    empty.className = 'text-muted'; empty.textContent = 'Diff Compare is empty';
+    container.appendChild(empty);
+    applyDiffFilter(); return true;
+  }
+
+  // Workflow（步驟條與時間軸）
+  const FLOW_BASE = [
+    { code:'Pending_Submit',   label:'Request' },
+    { code:'Submitted',        label:'Submit'  },
+    { code:'Preparing_Deploy', label:'Prepare'  },
+    { code:'Approved',         label:'Approved' },
+    { code:'Preparing_Deploy', label:'Deploy'  },
+    { code:'Deploy_Succeeded', label:'Done'    }
+  ];
+  const FLOW_FAIL_SET = new Set(['Rejected','Canceled','Deploy_Failed','Partial_Failed','Verify_Failed']);
+  const STEP_INDEX = {
+    Pending_Submit:   0,
+    Submitted:        1,  
+    Awaiting_Approval:2,
+    Preparing_Deploy: 2,
+    Approved:         3,  
+    Deploying:        4,  
+    Deploy_Succeeded: 5   
+  };
+  function statusInfo(s){
+    const map = {
+      Pending_Submit:   { title:'Request Created',      msg:'The request is created. You can edit, submit, or delete it below.' },
+      Awaiting_Approval:{ title:'Submitted',            msg:'Submitted for review. Approvers can approve or reject.' },
+      Preparing_Deploy: { title:'Validating',           msg:'Pre-deploy validation/verification is running after submit.' }, // ← 調整
+      Deploying:        { title:'Deploying',            msg:'Deployment in progress. All operations are temporarily disabled.' },
+      Deploy_Succeeded: { title:'Completed',            msg:'Deployment succeeded. No further action is required.' },
+      Deploy_Failed:    { title:'Deployment Failed',    msg:'Deployment failed. Please fix the issues and resubmit as a new request.' },
+      Partial_Failed:   { title:'Partial Failure',      msg:'Some actions failed. Review the differences and resubmit as a new request.' },
+      Rejected:         { title:'Rejected',             msg:'The request was rejected. Please address the feedback and submit a new request.' },
+      Canceled:         { title:'Canceled',             msg:'The request has been canceled. No further operations are allowed.' },
+      Verify_Failed:    { title:'Validation Failed',    msg:'Pre-submit validation failed. Please correct the fields and try again.' }
+    };
+    return map[s] || { title:'', msg:'' };
+  }
+  const flowStatusLabel = (code) => {
+    if (code === 'Submitted' || code === 'Awaiting_Approval') return 'Submit';
+    if (code === 'Preparing_Deploy') return 'Prepare';
+    if (code === 'Approved')         return 'Approved';
+    if (code === 'Deploying')        return 'Deploy';
+    const map = Object.fromEntries(FLOW_BASE.map(x => [x.code, x.label]));
+    return map[code] || ({
+      Rejected:'Rejected', Canceled:'Canceled',
+      Deploy_Failed:'Deploy Failed', Partial_Failed:'Partial Failed',
+      Verify_Failed:'Verify Failed', Edited:'Edit'
+    }[code] || code || '-');
+  };
+  const statusIcon = (code) => {
+    switch (code) {
+      case 'Pending_Submit':    return 'bi-clipboard-plus';
+      case 'Submitted':
+      case 'Awaiting_Approval': return 'bi-send-check';
+      case 'Preparing_Deploy':  return 'bi-clipboard-check'; // 驗證/預檢
+      case 'Approved':          return 'bi-person-check';
+      case 'Deploying':         return 'bi-cloud-upload';
+      case 'Deploy_Succeeded':  return 'bi-check2-circle';
+      case 'Rejected':          return 'bi-x-circle';
+      case 'Canceled':          return 'bi-slash-circle';
+      case 'Deploy_Failed':     return 'bi-exclamation-octagon';
+      case 'Partial_Failed':    return 'bi-shield-exclamation';
+      case 'Verify_Failed':     return 'bi-bug';
+      default:                  return 'bi-dot';
+    }
+  };
+  function parseTS(raw){
+    // 依照 base.html 的工具；若未提供，使用 Date 解析
+    if (window.parseAsInstant && window.cleanDbDatetime){
+      return window.parseAsInstant(window.cleanDbDatetime(raw)) || null;
+    }
+    const d = new Date(String(raw||'').replace(' ','T')); return isNaN(+d) ? null : d;
+  }
+  
+  function buildSegments(items){
+    const hist = items.filter(x=>x.at).map(x=>({...x, at_dt: parseTS(x.at)})).filter(x=>x.at_dt).sort((a,b)=> a.at_dt - b.at_dt);
+    const segs = [];
+    for (let i=0;i<hist.length;i++){
+      const from = hist[i].at_dt; const to = (i+1 < hist.length) ? hist[i+1].at_dt : null;
+      segs.push({ status: hist[i].status, from, to, by: hist[i].by, note: hist[i].note });
+    }
+    return segs;
+  }
+  const fmtDur = (ms)=>{
+    ms = Math.max(0, +ms || 0);
+    let s = Math.floor(ms/1000);
+    const d=Math.floor(s/86400); s-=d*86400;
+    const h=Math.floor(s/3600);  s-=h*3600;
+    const m=Math.floor(s/60);    s-=m*60;
+    const out=[]; if(d) out.push(d+'d'); if(h) out.push(h+'h'); if(m) out.push(m+'m'); out.push(s+'s'); return out.join(' ');
+  };
+
+  function stepIndexFor(status, hist){
+    if (status in STEP_INDEX) return STEP_INDEX[status];
+    if (!FLOW_FAIL_SET.has(status)) return 0;
+    if (status === 'Verify_Failed') return 1;
+    if (status === 'Deploy_Failed' || status === 'Partial_Failed') return 3;
+    if (status === 'Rejected' || status === 'Canceled'){
+      // 只有真的出現「Approved」才算越過核准
+      const passedApproval = (hist||[]).some(x => x.status === 'Approved');
+      return passedApproval ? 2 : 1;
+    }
+    return 2;
+  }
+
+  function renderWorkflowCard(status, items){
+    const stepsEl = $('m-flow-steps'), msgEl = $('m-flow-msg');
+    if (!stepsEl || !msgEl) return;
+    clear(stepsEl);
+
+    const FLOW_FAIL_SET = new Set(['Rejected','Canceled','Deploy_Failed','Partial_Failed','Verify_Failed']);
+    const isFail   = FLOW_FAIL_SET.has(status);
+    const isClosed = isFail || status === 'Deploy_Succeeded';
+    const curIdx   = stepIndexFor(status, items);
+
+    // 6 個步驟的 icon/主題（Prepare 共享 Submit 的綠色主題，不需新增 CSS）
+    const STEP_ICON  = ['bi-clipboard-plus','bi-send-check','bi-clipboard-check','bi-person-check','bi-cloud-upload','bi-check2-circle'];
+    const STEP_THEME = ['chip-Request','chip-Submit','chip-Submit','chip-Approved','chip-Deploy','chip-Done'];
+
+    const segments = buildSegments(items || []);
+    const now = Date.now();
+
+    // 以 Pending_Submit 為 clamp 起點
+    const createdMs = (() => {
+      const p = (items||[]).find(x => x.status === 'Pending_Submit' && parseTS(x.at));
+      return p ? +parseTS(p.at) : null;
+    })();
+
+    // 逐段統計 Prepare/Deploy 的累積時間
+    let prepareMs = 0, deployMs = 0;
+    segments.forEach(seg => {
+      const start = seg.from ? +seg.from : 0;
+      const endMs = seg.to ? +seg.to : now;
+      const clampedStart = createdMs != null ? Math.max(start, createdMs) : start;
+      if (endMs <= clampedStart) return;
+
+      if (seg.status === 'Preparing_Deploy') prepareMs += (endMs - clampedStart);
+      if (seg.status === 'Deploying')        deployMs  += (endMs - clampedStart);
+    });
+
+    // 步驟條
+    for (let i = 0; i < FLOW_BASE.length; i++) {
+      if (isFail && i > curIdx) break;
+      if (stepsEl.children.length) {
+        const ar = document.createElement('span');
+        ar.className = 'flow-arrow';
+        ar.textContent = '→';
+        stepsEl.appendChild(ar);
+      }
+      const chip = document.createElement('div');
+      chip.className = 'flow-chip ' + (STEP_THEME[i] || '');
+      if (!isFail){
+        if (i < curIdx) chip.classList.add('done');
+        else if (i === curIdx) chip.classList.add('current');
+      }
+      chip.innerHTML = `<i class="bi ${STEP_ICON[i]}"></i><span>${FLOW_BASE[i].label}</span>`;
+      stepsEl.appendChild(chip);
+    }
+
+    if (isFail){
+      const ar2 = document.createElement('span');
+      ar2.className = 'flow-arrow';
+      ar2.textContent = '→';
+      stepsEl.appendChild(ar2);
+
+      const failChip = document.createElement('div');
+      failChip.className = 'flow-chip current fail ' + (status === 'Canceled' ? 'chip-Canceled' : 'chip-Rejected');
+      const FAIL_ICON = { Rejected:'bi-x-circle', Canceled:'bi-slash-circle', Deploy_Failed:'bi-exclamation-octagon', Partial_Failed:'bi-shield-exclamation', Verify_Failed:'bi-bug' };
+      failChip.innerHTML = `<i class="bi ${FAIL_ICON[status]||'bi-exclamation-triangle'}"></i><span>${esc(flowStatusLabel(status))}</span>`;
+      stepsEl.appendChild(failChip);
+    }
+
+    // 訊息摘要：分別顯示 Prepare / Deploy 的累計時長
+    const info = statusInfo(status);
+    let labelText, tailText = '';
+    if (isClosed) {
+      labelText = 'Final: <b>'+esc(flowStatusLabel(status))+'</b>';
+    } else {
+      const currentLabel = FLOW_BASE[curIdx]?.label || flowStatusLabel(status);
+      const currentFrom = (() => {
+        let t = null;
+        const segs = buildSegments(items || []);
+        segs.forEach(seg => { if (!seg.to) t = seg.from; });
+        return t;
+      })();
+      const currentDur = currentFrom ? fmtDur(now - currentFrom.getTime()) : '0s';
+      labelText = 'Current: <b>'+esc(currentLabel)+'</b>';
+      tailText  = ' ' + currentDur;
+    }
+    msgEl.innerHTML =
+      esc(info.msg || '') +
+      `<div class="small text-muted mt-1"><i class="bi bi-stopwatch"></i> Summary: Prepare ${fmtDur(prepareMs)} · Deploy ${fmtDur(deployMs)} · ${labelText}${tailText}</div>`;
+  }
+
+  const actorLabelFor = (s)=> ({
+    Pending_Submit:'Request By',
+    Submitted:'Submitted By',
+    Awaiting_Approval:'Requester',
+    Approved:'Approval By',
+    Rejected:'Approver',
+    Canceled:'Canceled By',
+    Deploy:'System',
+    Preparing_Deploy:'System',
+    Deploying:'Approval By',
+    Deploy_Succeeded:'System',
+    Deploy_Failed:'System',
+    Partial_Failed:'System',
+    Verify_Failed:'System'}
+  [s] || 'User');
+
+  const timeLabelFor  = (s)=> ({
+    Pending_Submit:'Request Time',
+    Submitted:'Submit Time',
+    Awaiting_Approval:'Submit Time',
+    Approved:'Approval Time',
+    Rejected:'Rejected Time',
+    Canceled:'Canceled Time',
+    Deploy:'Deploy Time',
+    Preparing_Deploy:'Verify Time',
+    Deploying:'Deploy Time',
+    Deploy_Succeeded:'Done Time',
+    Deploy_Failed:'Deploy Time',
+    Partial_Failed:'Deploy Time',
+    Verify_Failed:'Verify Time'}
+  [s] || 'Time');
+
+function adaptTimelineToFlowItems(events = [], finalStatus = '') {
+  const createdAt = window._CURRENT_DRAFT_CREATED_AT ? new Date(String(window._CURRENT_DRAFT_CREATED_AT).replace(' ','T')) : null;
+  const createdMs = createdAt && !isNaN(+createdAt) ? +createdAt : null;
+
+  const firstApprovedMs = (() => {
+    const ts = (events||[])
+      .filter(e => e && e.type === 'approved' && e.at)
+      .map(e => +new Date(String(e.at).replace(' ','T')))
+      .filter(Number.isFinite)
+      .sort((a,b)=>a-b)[0];
+    return Number.isFinite(ts) ? ts : null;
+  })();
+
+  const mapDeploy = (e) => {
+    const s = String(e.status || '').toLowerCase();
+    if (s === 'success')  return 'Deploy_Succeeded';
+    if (s === 'failed')   return 'Deploy_Failed';
+    if (s === 'partial')  return 'Partial_Failed';
+    if (s === 'running')  return 'Deploying';
+    if (s === 'canceled') return 'Canceled';
+    return 'Deploying';
+  };
+
+  const out = [];
+
+  // 固定以建立時間當開頭
+  if (window._CURRENT_DRAFT_CREATED_AT) {
+    out.push({ status: 'Pending_Submit', at: window._CURRENT_DRAFT_CREATED_AT });
+  }
+
+  // 逐筆事件 → 標準化節點
+  let submitAt = null;
+  for (const e of (events || [])) {
+    const base = { by: e.by || '', note: e.note || '' };
+
+    if (e.type === 'submit') {
+      submitAt = e.at || null;
+      out.push({ status: 'Submitted', at: e.at, ...base });
+      // ⭐ Submit 之後立刻進入「Preparing_Deploy」(驗證)，直到 Approved 才結束/銜接
+      if (submitAt) out.push({ status: 'Preparing_Deploy', at: submitAt, ...base });
+    }
+
+    if (e.type === 'approved') out.push({ status: 'Approved', at: e.at, ...base });
+    if (e.type === 'rejected') out.push({ status: 'Rejected', at: e.at, ...base });
+    if (e.type === 'canceled') out.push({ status: 'Canceled', at: e.at, ...base });
+
+    // Deploy 訊號只接受「核准之後」的
+    if (e.type === 'deploy') {
+      const startAt = (e.range && e.range.start) || e.at || '';
+      const startMs = startAt ? +new Date(String(startAt).replace(' ','T')) : NaN;
+      const allow = Number.isFinite(startMs) && Number.isFinite(firstApprovedMs) && startMs >= firstApprovedMs;
+      if (!allow) continue;
+
+      // 進入 Deploying
+      if (startAt) out.push({ status: 'Deploying', at: startAt, ...base });
+
+      // 終態（若有）
+      const st2   = mapDeploy(e);
+      const endAt = (e.range && e.range.end) || e.at || '';
+      const tStart= startAt ? +new Date(String(startAt).replace(' ','T')) : NaN;
+      const t2ms  = endAt ? +new Date(String(endAt).replace(' ','T')) : NaN;
+      if (st2 !== 'Deploying' || (isFinite(t2ms) && isFinite(tStart) && t2ms > tStart)) {
+        out.push({ status: st2, at: (endAt || startAt), ...base });
+      }
+    }
+  }
+
+  // 依時間排序 & 過濾不合理的時間（比建立還早的）
+  let items = out.filter(i => i.at)
+                 .sort((a,b) => new Date(a.at) - new Date(b.at));
+  if (createdMs != null) {
+    items = items.filter(i => {
+      const t = +new Date(String(i.at).replace(' ','T'));
+      return isFinite(t) ? (t >= createdMs) : true;
+    });
+  }
+
+  // 若最終是結案態，且時間軸中沒對應節點，補上一筆尾端
+  const CLOSED = new Set(['Deploy_Succeeded','Deploy_Failed','Partial_Failed','Rejected','Canceled','Verify_Failed']);
+  if (finalStatus && CLOSED.has(finalStatus) && !items.some(x => x.status === finalStatus)) {
+    items.push({ status: finalStatus, at: items.length ? items[items.length-1].at : new Date().toISOString() });
+  }
+
+  // 若 Canceled，隱藏多餘的 Rejected（保持簡潔）
+  if (finalStatus === 'Canceled') {
+    items = items.filter(x => x.status !== 'Rejected');
+  }
+
+  return items;
+}
+
+// === NEW: 用「flow-tl」樣式渲染時間軸（吃 workflow items，而非原生 events） ===
+function renderFlowTimelineFromServer(containerEl, events = [], finalStatus = '') {
+  if (!containerEl) return;
+  const items = adaptTimelineToFlowItems(events, finalStatus);
+
+  // 這些狀態「不顯示任何 meta」（時間、By、note 都不顯示）
+  const HIDE_META = new Set(['Preparing_Deploy']);
+
+  const html = items.map(i => {
+    const hideMeta = HIDE_META.has(i.status);
+
+    const statusCol = `
+      <div class="status">
+        <i class="bi ${statusIcon(i.status)}"></i>
+        <span>${esc(flowStatusLabel(i.status))}</span>
+      </div>`;
+
+    const metaParts = [];
+    if (!hideMeta) {
+      metaParts.push(
+	`<div><span class="k">${esc(timeLabelFor(i.status))}:</span> ` +
+        `<span data-iso="${escAttr(i.at)}" data-format="slash"></span></div>`
+      )
+      if (i.by)   metaParts.push(`<div><span class="k">${esc(actorLabelFor(i.status))}:</span> ${esc(i.by)}</div>`);
+      if (i.note) metaParts.push(`<div class="note">${esc(i.note)}</div>`);
+    }
+
+    return `
+      <div class="tl-item s-${escAttr(i.status)}">
+        ${statusCol}
+        <div class="meta">${metaParts.join('')}</div>
+      </div>`;
+  }).join('');
+
+  containerEl.innerHTML = html;
+  window.renderAllTZ && window.renderAllTZ();
+}
+
+// 取得詳情後直接渲染
+async function fetchDraftAndRender(id) {
+  const res = await fetch(`/fortigate/drafts/${id}`);
+  const { data } = await res.json();
+  const events = Array.isArray(data.timeline) ? data.timeline : [];
+  renderFlowTimelineFromServer($('m-flow-tl'), events, data.status || '');
+}
+
+  function appendLocalStatusToCache(id, status, note, at){
+    const row = ROW_CACHE.get(Number(id)); if (!row) return;
+    if (!Array.isArray(row.__local_history)) row.__local_history = [];
+    row.__local_history.push({
+      status,
+      at: at || new Date().toISOString(),
+      by: currentUserName(),
+      note: (note||'')
+    });
+    if (OPEN_REVIEW_DRAFT_ID === Number(id)) updateActionPlanIfChanged(Number(id));
+  }
+
+  function hideDecisionButtons(){ btnApprove.classList.add('d-none'); btnReject.classList.add('d-none'); }
+
+  // Review actions
+  on(btnSubmit,'click', async ()=>{
+    const id = Number(mDraftId.textContent||'0'); if(!id) return;
+    if (!confirm(`Submit request #${id} ?`)) return;
+    bootstrap.Modal.getInstance(draftModalEl)?.hide();
+    try{
+      await fetchWithFlash(API.drafts_submit(id), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+      await refreshDraftAndModal(id);
+    }catch(e){ toastError(e.message || 'Submit failed'); }
+  });
+  on(btnApprove,'click', async ()=>{
+    const id = Number(mDraftId.textContent||'0'); if(!id) return;
+    if (!confirm(`Approve request #${id} ?`)) return;
+
+    btnApprove.disabled = true; btnReject.disabled = true;
+    setReviewBusy(true);
+    try{
+      await fetchWithFlash(API.drafts_approve(id), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+      await refreshDraftAndModal(id);
+    }catch(e){
+      toastError(e.message || 'Approve failed');
+      btnApprove.disabled = false; btnReject.disabled = false;
+    }finally{
+      setReviewBusy(false);
+    }
+  });
+
+  // Reject flow
+  const rejectModalEl = $('rejectModal');
+  const rejReason = $('rej_reason'), rejCommentWrap = $('rej_comment_wrap'), rejComment = $('rej_comment'), rejSave = $('rej_save');
+  if (rejectModalEl){
+    rejectModalEl.addEventListener('show.bs.modal', (ev)=>{
+      const base = 1060; ev.target.style.zIndex = base + 4;
+      setTimeout(()=>{
+        const backs = document.querySelectorAll('.modal-backdrop');
+        const top = backs[backs.length - 1]; if (top) top.style.zIndex = String(base + 3);
+      }, 0);
+    });
+  }
+  on(btnReject,'click', ()=>{
+    rejReason.value=''; rejComment.value=''; rejCommentWrap.classList.add('d-none');
+    bootstrap.Modal.getOrCreateInstance(rejectModalEl).show();
+  });
+  on(rejReason,'change', ()=> rejCommentWrap.classList.toggle('d-none', rejReason.value!=='comment'));
+  on(rejSave,'click', async ()=>{
+    const id = Number(mDraftId.textContent||'0'); if(!id) return;
+    const reason = rejReason.value;
+    if (!reason) return toastWarn('Please choose a reason.');
+    if (reason==='comment' && !(rejComment.value||'').trim()) return toastWarn('Please enter a comment.');
+
+    bootstrap.Modal.getInstance(rejectModalEl)?.hide();
+    bootstrap.Modal.getInstance(draftModalEl)?.hide();
+    try{
+      let noteText = '', finalStatus = 'Rejected';
+      if (reason==='cancel'){
+        let ok = false;
+        try{
+          await fetchWithFlash(API.drafts_cancel(id), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+          ok = true; finalStatus = 'Canceled'; noteText = 'Request Cancel';
+        }catch(_){}
+        if (!ok){
+          await fetchWithFlash(API.drafts_reject(id), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ comment:'Request Cancel' }) });
+          finalStatus = 'Rejected'; noteText = 'Request Cancel';
+        }
+      } else if (reason==='wrong'){
+        await fetchWithFlash(API.drafts_reject(id), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ comment:'Wrong value setting' }) });
+        noteText = 'Wrong value setting';
+      } else {
+        const txt = (rejComment.value||'').trim();
+        await fetchWithFlash(API.drafts_reject(id), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ comment: txt }) });
+        noteText = txt;
+      }
+      hideDecisionButtons();
+      await refreshDraftAndModal(id);
+    }catch(e){ toastError(e.message || 'Action failed'); }
+  });
+
+  on(btnDelete,'click', async ()=>{
+    const id = Number(mDraftId.textContent||'0'); if(!id) return;
+    if (!confirm(`Delete request #${id} ?`)) return;
+    try{
+      try { await fetchWithFlash(API.drafts_delete(id), { method:'POST', headers:{'Content-Type':'application/json'} }); }
+      catch(_){ await fetchWithFlash(`/fortigate/drafts/${id}`, { method:'DELETE' }); }
+      bootstrap.Modal.getInstance(draftModalEl)?.hide();
+      fetchList(1);
+    }catch(e){ toastError(e.message || 'Delete failed'); }
+  });
+
+  on(btnEdit,'click', ()=>{
+    const id = Number((mDraftId.textContent||'').trim() || OPEN_REVIEW_DRAFT_ID || 0);
+    if (!id) return toastWarn('Request ID not found.');
+    const row = ROW_CACHE.get(id);
+    if (!row) { toastWarn('Request content has not loaded yet. Refreshing…'); refreshDraftAndModal(id); return; }
+    let da = row.draft_action || {};
+    if (typeof da === 'string') { try{ da = JSON.parse(da); }catch(_){ da = {}; } }
+    const plan = Array.isArray(da.action_plan) ? da.action_plan : [];
+    CURRENT_EDIT_DRAFT_ID = id;
+    openEditWithPlans(plan);
+  });
+
+  async function openDraft(row){
+    if (!Array.isArray(row.timeline) || row.timeline.length === 0) {
+      try {
+        setReviewBusy(true);
+        const fresh = await fetchDraftDetail(row.id);
+        ROW_CACHE.set(Number(row.id), fresh);
+        row = fresh;
+      } catch (_) {
+      } finally { setReviewBusy(false); }
+    }
+    OPEN_REVIEW_DRAFT_ID = Number(row.id);
+    const st = String(row.status||'');
+    mDraftId.textContent = row.id;
+    mTitle.textContent   = row.title || '';
+    const vis = visualStatusFor(st);
+    mStatus.innerHTML    = statusBadge(vis);
+    mCreatedBy.textContent = row.created_by_name || row.created_by || '';
+    mCreatedAt.setAttribute('data-iso', row.created_at || ''); mCreatedAt.setAttribute('data-format', 'slash');
+    window._CURRENT_DRAFT_CREATED_AT = row.created_at || null;
+    window.renderAllTZ && window.renderAllTZ();
+    [btnEdit,btnSubmit,btnDelete,btnApprove,btnReject].forEach(b=> b && (b.disabled=false));
+
+    const events = Array.isArray(row.timeline) ? row.timeline : [];
+    const hist   = adaptTimelineToFlowItems(events, vis);
+    renderWorkflowCard(vis, hist);
+     renderFlowTimelineFromServer($('m-flow-tl'), events, vis);
+
+    applyReviewButtons(vis);
+
+    const showPR = ['Preparing_Deploy','Deploying','Deploy_Succeeded','Deploy_Failed','Partial_Failed'].includes(String(row.status||''));
+    showPlanResult(showPR);
+    if (showPR) loadPlanResults(row.id);
+
+    const diffWrap = $('m-diff-wrap'), diffRows = $('m-diff-rows'); clear(diffRows); setReviewBusy(true);
+    const report = (()=>{ try{ return JSON.parse(row.check_report) }catch(_){ return row.check_report || null; } })();
+    diffWrap.style.display='';
+    try {
+      renderDiffFromCheckReport(diffRows, report);
+    } catch(e){
+      console.warn('[diff] render failed:', e);
+    } finally {
+      setReviewBusy(false);
+    }
+    bootstrap.Modal.getOrCreateInstance(draftModalEl).show();
+
+    const idNum = Number(row.id);
+    startReviewPoll(idNum);
+
+    try{
+      let da = row.draft_action || {};
+      if (typeof da === 'string'){ try{ da = JSON.parse(da); }catch(_){} }
+      const plan = Array.isArray(da.action_plan) ? da.action_plan : [];
+      LAST_PLAN_SIG.set(idNum, planSignature(plan));
+      LAST_STATUS.set(idNum, String(row.status || ''));
+      LAST_TL_SIG.set(idNum, tlSignature(Array.isArray(row.timeline) ? row.timeline : []));
+      LAST_DIFF_SIG.set(idNum, makeDiffSig(row.check_report) || '');
+    }catch(_){}
+  }
+  draftModalEl?.addEventListener('hidden.bs.modal', ()=> { OPEN_REVIEW_DRAFT_ID = null; });
+
+  // 列表點擊 → 開 Review
+  document.addEventListener('click', (e)=>{
+    const a = e.target.closest?.('a.js-open'); if (!a) return;
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(a.getAttribute('data-id') || a.dataset.id || 0); if (!id) return;
+    const cached = ROW_CACHE.get(id);
+    if (cached) return openDraft(cached);
+    setReviewBusy(true);
+    fetchDraftDetail(id)
+      .then(row => { ROW_CACHE.set(id, row); openDraft(row); })
+      .catch(err => toastError(err?.message || 'Open failed'))
+      .finally(()=> setReviewBusy(false));
+  });
+
+  /** =========================
+   * Search & Sync（政策清單）
+   * ========================= */
+  const sDevice=$('s_device'), sVDOM=$('s_vdom'), sVDOMFallback=$('s_vdom_fallback'), sVDOMHelp=$('s_vdom_help');
+  const policyTBody = document.querySelector('#policyTable tbody');
+  const policyEmpty = $('policyEmpty');
+  const fAction=$('f_action'), fStatus=$('f_status'), fSeqMin=$('f_seq_min'), fSeqMax=$('f_seq_max'), fName=$('f_name');
+  const selectedPolicyHint=$('selectedPolicyHint'), selectedPolicyText=$('selectedPolicyText');
+  let currentSearchDeviceId=null, currentSearchVdom=null;
+  const policyCache = new Map();
+
+  const AUTO_SYNCED_KEYS = new Set();
+  let AUTO_SYNC_INFLIGHT = false, VDOM_INPUT_TIMER = null;
+
+  on(sDevice, 'change', async ()=>{
+    await loadVDOMsSelect(sDevice.value, sVDOM, sVDOMFallback, sVDOMHelp);
+    if (!sVDOM.classList.contains('d-none')) sVDOM.value = '';
+    resetPolicies();
+  });
+  on(sVDOM, 'change', ()=> autoSyncIfReady('vdom-select'));
+  on(sVDOMFallback,'input', ()=>{
+    clearTimeout(VDOM_INPUT_TIMER);
+    VDOM_INPUT_TIMER = setTimeout(()=> autoSyncIfReady('vdom-manual'), 400);
+  });
+  on($('btnReload'),'click', ()=>{
+    setPolicyBusy(true);
+    loadDevicesSelect(sDevice)
+      .then(()=>{
+        sDevice.value = '';
+        clear(sVDOM);
+        sVDOM.classList.remove('d-none');
+        sVDOMFallback.value = '';
+        sVDOMFallback.classList.add('d-none');
+        sVDOMHelp.textContent = '';
+        AUTO_SYNCED_KEYS.clear();
+        resetPolicies();
+      })
+      .finally(()=> setPolicyBusy(false));
+  });
+
+  function currentDeviceVdom(){
+    const device_id = sDevice.value;
+    const vdom = sVDOM.classList.contains('d-none') ? (sVDOMFallback.value||'') : sVDOM.value;
+    return { device_id, vdom };
+  }
+  function resetPolicies(){
+    clear(policyTBody); policyEmpty.style.display=''; policyCache.clear();
+    selectedPolicyHint?.classList.add('d-none');
+    currentSearchDeviceId = null; currentSearchVdom = null;
+  }
+  async function autoSyncIfReady(){
+    const { device_id, vdom } = currentDeviceVdom();
+    if (!device_id || !vdom) return;
+    const key = `${device_id}|${vdom}`;
+    if (AUTO_SYNC_INFLIGHT || AUTO_SYNCED_KEYS.has(key)) return;
+    AUTO_SYNC_INFLIGHT = true; $('btnReload') && ($('btnReload').disabled = true); setPolicyBusy(true);
+    try{
+      const j = await fetchJSON(API.sync_policies, { method:'POST', body: JSON.stringify({ device_id:Number(device_id), vdom }) });
+      AUTO_SYNCED_KEYS.add(key);
+      $('filterForm').dispatchEvent(new Event('submit'));
+      toastInfo && toastInfo(`Synced ${devNameOf(device_id)||device_id} / ${vdom} · Imported ${j.count||0} item(s).`);
+    }catch(e){ toastError('Sync failed: '+(e.message||e)); }
+    finally{ AUTO_SYNC_INFLIGHT=false; $('btnReload') && ($('btnReload').disabled=false); setPolicyBusy(false); }
+  }
+
+  async function loadDevicesSelect(sel){
+    try{
+      const data = await fetchJSON(API.devices);
+      clear(sel);
+      const p = document.createElement('option'); p.value=''; p.textContent='(choose device)'; sel.appendChild(p);
+      const items = data.items||[];
+      if (!items.length){ const o=document.createElement('option'); o.value=''; o.textContent='(no devices)'; sel.appendChild(o); return; }
+      items.forEach(it=>{
+        const opt = document.createElement('option');
+        opt.value = String(it.id); opt.textContent = (it.name||('device_'+it.id)) + ' ('+(it.host||'-')+')';
+        sel.appendChild(opt);
+      });
+    }catch(_){
+      clear(sel); const o=document.createElement('option'); o.value=''; o.textContent='(failed)'; sel.appendChild(o);
+    }
+  }
+  async function loadVDOMsSelect(deviceId, sel, fallback, help){
+    if (!deviceId){
+      clear(sel); const o=document.createElement('option'); o.value=''; o.textContent='(choose device first)'; sel.appendChild(o);
+      sel.classList.remove('d-none'); fallback.classList.add('d-none'); help.textContent = ''; return;
+    }
+    try{
+      const data = await fetchJSON(API.device_vdoms(deviceId));
+      const raw = data.items || data.vdoms || []; const list = [];
+      raw.forEach(x=> list.push(typeof x==='string' ? x : (x?.name || x?.vdom || x?.value)));
+      clear(sel);
+      const p=document.createElement('option'); p.value=''; p.textContent='(choose VDOM)'; sel.appendChild(p);
+      if (list.length) list.forEach(v=>{ const op=document.createElement('option'); op.value=v; op.textContent=v; sel.appendChild(op); });
+      else { const o2=document.createElement('option'); o2.value=''; o2.textContent='(no VDOMs)'; sel.appendChild(o2); }
+      sel.classList.remove('d-none'); fallback.classList.add('d-none'); help.textContent='';
+      sel.value='';
+    }catch(_){
+      sel.classList.add('d-none'); fallback.classList.remove('d-none'); help.textContent='VDOM list API not provided; switched to manual input.';
+    }
+  }
+  const parseArray = (v)=>{
+    if (v==null) return [];
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string'){
+      try{ const a = JSON.parse(v); if (Array.isArray(a)) return a; }catch(_){}
+      return v.split(',').map(s=>s.trim()).filter(Boolean);
+    }
+    return [String(v)];
+  };
+  function renderPolicyRows(items){
+    clear(policyTBody);
+    if(!items.length){ policyEmpty.style.display=''; return; }
+    policyEmpty.style.display='none';
+    items.sort((a,b)=> (a.fg_policy_id||0)-(b.fg_policy_id||0));
+    items.forEach(row=>{
+      const dev=row.device_id||currentSearchDeviceId; const vd=row.vdom||currentSearchVdom;
+      const key = `${dev}:${vd}:${row.fg_policy_id}`;
+      const tr = document.createElement('tr'); tr.setAttribute('data-key', key);
+      tr.innerHTML =
+        `<td class="text-primary text-decoration-underline" style="cursor:pointer">${row.fg_policy_id||''}</td>`+
+        `<td>${esc(row.name||'')}</td>`+
+        `<td>${esc(row.status||'')}</td>`+
+        `<td>${esc(row.schedule||'')}</td>`+
+        `<td>${row.nat?'Yes':'No'}</td>`;
+      policyTBody.appendChild(tr);
+      policyCache.set(key, {
+        device_id: dev, vdom: vd, fg_policy_id: row.fg_policy_id, name: row.name, action: row.action, status: row.status, schedule: row.schedule, nat: row.nat,
+        src_addrs: parseArray(row.src_addrs), dst_addrs: parseArray(row.dst_addrs),
+        services: parseArray(row.services), src_intfs: parseArray(row.src_intfs), dst_intfs: parseArray(row.dst_intfs),
+        webfilter: row.webfilter || row['web-filter'] || row['web_filter'] || null,
+        comments: row.comments || row.comment || ''
+      });
+    });
+  }
+  on($('filterForm'),'submit', async (e)=>{
+    e.preventDefault();
+    const device_id = sDevice.value;
+    const vdom = sVDOM.classList.contains('d-none') ? sVDOMFallback.value : sVDOM.value;
+    if (!device_id || !vdom) return alert('Please choose Device and VDOM');
+    currentSearchDeviceId = Number(device_id); currentSearchVdom = vdom;
+    const params = new URLSearchParams();
+    params.set('device_id', device_id); params.set('vdom', vdom);
+    if (fAction.value) params.set('action', fAction.value);
+    if (fStatus.value) params.set('status', fStatus.value);
+    if (fSeqMin.value) params.set('seq_min', fSeqMin.value);
+    if (fSeqMax.value) params.set('seq_max', fSeqMax.value);
+    if (fName.value)   params.set('name', fName.value);
+
+    setPolicyBusy(true);
+    try{
+      const data = await fetchJSON(`${API.list_policies}?${params.toString()}`);
+      renderPolicyRows(data.items||[]);
+    }catch(e){
+      alert('List failed: '+ e.message);
+    }finally{ setPolicyBusy(false); }
+  });
+
+  /** =========================
+   * Policy Preview → Apply to Form
+   * ========================= */
+  const ppModalEl=$('policyPreviewModal'), ppTitle=$('pp-title'), ppBody=$('pp-body'), ppApply=$('pp-apply');
+  const policyTBodyEl = document.querySelector('#policyTable tbody');
+  let ppRow=null;
+
+  if (ppModalEl){
+    ppModalEl.addEventListener('show.bs.modal', (ev)=>{
+      const modalZ=1062, backdropZ=1061;
+      ev.target.style.zIndex = modalZ;
+      setTimeout(()=>{ const backs=document.querySelectorAll('.modal-backdrop'); const top=backs[backs.length-1]; if (top) top.style.zIndex = String(backdropZ); },0);
+    });
+  }
+  $('planFormModal')?.addEventListener('show.bs.modal', (ev)=>{
+    const modalZ=1064, backdropZ=1063;
+    ev.target.style.zIndex = modalZ;
+    setTimeout(()=>{ const backs=document.querySelectorAll('.modal-backdrop'); const top=backs[backs.length-1]; if (top) top.style.zIndex = String(backdropZ); },0);
+  });
+
+  on(policyTBodyEl, 'click', (e)=>{
+    const cell = e.target.closest?.('td'); const tr = cell ? cell.parentElement : null; if (!tr || !tr.getAttribute) return;
+    const key = tr.getAttribute('data-key'); if (!key) return;
+    ppRow = policyCache.get(key); if (!ppRow) return;
+    policyTBodyEl.querySelectorAll('tr').forEach(r=> r.classList.remove('table-active')); tr.classList.add('table-active');
+    ppTitle.textContent = '#' + (ppRow.fg_policy_id||'') + (ppRow.name ? (' · ' + ppRow.name) : '');
+    clear(ppBody);
+    const fields = [
+      ['Device', devNameOf(ppRow.device_id)], ['VDOM', ppRow.vdom], ['Policy ID', ppRow.fg_policy_id],
+      ['Action', ppRow.action], ['Status', ppRow.status], ['Schedule', ppRow.schedule], ['NAT', ppRow.nat ? 'enable':'disable'],
+      ['Src Addrs', (ppRow.src_addrs||[]).join(', ')], ['Dst Addrs', (ppRow.dst_addrs||[]).join(', ')],
+      ['Services', (ppRow.services||[]).join(', ')], ['Src Intfs', (ppRow.src_intfs||[]).join(', ')],
+      ['Dst Intfs', (ppRow.dst_intfs||[]).join(', ')], ['WebFilter', ppRow.webfilter||''], ['Comment', ppRow.comments||'']
+    ];
+    fields.forEach(([k,v])=>{
+      const tr2 = document.createElement('tr');
+      tr2.innerHTML = `<th style="width:160px;">${esc(k)}</th><td>${esc(String(v||''))}</td>`;
+      ppBody.appendChild(tr2);
+    });
+    bootstrap.Modal.getOrCreateInstance(ppModalEl).show();
+  });
+  on(ppApply,'click', ()=>{
+    if (!ppRow) return;
+    bootstrap.Modal.getInstance(ppModalEl)?.hide();
+    setTimeout(()=> openPlanFormWithPolicy(ppRow), 0);
+  });
+
+  /** =========================
+   * Draft Form（TomSelect + 物件載入 + Plan 編輯）
+   * ========================= */
+  // TomSelect helpers
+  function tsRootEl(inst){ return (inst && (inst.control || inst.wrapper)) || (inst && inst.el) || null; }
+  function markTSInvalid(inst, bad){ const root = tsRootEl(inst); if (root) root.classList.toggle('is-invalid', !!bad); }
+  function clearTSInvalidOnChange(inst){
+    if (inst && typeof inst.on === 'function') inst.on('change', ()=> markTSInvalid(inst, false));
+    else if (inst && inst.el) inst.el.addEventListener('input', ()=> markTSInvalid(inst, false));
+  }
+  function createTS(selector, extra){
+    const hasTS = !!(window.TomSelect && window.__TS_READY__);
+    if (hasTS){
+      const base = { plugins:{ remove_button:{ title:'Remove' } }, create:true, persist:false, maxOptions:10000, delimiter:',', valueField:'value', labelField:'text', searchField:['text','value'] };
+      return new TomSelect(selector, Object.assign({}, base, (extra||{})));
+    } else {
+      const el = document.querySelector(selector);
+      return { el, options:{}, clear(){ el && (el.value=''); }, clearOptions(){}, addOption(){}, refreshOptions(){},
+        setValue(vals){ el && (el.value = Array.isArray(vals)? vals.join(','): String(vals||'')); },
+        getValue(){ return el ? el.value : ''; }, on(){}, settings:{} };
+    }
+  }
+  function tsSetOptions(inst, arr){
+    if (!inst) return;
+    if (inst.addOption){
+      inst.clearOptions(); (arr||[]).forEach(v=> inst.addOption({value:String(v), text:String(v)})); inst.refreshOptions(false);
+    } else if (inst.el){ inst.el.value = (arr||[]).join(','); }
+  }
+  function tsGetValues(inst){
+    if (!inst) return [];
+    try{
+      const v = inst.getValue ? inst.getValue() : (inst.el ? inst.el.value : '');
+      if (Array.isArray(v)) return v.filter(Boolean);
+      if (typeof v === 'string') return v.split(',').map(s=>s.trim()).filter(Boolean);
+      return [];
+    }catch(_){ return []; }
+  }
+  function tsSetValues(inst, arr){
+    if (!inst) return;
+    const vals = Array.isArray(arr) ? arr : (arr==null?[]:[String(arr)]);
+    try{ inst.setValue ? inst.setValue(vals, true) : (inst.el && (inst.el.value = vals.join(','))); }catch(_){}
+  }
+  function tsSetOptionsGrouped(inst, typed, groupField, labelMap, order, iconMap){
+    if(!inst || !Array.isArray(typed) || !typed.length) return;
+    if(!(window.TomSelect && window.__TS_READY__ && inst.addOption)) return;
+    const seen = new Set(), groups = [];
+    typed.forEach(it=>{ const k = String((it[groupField]) || 'Other'); if (!seen.has(k)){ seen.add(k); groups.push(k); } });
+    const pretty = (k)=> (labelMap && labelMap[k]) || (k.charAt(0).toUpperCase()+k.slice(1));
+    const pos = (arr,k)=> (arr?arr.indexOf(k):-1) >= 0 ? arr.indexOf(k) : 999;
+    groups.sort((a,b)=> (pos(order,a)-pos(order,b)) || a.localeCompare(b));
+    if (typeof inst.clearOptionGroups === 'function') inst.clearOptionGroups();
+    inst.clearOptions();
+    groups.forEach(g=> inst.addOptionGroup?.(g, {label: pretty(g)}));
+    const byGroup = {};
+    typed.forEach(it=>{ const g=String(it[groupField]||'Other'); (byGroup[g] = byGroup[g] || []).push(it); });
+    groups.forEach(g=>{
+      (byGroup[g]||[]).sort((a,b)=> String(a.name||'').localeCompare(String(b.name||''))).forEach(it2=>{
+        inst.addOption({ value:String(it2.name), text:String(it2.name), group:g });
+      });
+    });
+    inst.settings.render = inst.settings.render || {};
+    inst.settings.render.optgroup_header = (data)=> `<div class="optgroup-header">-- ${data.label || ''} --</div>`;
+    inst.settings.render.option = ((iMap)=> (data, escape)=> {
+      const g = String(data.group||'Other'); const ico = (iMap && (iMap[g] || iMap.default)) || '';
+      const iconHtml = ico ? `<span class="ts-ico">${escape(ico)}</span>` : '';
+      return `<div class="ts-optline">${iconHtml}<span>${escape(data.text||'')}</span></div>`;
+    })(iconMap);
+    inst.refreshOptions(false);
+  }
+  window.__INIT_TS__ = function(){
+    if (window.__TS_INITED__) return;
+    window.__TS_INITED__ = true;
+    const groupCfg = { optgroupField:'group', lockOptgroupOrder:true };
+    tsSrc = createTS('#d_src_addrs', groupCfg);
+    tsDst = createTS('#d_dst_addrs', groupCfg);
+    tsSvc = createTS('#d_services',  groupCfg);
+    tsSif = createTS('#d_src_intfs', groupCfg);
+    tsDif = createTS('#d_dst_intfs', groupCfg);
+    tsWf  = createTS('#d_webfilter');
+    [tsSrc, tsDst, tsSvc, tsSif, tsDif].forEach(clearTSInvalidOnChange);
+  };
+
+  // 取得 Draft Form 元件
+  const editModalEl = $('editModal');
+  const planFormModalEl = $('planFormModal');
+  const btnOpenCreate = $('btnOpenCreate');
+  const btnAddPlan = $('btnAddPlan');
+  const btnSavePlan = $('btnSavePlan');
+  const btnCancelPlan = $('btnCancelPlan');
+  const btnSaveDraft = $('btnSaveDraft');
+  const planBoard = $('planBoard'), planEmpty = $('planEmpty');
+
+  const dEditIndex = $('d_edit_index');
+  const dDevice = $('d_device');
+  const dVDOM = $('d_vdom');
+  const dVDOMFallback = $('d_vdom_fallback');
+  const dVDOMHelp = $('d_vdom_help');
+  const dType = $('d_type');
+  const dTarget = $('d_target');
+  const dName = $('d_name');
+  const dAction = $('d_action');
+  const dStatus = $('d_status');
+  const dNat = $('d_nat');
+
+  let tsSrc, tsDst, tsSvc, tsSif, tsDif, tsWf;
+  let PLANFORM_PREFILLING = false;
+
+  on(dDevice, 'change', async ()=>{
+    await loadVDOMsForm(dDevice.value);
+    await loadObjectOptions();
+  });
+  on(dVDOM, 'change', ()=>{ if (dVDOM.value) loadObjectOptions(); });
+  on(dVDOMFallback, 'input', ()=>{ const v=(dVDOMFallback.value||'').trim(); if (v) loadObjectOptions(); });
+
+  async function loadDevicesForm(){
+    try{
+      const data = await fetchJSON(API.devices);
+      clear(dDevice);
+      const o=document.createElement('option'); o.value=''; o.textContent='(choose device)'; dDevice.appendChild(o);
+      (data.items||[]).forEach(it=>{
+        const opt=document.createElement('option');
+        opt.value=String(it.id); opt.textContent=(it.name||('device_'+it.id)) + ' ('+(it.host||'-')+')';
+        dDevice.appendChild(opt);
+      });
+    }catch(_){
+      clear(dDevice); const o2=document.createElement('option'); o2.value=''; o2.textContent='(failed)'; dDevice.appendChild(o2);
+    }
+  }
+  async function loadVDOMsForm(deviceId){
+    if (!deviceId){
+      clear(dVDOM); const o=document.createElement('option'); o.value=''; o.textContent='(choose device first)'; dVDOM.appendChild(o);
+      dVDOM.classList.remove('d-none'); dVDOMFallback.classList.add('d-none'); dVDOMHelp.textContent=''; return;
+    }
+    try{
+      const data = await fetchJSON(API.device_vdoms(deviceId));
+      const raw = data.items||data.vdoms||[]; const list=[];
+      raw.forEach(x=> list.push(typeof x==='string' ? x : (x?.name || x?.vdom || x?.value)));
+      clear(dVDOM);
+      const p=document.createElement('option'); p.value=''; p.textContent='(choose VDOM)'; dVDOM.appendChild(p);
+      if (list.length) list.forEach(v=>{ const opt=document.createElement('option'); opt.value=v; opt.textContent=v; dVDOM.appendChild(opt); });
+      else { const o2=document.createElement('option'); o2.value=''; o2.textContent='(no VDOMs)'; dVDOM.appendChild(o2); }
+      dVDOM.classList.remove('d-none'); dVDOMFallback.classList.add('d-none'); dVDOMHelp.textContent='';
+    }catch(_){
+      dVDOM.classList.add('d-none'); dVDOMFallback.classList.remove('d-none'); dVDOMHelp.textContent='VDOM list API not provided; switched to manual input.';
+    }
+  }
+  async function loadObjectOptions(){
+    const device_id = dDevice.value;
+    const vdom = dVDOM.classList.contains('d-none') ? dVDOMFallback.value : dVDOM.value;
+    if (!device_id || !vdom){
+      if (tsSrc){
+        tsSrc.clearOptions?.(); tsDst.clearOptions?.(); tsSvc.clearOptions?.(); tsSif.clearOptions?.(); tsDif.clearOptions?.(); tsWf.clearOptions?.();
+      }
+      return;
+    }
+    const params = new URLSearchParams(); params.set('device_id', device_id); params.set('vdom', vdom); params.set('verbose','1');
+    try{
+      const data = await fetchJSON(`${API.policy_objects}?${params.toString()}`);
+      const addrTyped = Array.isArray(data.addresses_meta) ? data.addresses_meta : ((data.addresses_meta && data.addresses_meta.typed) || []);
+      if (addrTyped.length){
+        const ADDR_LABEL = { ipmask:'IP/Mask', fqdn:'FQDN', group:'Address Group', builtin:'Built-in', unknown:'Other' };
+        const ADDR_ICON  = { ipmask:'🗺️', fqdn:'🌐', group:'📦', builtin:'🧱', unknown:'❓', default:'🔹' };
+        const ADDR_ORDER = ['ipmask','fqdn','group','builtin','unknown'];
+        tsSetOptionsGrouped(tsSrc, addrTyped, 'type', ADDR_LABEL, ADDR_ORDER, ADDR_ICON);
+        tsSetOptionsGrouped(tsDst, addrTyped, 'type', ADDR_LABEL, ADDR_ORDER, ADDR_ICON);
+      } else {
+        tsSetOptions(tsSrc, data.addresses||[]);
+        tsSetOptions(tsDst, data.addresses||[]);
+      }
+      const svcTyped = Array.isArray(data.services_meta) ? data.services_meta : ((data.services_meta && data.services_meta.typed) || []);
+      if (svcTyped.length) tsSetOptionsGrouped(tsSvc, svcTyped, 'category', null, null, {default:'🔹'}); else tsSetOptions(tsSvc, data.services||[]);
+      const ifTyped = Array.isArray(data.interfaces_meta) ? data.interfaces_meta : ((data.interfaces_meta && data.interfaces_meta.typed) || []);
+      if (ifTyped.length){
+        const IF_LABEL = { 'interface':'Interface', 'zone':'Zone', 'virtual-switch':'Virtual Switch', 'sdwan-zone':'SD-WAN Zone', 'meta':'Meta' };
+        const IF_ICON  = { 'interface':'🖧','zone':'🧭','virtual-switch':'🔀','sdwan-zone':'🌐','meta':'⚙️', default:'🔹' };
+        const IF_ORDER = ['interface','zone','virtual-switch','sdwan-zone','meta'];
+        tsSetOptionsGrouped(tsSif, ifTyped, 'type', IF_LABEL, IF_ORDER, IF_ICON);
+        tsSetOptionsGrouped(tsDif, ifTyped, 'type', IF_LABEL, IF_ORDER, IF_ICON);
+      } else {
+        tsSetOptions(tsSif, data.interfaces||[]);
+        tsSetOptions(tsDif, data.interfaces||[]);
+      }
+      tsSetOptions(tsWf, data.webfilters || data['web-filters'] || []);
+    }catch(_){
+      if (tsSrc){
+        tsSrc.clearOptions?.(); tsDst.clearOptions?.(); tsSvc.clearOptions?.(); tsSif.clearOptions?.(); tsDif.clearOptions?.(); tsWf.clearOptions?.();
+      }
+    }
+  }
+
+  // Plans Board（排序 + fallback）
+  let PLAN_LIST = [];
+  let sortableInst = null;
+
+  function nextActionId() {
+    let max = 0;
+    (PLAN_LIST || []).forEach(p => {
+      const m = String(p.action_id || '').match(/(\d+)$/);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    const n = max + 1;
+    return 'plan-' + String(n).padStart(2, '0');
+  }
+  function cmpActionIdAsc(a, b){
+    const ax = String(a?.action_id || ''), bx = String(b?.action_id || '');
+    const na = (ax.match(/(\d+)$/) || [,''])[1], nb = (bx.match(/(\d+)$/) || [,''])[1];
+    if (na && nb && na !== nb) return parseInt(na, 10) - parseInt(nb, 10);
+    return ax.localeCompare(bx);
+  }
+  const ensurePid = (p)=> (p.__pid || (p.__pid = 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,8)));
+  function planToSummary(p){
+    const head = (p.action_type||'') + (p.resource_id?(' #'+p.resource_id):'') + ((p.payload && p.payload.name)?(' · '+p.payload.name):'');
+    const sub = devNameOf(p.device_id) + (p.vdom?(' / '+p.vdom):'') + ' · ' + (p.kind||'policy');
+    const from = 'From: ' + (((p.payload?.src_intfs)||[]).join(', ') || '-') + ' | ' + (((p.payload?.src_addrs)||[]).join(', ') || '-');
+    const to   = 'To: '   + (((p.payload?.dst_intfs)||[]).join(', ') || '-') + ' | ' + (((p.payload?.dst_addrs)||[]).join(', ') || '-');
+    const svc  = 'Services: ' + (((p.payload?.services)||[]).join(', ') || '-');
+    const natText = (p.payload && Object.prototype.hasOwnProperty.call(p.payload,'nat')) ? (p.payload.nat ? 'enable':'disable') : '-';
+    const meta = 'Act: '+((p.payload?.action)||'-')+' · Status: '+((p.payload?.status)||'-')+' · NAT: '+natText;
+    return {head, sub, from, to, svc, meta};
+  }
+  function refreshPlanBoard(){
+    planEmpty.style.display = PLAN_LIST.length ? 'none':'';
+    [...planBoard.querySelectorAll('.plan-card')].forEach(x=>x.remove());
+    PLAN_LIST.forEach(p=>{
+      const pid = ensurePid(p);
+      const s = planToSummary(p);
+      const card = document.createElement('div'); card.className='plan-card'; card.dataset.pid = pid; card.setAttribute('draggable','true');
+      card.innerHTML =
+        `<div class="plan-grip" title="Drag to reorder"><span class="bar"></span><span class="bar"></span><span class="bar"></span></div>`+
+        `<div class="plan-main">
+           <div class="plan-title">${esc(s.head)}</div>
+           <div class="plan-sub">${esc(s.sub)}</div>
+           <div class="plan-meta">${esc(s.from)}</div>
+           <div class="plan-meta">${esc(s.to)}</div>
+           <div class="plan-meta">${esc(s.svc)}</div>
+           <div class="plan-meta">${esc(s.meta)}</div>
+         </div>`+
+        `<div class="plan-actions">
+           <button type="button" class="btn btn-outline-secondary btn-sm js-edit-plan">Edit</button>
+           <button type="button" class="btn btn-outline-danger btn-sm js-del-plan">Remove</button>
+         </div>`;
+      planBoard.appendChild(card);
+    });
+    if (window.Sortable && !sortableInst){
+      sortableInst = new Sortable(planBoard, { animation:150, handle:'.plan-grip', draggable:'.plan-card', filter:'.empty-hint', onEnd: ()=> reorderPlanListFromDOM() });
+    }
+  }
+  function reorderPlanListFromDOM(){
+    const cards = planBoard.querySelectorAll('.plan-card');
+    const newOrderPids = [...cards].map(x=>x.dataset.pid);
+    const map = new Map(PLAN_LIST.map(p=>[p.__pid, p]));
+    PLAN_LIST = newOrderPids.map(pid=> map.get(pid)).filter(Boolean);
+  }
+  planBoard.addEventListener('click', (e)=>{
+    const editBtn = e.target.closest?.('.js-edit-plan');
+    if (editBtn){
+      const card = editBtn.closest('.plan-card'); if (!card) return;
+      const pid = card.dataset.pid;
+      const idx = PLAN_LIST.findIndex(x=>x.__pid===pid); if (idx<0) return;
+      editPlanAt(idx); return;
+    }
+    const delBtn = e.target.closest?.('.js-del-plan');
+    if (delBtn){
+      const card = delBtn.closest('.plan-card'); if (!card) return;
+      const pid = card.dataset.pid; const idx = PLAN_LIST.findIndex(x=>x.__pid===pid); if (idx<0) return;
+      if (!confirm('Remove this plan?')) return;
+      PLAN_LIST.splice(idx,1); refreshPlanBoard();
+    }
+  });
+  // native drag fallback
+  let draggingCard=null, allowDrag=false;
+  const placeholder = document.createElement('div'); placeholder.className='plan-placeholder';
+  planBoard.addEventListener('mousedown', (e)=>{ if (window.Sortable) return; if (e.target.closest?.('.plan-grip')) allowDrag=true; });
+  document.addEventListener('mouseup', ()=>{ allowDrag=false; });
+  planBoard.addEventListener('dragstart', (e)=>{
+    if (window.Sortable) return;
+    const card = e.target.closest?.('.plan-card'); if (!card) { e.preventDefault(); return; }
+    if (!allowDrag && !e.target.closest?.('.plan-grip')) { e.preventDefault(); return; }
+    draggingCard = card; card.classList.add('dragging');
+    placeholder.style.height = card.getBoundingClientRect().height+'px';
+    card.after(placeholder); e.dataTransfer?.setData('text/plain', card.dataset.pid||'');
+  });
+  planBoard.addEventListener('dragover', (e)=>{
+    if (window.Sortable) return; e.preventDefault();
+    if (!draggingCard) return;
+    const afterEl = getAfterElement(planBoard, e.clientY);
+    if (afterEl == null) planBoard.appendChild(placeholder); else planBoard.insertBefore(placeholder, afterEl);
+  });
+  function getAfterElement(container, y){
+    const els = [...container.querySelectorAll('.plan-card:not(.dragging)')];
+    let closest = {offset:-Infinity, element:null};
+    els.forEach(el=>{
+      const box = el.getBoundingClientRect(); const offset = y - box.top - box.height/2;
+      if (offset < 0 && offset > closest.offset) closest = {offset, element: el};
+    });
+    return closest.element;
+  }
+  function endDragAndRebuild(){
+    draggingCard.classList.remove('dragging'); placeholder.remove(); draggingCard=null; allowDrag=false;
+    reorderPlanListFromDOM(); refreshPlanBoard();
+  }
+  planBoard.addEventListener('drop', (e)=>{ if (window.Sortable) return; e.preventDefault(); if (!draggingCard) return; planBoard.insertBefore(draggingCard, placeholder); endDragAndRebuild(); });
+  planBoard.addEventListener('dragend', ()=>{ if (window.Sortable) return; if (!draggingCard) return; endDragAndRebuild(); });
+
+  // PlanForm：open / fill / save
+  function clearForm(){
+    dEditIndex.value='-1';
+    dDevice.value=''; dVDOM.innerHTML=''; dVDOMFallback.value='';
+    dVDOM.classList.remove('d-none'); dVDOMFallback.classList.add('d-none'); dVDOMHelp.textContent='';
+    if (dType) dType.value='';
+    if (dTarget) dTarget.value='';
+    dName.value=''; dAction.value='accept'; dStatus.value='enable'; dNat.value='enable';
+    if (tsSrc){ tsSrc.clear(true); tsDst.clear(true); tsSvc.clear(true); tsSif.clear(true); tsDif.clear(true); tsWf.clear(true); }
+    clearAllRequiredInvalid();
+  }
+  function openPlanFormModal(){ bootstrap.Modal.getOrCreateInstance(planFormModalEl).show(); }
+  function openPlanFormCreate(){
+    clearForm(); window.__INIT_TS__(); openPlanFormModal(); setPlanFormBusy(true);
+    (dDevice.options.length ? Promise.resolve() : loadDevicesForm()).finally(()=> setPlanFormBusy(false));
+    paintActionType();
+  }
+  function fillPlanFormFromPlan(p){
+    dDevice.value = String(p.device_id||'');
+    return loadVDOMsForm(dDevice.value).then(()=>{
+      if (!dVDOM.classList.contains('d-none')) dVDOM.value = p.vdom || dVDOM.value; else dVDOMFallback.value = p.vdom || '';
+      return loadObjectOptions();
+    }).then(()=>{
+      dType.value = p.action_type || 'update';
+      paintActionType();
+      dTarget.value = p.resource_id || '';
+      const payload = p.payload || {};
+      dName.value   = payload.name || '';
+      dAction.value = payload.action || 'accept';
+      dStatus.value = payload.status || 'enable';
+      dNat.value    = (typeof payload.nat==='boolean') ? (payload.nat?'enable':'disable') : dNat.value;
+      tsSetValues(tsSrc, payload.src_addrs||[]);
+      tsSetValues(tsDst, payload.dst_addrs||[]);
+      tsSetValues(tsSvc, payload.services||[]);
+      tsSetValues(tsSif, payload.src_intfs||[]);
+      tsSetValues(tsDif, payload.dst_intfs||[]);
+      tsSetValues(tsWf,  payload.webfilter ? [payload.webfilter] : []);
+    });
+  }
+  function editPlanAt(idx){
+    const p = PLAN_LIST[idx]; if (!p) return;
+    dEditIndex.value = String(idx); window.__INIT_TS__(); openPlanFormModal(); setPlanFormBusy(true);
+    (dDevice.options.length ? Promise.resolve() : loadDevicesForm())
+      .then(()=> fillPlanFormFromPlan(p))
+      .finally(()=> setPlanFormBusy(false));
+  }
+  function openPlanFormWithPolicy(row){
+    clearForm(); dEditIndex.value='-1'; window.__INIT_TS__();
+    clearAllRequiredInvalid(); PLANFORM_PREFILLING = true;
+    openPlanFormModal(); setPlanFormBusy(true);
+    (async ()=>{
+      try{
+        if (!dDevice.options.length) await loadDevicesForm();
+        dDevice.value = String(row.device_id);
+        await loadVDOMsForm(dDevice.value);
+        if (!dVDOM.classList.contains('d-none')){
+          let found=false; const opts = dVDOM.options;
+          for (let i=0;i<opts.length;i++){ if (opts[i].value === String(row.vdom)){ dVDOM.value = opts[i].value; found = true; break; } }
+          if (!found){ dVDOM.classList.add('d-none'); dVDOMFallback.classList.remove('d-none'); dVDOMFallback.value = String(row.vdom||''); }
+        } else dVDOMFallback.value = String(row.vdom||'');
+        await loadObjectOptions();
+        dType.value   = 'update';
+        dTarget.value = row.fg_policy_id || '';
+        dName.value   = row.name || '';
+        dAction.value = row.action || 'accept';
+        dStatus.value = row.status || 'enable';
+        dNat.value    = row.nat ? 'enable' : 'disable';
+        tsSetValues(tsSrc, row.src_addrs||[]);
+        tsSetValues(tsDst, row.dst_addrs||[]);
+        tsSetValues(tsSvc, row.services||[]);
+        tsSetValues(tsSif, row.src_intfs||[]);
+        tsSetValues(tsDif, row.dst_intfs||[]);
+        tsSetValues(tsWf,  row.webfilter ? [row.webfilter] : []);
+      }finally{
+        PLANFORM_PREFILLING = false; setPlanFormBusy(false);
+	paintActionType();
+      }
+    })();
+  }
+  on(btnAddPlan, 'click', ()=> openPlanFormCreate());
+
+  function tsSetRequiredInvalid(inst, bad){ markTSInvalid(inst, bad); }
+  function clearAllRequiredInvalid(){ [tsSrc, tsDst, tsSvc, tsSif, tsDif].forEach(inst=> tsSetRequiredInvalid(inst, false)); }
+  function validateRequiredSets(){
+    const req = [
+      {inst: tsSrc, name:'Src Addresses'},
+      {inst: tsDst, name:'Dst Addresses'},
+      {inst: tsSvc, name:'Services'},
+      {inst: tsSif, name:'Src Interfaces'},
+      {inst: tsDif, name:'Dst Interfaces'}
+    ];
+    let ok = true, firstBad = null;
+    req.forEach(r=>{
+      const has = tsGetValues(r.inst).length > 0;
+      tsSetRequiredInvalid(r.inst, !has);
+      if (!has && !firstBad) firstBad = r.inst;
+      ok = ok && has;
+    });
+    if (!ok){
+      toastWarn('Please fill all required fields: Src/Dst Addresses, Services, Src/Dst Interfaces.');
+      const root = tsRootEl(firstBad);
+      if (firstBad && typeof firstBad.focus === 'function') { try{ firstBad.focus(); }catch(_){ } }
+      else if (root && root.focus) { try{ root.focus(); }catch(_){ } }
+    }
+    return ok;
+  }
+
+  function buildPlanFromForm(){
+    const device_id = Number(dDevice.value||0);
+    const vdom = dVDOM.classList.contains('d-none') ? (dVDOMFallback.value||'') : (dVDOM.value||'');
+    const action_type = (dType.value || "").trim();
+    if (!action_type) {
+      dType.classList.add('is-invalid');
+      throw new Error("Action Type is null.");
+    } else {
+      dType.classList.remove('is-invalid');
+    }
+    const resource_id = dTarget.value ? Number(dTarget.value) : null;
+
+    const plan = { device_id, vdom, kind:'policy', action_type, resource_id, payload:{} };
+
+    if (action_type !== 'delete'){
+      plan.payload = {
+        name:   (dName.value||''),
+        action: dAction.value||'accept',
+        status: dStatus.value||'enable',
+        nat:    (dNat.value==='enable'),
+        src_addrs: tsGetValues(tsSrc),
+        dst_addrs: tsGetValues(tsDst),
+        services:  tsGetValues(tsSvc),
+        src_intfs: tsGetValues(tsSif),
+        dst_intfs: tsGetValues(tsDif)
+      };
+      const wf = tsGetValues(tsWf); if (wf.length) plan.payload.webfilter = wf[0];
+    }
+    return plan;
+  }
+
+  on(btnSavePlan,'click', ()=>{
+    const idx = Number(dEditIndex.value||'-1');
+    if ((dType.value!=='delete') && !validateRequiredSets()) return;
+
+    const plan = buildPlanFromForm();
+    if (!plan.device_id || !plan.vdom){ toastWarn('Please select Device and VDOM.'); return; }
+
+    const keepId = (idx >= 0 && PLAN_LIST[idx] && PLAN_LIST[idx].action_id) ? PLAN_LIST[idx].action_id : null;
+    if (!plan.action_id) plan.action_id = keepId || nextActionId();		  
+
+    if (idx >= 0 && PLAN_LIST[idx]){
+      plan.__pid = PLAN_LIST[idx].__pid;
+      PLAN_LIST[idx] = plan;
+    } else {
+      ensurePid(plan); PLAN_LIST.push(plan);
+    }
+    refreshPlanBoard();
+    bootstrap.Modal.getInstance(planFormModalEl)?.hide();
+  });
+  on(btnCancelPlan,'click', ()=> bootstrap.Modal.getInstance(planFormModalEl)?.hide());
+
+  // 開啟 Create / Edit Draft 面板
+  on(btnOpenCreate,'click', ()=>{
+    AUTO_SYNCED_KEYS.clear(); AUTO_SYNC_INFLIGHT = false;
+    CURRENT_EDIT_DRAFT_ID = null; $('editModalTitle').textContent = 'Create Request';
+    PLAN_LIST = []; refreshPlanBoard();
+    const scb = $('searchCardBody'); scb && bootstrap.Collapse.getOrCreateInstance(scb, {toggle:false}).hide();
+    loadDevicesSelect(sDevice).then(()=>{});
+    window.__INIT_SORTABLE__ && window.__INIT_SORTABLE__();
+    window.__INIT_TS__ && window.__INIT_TS__();
+    if (!dDevice.options.length) loadDevicesForm();
+    bootstrap.Modal.getOrCreateInstance(editModalEl, { backdrop:false }).show();
+  });
+  function openEditWithPlans(action_plan){
+    $('editModalTitle').textContent = 'Edit Request';
+    CURRENT_EDIT_DRAFT_ID = Number(($('m-draft-id')?.textContent||'').trim()) || CURRENT_EDIT_DRAFT_ID || null;
+    PLAN_LIST = [];
+    (action_plan||[]).forEach(act => { const clone = JSON.parse(JSON.stringify(act)); ensurePid(clone); PLAN_LIST.push(clone); });
+    refreshPlanBoard();
+    window.__INIT_SORTABLE__ && window.__INIT_SORTABLE__();
+    window.__INIT_TS__ && window.__INIT_TS__();
+    if (!dDevice.options.length) loadDevicesForm();
+    bootstrap.Modal.getOrCreateInstance(editModalEl, { backdrop:false }).show();
+  }
+  editModalEl?.addEventListener('hidden.bs.modal', ()=>{
+    AUTO_SYNCED_KEYS.clear(); AUTO_SYNC_INFLIGHT=false; CURRENT_EDIT_DRAFT_ID=null;
+    PLAN_LIST = []; refreshPlanBoard();
+    sDevice.value=''; clear(sVDOM); sVDOM.classList.remove('d-none'); sVDOMFallback.value=''; sVDOMFallback.classList.add('d-none'); sVDOMHelp.textContent='';
+    fAction.value=''; fStatus.value=''; fSeqMin.value=''; fSeqMax.value=''; fName.value='';
+    resetPolicies();
+  });
+
+  // 儲存 Request（Create / Update）
+  async function saveDraft(){
+    if (!PLAN_LIST.length) { toastWarn('No plans to save. Please add at least one plan.'); return; }
+    // 填入 action_order
+    PLAN_LIST.forEach((p, i) => {
+      p.action_order = (i + 1)*10;
+      p.action_id = 'plan-' + String(i + 1).padStart(2, '0');
+    });
+    const payload = {
+      draft_action: {
+        options: { dry_run: false, validate_only: false, continue_on_error: true },
+        version: 1,
+        action_plan: PLAN_LIST
+      }
+    };
+    setEditBusy(true);
+    try{
+      if (CURRENT_EDIT_DRAFT_ID){
+        // 嘗試 PUT / POST 更新
+        let ok = false, data=null, url = `/fortigate/drafts/${CURRENT_EDIT_DRAFT_ID}`;
+        try{
+          data = await fetchJSON(url, { method:'PUT', body: JSON.stringify(payload) });
+          ok = true;
+        }catch(_){}
+        if (!ok) data = await fetchJSON(url, { method:'POST', body: JSON.stringify(payload) });
+        // 更新快取
+        try{
+          const fresh = await fetchDraftDetail(CURRENT_EDIT_DRAFT_ID);
+          ROW_CACHE.set(CURRENT_EDIT_DRAFT_ID, fresh);
+        }catch(_){}
+        bootstrap.Modal.getInstance(editModalEl)?.hide();
+        try{ await refreshDraftAndModal(CURRENT_EDIT_DRAFT_ID); }catch(_){}
+        toastInfo('Draft updated.');
+        return data;
+      } else {
+	const data = await fetchJSON(API.drafts_create, { method:'POST', body: JSON.stringify(payload) });
+        bootstrap.Modal.getInstance(editModalEl)?.hide();
+
+        const newId = getDraftIdFromResponse ? getDraftIdFromResponse(data)
+                                             : Number(data?.id ?? data?.data?.id ?? data?.draft_id ?? data?.draft?.id ?? 0);
+
+        fetchList(1);
+
+        if (newId){
+          try{
+            const fresh = await fetchDraftDetail(newId);
+            ROW_CACHE.set(newId, fresh);
+            setTimeout(()=> openDraft(fresh), 0);
+          }catch(e){
+            console.warn('Auto-open review failed:', e);
+          }
+        }else{
+          console.warn('Create response has no id; skipped auto-open.');
+        }
+
+        toastInfo('Draft created.');
+        return data;
+      }
+    }catch(e){
+      toastError(e.message || 'Save failed');
+    }finally{
+      setEditBusy(false);
+    }
+  }
+
+  on(btnSaveDraft, 'click', async () => {
+    try {
+      const resp = await saveDraft(); // ← 一定要等存檔完成
+      const savedId = getDraftIdFromResponse(resp) || CURRENT_EDIT_DRAFT_ID;
+
+      bootstrap.Modal.getInstance(editModalEl)?.hide();
+      bootstrap.Modal.getInstance(planFormModalEl)?.hide?.();
+
+      if (OPEN_REVIEW_DRAFT_ID === Number(savedId)) {
+        LAST_DIFF_SIG.delete(Number(savedId));       // 先清舊簽章
+        await refreshDraftAndModal(Number(savedId)); // 強制整體重繪（含 Diff）
+        // 如果你想更省：改成 await refreshDiffIfChanged(Number(savedId), resp.data || resp);
+      }
+
+      doRefresh(); // 列表輕量刷新
+    } catch (e) {
+      toastError(e?.message || 'Save failed');
+    }
+  });
+  /** =========================
+   * 首次初始化
+   * ========================= */
+  document.addEventListener('DOMContentLoaded', async ()=>{
+    restoreQuickState();
+    await loadDevicesMap();
+    fetchList(1);
+
+    // 右側工具列自動換行（md+）
+    const btn = $('btnOpenCreate');
+    if (btn && btn.parentElement){ btn.parentElement.classList.add('controls-right'); }
+
+    // Search & Sync 初始：載入 Device
+    loadDevicesSelect(sDevice).then(()=>{});
+
+    // 改善小按鈕可用性
+    syncAutoIcon();
+  });
+
+})();
+</script>
+
+
+{% endblock %}
+
