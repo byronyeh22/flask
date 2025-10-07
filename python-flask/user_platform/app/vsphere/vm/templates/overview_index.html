@@ -92,6 +92,7 @@
     .status-approved{ background: rgba(46,204,113,0.2); color: #2ecc71; }
     .status-draft   { background: rgba(108,117,125,0.2); color: #6c757d; }
     .status-deploying { background: rgba(52,152,219,0.2); color: #3498db; }
+    .status-canceled { background: rgba(52,152,219,0.2); color: #3498db; }
 
     .workflow-id { font-family: 'Courier New', monospace; background: rgba(52, 152, 219, 0.1); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; color: var(--accent-color); font-weight: 500; }
     .ticket-link { color: var(--accent-color); text-decoration: none; font-weight: 500; font-size: 0.75rem; transition: color 0.2s ease; }
@@ -191,7 +192,8 @@
   'success':            (uniq.rows | selectattr('status', 'equalto', 'SUCCESS') | list | length),
   'failed':             (uniq.rows | selectattr('status', 'equalto', 'FAILED') | list | length),
   'deploying':          (uniq.rows | selectattr('status', 'equalto', 'DEPLOYING') | list | length),
-  'returned':           (uniq.rows | selectattr('status', 'equalto', 'RETURNED') | list | length)
+  'returned':           (uniq.rows | selectattr('status', 'equalto', 'RETURNED') | list | length),
+  'canceled':           (uniq.rows | selectattr('status', 'equalto', 'CANCELED') | list | length)
 } %}
 {% set status_labels = {
   'draft': 'Draft',
@@ -201,7 +203,8 @@
   'success': 'Success',
   'failed': 'Failed',
   'deploying': 'Deploying',
-  'returned': 'Returned'
+  'returned': 'Returned',
+  'canceled': 'Canceled'
 } %}
 
 <div class="container-fluid">
@@ -713,7 +716,8 @@ class TablePagination {
       approved: 'Approved',
       success: 'Success',
       failed: 'Failed',
-      returned: 'Returned'
+      returned: 'Returned',
+      canceled: 'Canceled'
     };
     const labels = [];
     this.selectedStatuses.forEach(k => labels.push(labelMap[k] || k));
