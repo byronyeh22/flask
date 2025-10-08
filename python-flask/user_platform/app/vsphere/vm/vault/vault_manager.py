@@ -86,7 +86,7 @@ class VaultManager:
             return None
 
         # 1. 定義 Vault Mount Point 和相對路徑
-        vault_mount_point = current_app.config.get('VAULT_PATH_PREFIX', 'secret')
+        vault_mount_point = "secret"
         relative_path = f"{environment}-{os_type}/{vm_name_prefix}"
         full_secret_path = f"{vault_mount_point}/{relative_path}"
 
@@ -100,7 +100,7 @@ class VaultManager:
             if not self.client.is_authenticated():
                 logging.error("❌ [VAULT_AUTH] Vault client is not authenticated")
                 return None
-            
+
             logging.info("✅ [VAULT_AUTH] Vault client is authenticated")
 
             # 3. 讀取 Secret
@@ -115,11 +115,11 @@ class VaultManager:
             if read_response and read_response.get("data") and read_response["data"].get("data"):
                 secret_data = read_response["data"]["data"]
                 all_keys = list(secret_data.keys())
-                
+
                 logging.info(f"📋 [VAULT_DATA] Secret found at {full_secret_path}")
                 logging.info(f"   - Available keys: {all_keys}")
                 logging.info(f"   - Secret data: {json.dumps(secret_data, indent=2)}")
-                
+
                 ip = secret_data.get("vm_host_ip")
                 if ip:
                     logging.info(f"✅ [VAULT_IP] Successfully retrieved IP for {vm_name_prefix}: {ip}")
