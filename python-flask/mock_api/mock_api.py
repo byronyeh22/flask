@@ -1,12 +1,14 @@
 from flask import Flask, jsonify, request
 from datetime import datetime, timezone, timedelta
 import random
+import ipaddress
+import string
+import secrets
+import hvac # 要先 pip3 install hvac ipaddress
 
 mock_app = Flask(__name__)
 
 # =========================
-<<<<<<< HEAD
-=======
 # Vault 配置
 # =========================
 import os
@@ -25,7 +27,6 @@ if not VAULT_TOKEN:
 ALLOCATED_IPS = {}
 
 # =========================
->>>>>>> 71973f1 (update)
 # 通用 Helper
 # =========================
 def utc_now_iso():
@@ -39,6 +40,96 @@ def iso_z(dt):
     if not isinstance(dt, datetime):
         return None
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# =========================
+# Vault 工具函數
+# =========================
+def get_vault_client():
+    """建立 Vault 客戶端"""
+    try:
+        client = hvac.Client(url=VAULT_ADDR, token=VAULT_TOKEN)
+        if not client.is_authenticated():
+            print("❌ [VAULT] Authentication failed")
+            return None
+        print("✅ [VAULT] Client authenticated")
+        return client
+    except Exception as e:
+        print(f"❌ [VAULT] Failed to connect: {e}")
+        return None
+
+def write_to_vault(path: str, data: dict) -> bool:
+    """
+    寫入資料到 Vault KV v2
+    path: 例如 "sandbox-windows/sra-1"
+    data: 例如 {"vm_host_ip": "172.26.1.2/24", "vm_login_password": "abc123"}
+    """
+    client = get_vault_client()
+    if not client:
+        return False
+    
+    try:
+        # 使用 KV v2 API
+        client.secrets.kv.v2.create_or_update_secret(
+            path=path,
+            secret=data,
+            mount_point=VAULT_MOUNT
+        )
+        print(f"✅ [VAULT] Written to {VAULT_MOUNT}/{path}")
+        print(f"   📋 Data: {data}")
+        return True
+    except Exception as e:
+        print(f"❌ [VAULT] Failed to write: {e}")
+        return False
+
+# =========================
+# IP 分配與密碼生成
+# =========================
+def allocate_ip_from_prefix(prefix: str) -> str:
+    """
+    從 CIDR 格式的網段中隨機分配一個 IP
+    例如：172.26.1.0/24 → 172.26.1.2/24
+    """
+    try:
+        network = ipaddress.ip_network(prefix, strict=False)
+
+        # 取得該網段的所有可用 IP（排除網路位址和廣播位址）
+        available_ips = list(network.hosts())
+
+        # 如果沒有記錄，初始化
+        if prefix not in ALLOCATED_IPS:
+            ALLOCATED_IPS[prefix] = set()
+
+        # 找到未分配的 IP
+        unallocated = [ip for ip in available_ips if str(ip) not in ALLOCATED_IPS[prefix]]
+
+        if not unallocated:
+            # 如果都分配完了，重置（測試環境可接受）
+            print(f"⚠️ [IP] All IPs in {prefix} allocated, resetting pool")
+            ALLOCATED_IPS[prefix] = set()
+            unallocated = available_ips
+
+        # 隨機選擇一個
+        selected_ip = random.choice(unallocated)
+        ALLOCATED_IPS[prefix].add(str(selected_ip))
+
+        # 返回 CIDR 格式（與 Terraform 一致）
+        return f"{selected_ip}/{network.prefixlen}"
+
+    except ValueError as e:
+        # 無效的網段，返回預設值
+        print(f"⚠️ [IP] Invalid prefix {prefix}, using default")
+        return "192.168.1.100/24"
+
+def generate_random_password(length: int = 16) -> str:
+    """
+    生成符合複雜度要求的隨機密碼
+    包含大小寫字母、數字和特殊符號
+    """
+    alphabet = string.ascii_letters + string.digits + "+=-_"
+    password = ''.join(secrets.choice(alphabet) for _ in range(length))
+    return password
+
 
 # =========================
 # In-memory (GitLab / vSphere / Jira)
@@ -70,11 +161,7 @@ def next_pipeline_id() -> int:
 def trigger_gitlab_pipeline(project_id):
     """
     模擬 trigger_gitlab_pipeline.py 的回應
-    對齊 insert_gitlab_pipeline_info_to_db 需求：
-      - pipeline_id / id（int）
-      - project_id（int）
-      - ref / sha / status / web_url（str）
-      - created_at / started_at / finished_at / duration
+    新增：在 CREATE 操作時模擬 Terraform 寫入 Vault
     """
     # ✅ 改為單調遞增
     pipeline_id = next_pipeline_id()
@@ -82,6 +169,46 @@ def trigger_gitlab_pipeline(project_id):
     # 產生時間
     created_dt = _utc_now()
     created_iso = iso_z(created_dt)
+
+    # =========================
+    # 新增：解析變數並模擬 Terraform
+    # =========================
+    form_data = request.form
+    action_type = form_data.get('variables[ACTION_TYPE]', 'create')
+    environment = form_data.get('variables[ENVIRONMENT]', 'sandbox')
+    os_type = form_data.get('variables[OS_TYPE]', 'linux')
+    vm_name_prefix = form_data.get('variables[VM_NAME_PREFIX]', 'mock-vm')
+    netbox_prefix = form_data.get('variables[NETBOX_PREFIX]', '172.26.1.0/24')
+    
+    print(f"\n🚀 [PIPELINE {pipeline_id}] Triggered")
+    print(f"   ACTION_TYPE: {action_type}")
+    print(f"   ENVIRONMENT: {environment}")
+    print(f"   OS_TYPE: {os_type}")
+    print(f"   VM_NAME_PREFIX: {vm_name_prefix}")
+    print(f"   NETBOX_PREFIX: {netbox_prefix}")
+    
+    # 模擬 Terraform 行為（僅 CREATE）
+    if action_type.lower() == 'create':
+        print(f"📦 [TERRAFORM] Simulating VM creation for {vm_name_prefix}")
+        
+        # 分配 IP
+        allocated_ip = allocate_ip_from_prefix(netbox_prefix)
+        print(f"   📡 [NETBOX] Allocated IP: {allocated_ip}")
+        
+        # 生成密碼
+        random_password = generate_random_password()
+        print(f"   🔐 [PASSWORD] Generated: {random_password}")
+        
+        # 寫入 Vault
+        vault_path = f"{environment}-{os_type}/{vm_name_prefix}"
+        vault_data = {
+            "vm_host_ip": allocated_ip,
+            "vm_login_password": random_password
+        }
+        
+        write_success = write_to_vault(vault_path, vault_data)
+        if not write_success:
+            print(f"   ⚠️ [VAULT] Write failed, but pipeline continues")
 
     # 註冊到 in-memory
     PIPELINES[pipeline_id] = {
