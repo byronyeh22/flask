@@ -559,3 +559,37 @@ def apply_request_to_db(workflow_id):
     finally:
         if db_conn:
             db_conn.close()
+
+# =======================================
+# IP 更新：新功能
+# =======================================
+def update_vm_ipv4_ip(vm_configuration_id: int, ipv4_ip: str) -> bool:
+    """
+    更新 vm_configurations 表中指定 VM 的 vm_ipv4_ip 欄位。
+    """
+    db_conn = get_db_connection()
+    try:
+        with db_conn.cursor() as cursor:
+            sql = """
+                UPDATE vm_configurations
+                SET vm_ipv4_ip = %s, updated_at = NOW()
+                WHERE id = %s
+            """
+            cursor.execute(sql, (ipv4_ip, vm_configuration_id))
+            db_conn.commit()
+
+            if cursor.rowcount == 0:
+                logging.warning(f"[update_vm_ipv4_ip] VM config ID {vm_configuration_id} not found in DB.")
+                return False
+
+            logging.info(f"[update_vm_ipv4_ip] VM config ID {vm_configuration_id} updated to IP={ipv4_ip}")
+            return True
+
+    except Error as e:
+        logging.error(f"[update_vm_ipv4_ip] DB error: {e}")
+        if db_conn:
+            db_conn.rollback()
+        return False
+    finally:
+        if db_conn:
+            db_conn.close()

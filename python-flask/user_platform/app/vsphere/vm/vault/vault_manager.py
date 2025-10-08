@@ -2,6 +2,7 @@ import hvac
 import logging
 from flask import current_app
 from urllib.parse import urlparse # 匯入 urlparse 函式
+import json
 
 class VaultManager:
     def __init__(self):
@@ -77,3 +78,75 @@ class VaultManager:
         except Exception as e:
             logging.error(f"Failed to delete credentials from Vault for {host}: {e}")
             return False, f"Failed to delete secret from Vault: {str(e)}"
+
+    def get_vm_ipv4_ip(self, environment: str, os_type: str, vm_name_prefix: str):
+        """從 Vault 取得 VM 的 IPv4 IP (路徑: {env}-{os_type}/{vm_name_prefix})"""
+        if not self.client:
+            logging.error("❌ [VAULT_CLIENT] Vault client is not configured.")
+            return None
+
+        # 1. 定義 Vault Mount Point 和相對路徑
+        vault_mount_point = current_app.config.get('VAULT_PATH_PREFIX', 'secret')
+        relative_path = f"{environment}-{os_type}/{vm_name_prefix}"
+        full_secret_path = f"{vault_mount_point}/{relative_path}"
+
+        logging.info(f"🔍 [VAULT_READ] Attempting to read from Vault:")
+        logging.info(f"   - Mount point: {vault_mount_point}")
+        logging.info(f"   - Relative path: {relative_path}")
+        logging.info(f"   - Full path: {full_secret_path}")
+
+        try:
+            # 2. 檢查 Vault client 是否已認證
+            if not self.client.is_authenticated():
+                logging.error("❌ [VAULT_AUTH] Vault client is not authenticated")
+                return None
+            
+            logging.info("✅ [VAULT_AUTH] Vault client is authenticated")
+
+            # 3. 讀取 Secret
+            read_response = self.client.secrets.kv.v2.read_secret_version(
+                path=relative_path,
+                mount_point=vault_mount_point
+            )
+
+            logging.info(f"📦 [VAULT_RESPONSE] Response received: {type(read_response)}")
+
+            # 4. 解析 response
+            if read_response and read_response.get("data") and read_response["data"].get("data"):
+                secret_data = read_response["data"]["data"]
+                all_keys = list(secret_data.keys())
+                
+                logging.info(f"📋 [VAULT_DATA] Secret found at {full_secret_path}")
+                logging.info(f"   - Available keys: {all_keys}")
+                logging.info(f"   - Secret data: {json.dumps(secret_data, indent=2)}")
+                
+                ip = secret_data.get("vm_host_ip")
+                if ip:
+                    logging.info(f"✅ [VAULT_IP] Successfully retrieved IP for {vm_name_prefix}: {ip}")
+                    return ip
+                else:
+                    logging.warning(f"⚠️ [VAULT_KEY] Key 'vm_host_ip' not found in secret data")
+                    logging.warning(f"   Available keys: {all_keys}")
+                    logging.warning(f"   Full secret data: {secret_data}")
+                    return None
+            else:
+                logging.warning(f"⚠️ [VAULT_EMPTY] Vault secret not found or data is empty at {full_secret_path}")
+                logging.warning(f"   Response structure: {read_response}")
+                return None
+
+        except hvac.exceptions.InvalidPath as e:
+            logging.error(f"❌ [VAULT_PATH] Vault path not found: {full_secret_path}")
+            logging.error(f"   Error details: {str(e)}")
+            return None
+        except hvac.exceptions.Forbidden as e:
+            logging.error(f"❌ [VAULT_PERMISSION] Permission denied reading {full_secret_path}")
+            logging.error(f"   Error details: {str(e)}")
+            return None
+        except Exception as e:
+            logging.error(f"❌ [VAULT_EXCEPTION] Failed to retrieve IP from Vault for {vm_name_prefix}")
+            logging.error(f"   Path: {full_secret_path}")
+            logging.error(f"   Error: {str(e)}")
+            logging.error(f"   Error type: {type(e).__name__}")
+            import traceback
+            logging.error(f"   Full traceback:\n{traceback.format_exc()}")
+            return None

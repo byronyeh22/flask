@@ -21,6 +21,10 @@ from app.vsphere.vm.jira_api.issue_updates import jira_add_comment, jira_transit
 from app.vsphere.vm.db.delete_vm_from_database import delete_vm_from_database
 from app.vsphere.vm.db.vm_provisioning_manager import sync_disk_labels_to_database
 
+# ---------- Vault & VMIP Update ----------
+from app.vsphere.vm.vault.vault_manager import VaultManager
+from app.vsphere.vm.db.vm_provisioning_manager import update_vm_ipv4_ip
+
 # Update workflow status
 from app.vsphere.vm.db.workflow_manager import update_request_status, get_workflow_status
 from mysql.connector import Error as MySQLError
@@ -71,6 +75,8 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
     finally:
         cur.close()
 
+
+# ---------- helpers ----------
 def _refresh_pipeline_from_gitlab(db_conn, pipeline_id: int) -> str:
     """
     直接打 GitLab 取最新 pipeline 詳情，並用 update_gitlab_pipeline_details 寫回 DB。
@@ -234,6 +240,137 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
 
         lock_cur.close()
 
+def _get_vm_config_details_for_ip_update(db_conn, vm_configuration_id: int): # 移除 Optional[Dict] 類型提示
+    """
+    根據 vm_configuration_id 從 DB 取得 IP 更新所需的欄位 (env, os_type, vm_name_prefix)。
+    """
+    cur = db_conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT environment, os_type, vm_name_prefix
+              FROM vm_configurations
+             WHERE id = %s
+             LIMIT 1
+            """,
+            (vm_configuration_id,)
+        )
+        return cur.fetchone()
+    finally:
+        cur.close()
+
+# ---------- Vault IP Update ----------
+# ---------- Vault IP Update ----------
+def update_vm_ip_from_vault(db_conn, workflow_id: int) -> bool:
+    """
+    從 Vault 取得 VM IP 並更新到資料庫
+    回傳: True=成功, False=失敗
+    """
+    # 🔒 使用 MySQL Named Lock 防止並發更新
+    lock_cur = db_conn.cursor(dictionary=True)
+    lock_acquired = False
+    
+    try:
+        # 獲取 IP 更新鎖
+        lock_name = f"ip_update_{workflow_id}"
+        lock_cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 10))
+        lock_result = lock_cur.fetchone()
+        lock_cur.fetchall()  # 清空剩餘結果
+        
+        if not (lock_result and list(lock_result.values())[0] == 1):
+            logging.info(f"⏭️ [IP_SKIP] IP update for workflow {workflow_id} is being processed, skipping")
+            return True  # 返回 True,因為其他線程會處理
+        
+        lock_acquired = True
+        logging.info(f"🔒 [IP_LOCK] Acquired IP update lock for workflow {workflow_id}")
+        
+        try:
+            logging.info(f"🌐 [IP_UPDATE] Starting IP update for workflow {workflow_id}")
+
+            # 1. 取得 vm_config_id
+            try:
+                vm_config_id = _get_vm_config_id_by_workflow(db_conn, workflow_id)
+            except Exception as e:
+                logging.error(f"❌ [IP_UPDATE] Failed to get vm_config_id: {e}")
+                set_failed_message(db_conn, workflow_id, "DB_VM_ID", f"Failed to get vm_config_id: {e}")
+                return False
+
+            # 2. 取得 VM 詳細資訊
+            vm_details = _get_vm_config_details_for_ip_update(db_conn, vm_config_id)
+            if not vm_details:
+                logging.error(f"❌ [IP_UPDATE] Failed to retrieve VM details for vm_config_id={vm_config_id}")
+                set_failed_message(db_conn, workflow_id, "DB_VM_INFO", "Failed to retrieve VM details for IP update.")
+                return False
+
+            logging.info(f"🔍 [IP_UPDATE] VM: {vm_details['environment']}-{vm_details['os_type']}/{vm_details['vm_name_prefix']}")
+
+            # 3. 從 Vault 取得 IP (含重試機制)
+            vault_manager = VaultManager()
+            max_retries = 5
+            retry_delay = 3
+            ip_address = None
+
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    time.sleep(retry_delay)
+
+                logging.info(f"🔄 [IP_UPDATE] Attempt {attempt + 1}/{max_retries}")
+                ip_address = vault_manager.get_vm_ipv4_ip(
+                    environment=vm_details["environment"],
+                    os_type=vm_details["os_type"],
+                    vm_name_prefix=vm_details["vm_name_prefix"]
+                )
+
+                if ip_address:
+                    break
+
+            # 4. 更新資料庫
+            if ip_address:
+                logging.info(f"💾 [IP_UPDATE] Updating DB with IP={ip_address}")
+
+                # 🔄 重新獲取 vm_config_id 以確保使用最新的記錄
+                try:
+                    vm_config_id = _get_vm_config_id_by_workflow(db_conn, workflow_id)
+                    logging.info(f"🔄 [IP_UPDATE] Re-fetched vm_config_id={vm_config_id}")
+                except Exception as e:
+                    logging.error(f"❌ [IP_UPDATE] Failed to re-fetch vm_config_id: {e}")
+                    set_failed_message(db_conn, workflow_id, "DB_VM_ID", f"Failed to re-fetch vm_config_id: {e}")
+                    return False
+
+                if update_vm_ipv4_ip(vm_config_id, ip_address):
+                    logging.info(f"✅ [IP_UPDATE] Successfully updated IP for workflow {workflow_id}")
+                    return True
+                else:
+                    logging.error(f"❌ [IP_UPDATE] Failed to update DB")
+                    set_failed_message(db_conn, workflow_id, "DB_IP", "Failed to update VM IPv4 IP in database.")
+                    return False
+            else:
+                vault_path = f"secret/{vm_details['environment']}-{vm_details['os_type']}/{vm_details['vm_name_prefix']}"
+                logging.error(f"❌ [IP_UPDATE] Failed after {max_retries} attempts. Path: {vault_path}")
+                set_failed_message(db_conn, workflow_id, "VAULT_IP", f"Failed to retrieve IP after {max_retries} attempts.")
+                return False
+        
+        except Exception as e:
+            logging.error(f"❌ [IP_UPDATE] Exception: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            set_failed_message(db_conn, workflow_id, "IP_UPDATE", f"Error during IP update: {str(e)}")
+            return False
+    
+    finally:
+        # 釋放鎖
+        if lock_acquired:
+            try:
+                lock_name = f"ip_update_{workflow_id}"
+                lock_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                lock_cur.fetchone()
+                lock_cur.fetchall()
+                logging.info(f"🔓 [IP_UNLOCK] Released IP update lock for workflow {workflow_id}")
+            except Exception as e:
+                logging.error(f"❌ Failed to release IP update lock for workflow {workflow_id}: {e}")
+
+        lock_cur.close()
+
 # ---------- Disk helpers ----------
 def _get_vm_config_id_by_workflow(db_conn, workflow_id: int) -> int:
     cur = db_conn.cursor(dictionary=True)
@@ -293,18 +430,18 @@ def _get_vm_name_prefix_by_config_id(db_conn, vm_configuration_id: int) -> str:
     finally:
         cur.close()
 
-def _acquire_batch_lock(cur, workflow_id: int, timeout_sec: int = 10) -> bool:
-    lock_name = f"ensure_disks_{workflow_id}"
-    cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, timeout_sec))
-    got = cur.fetchone()
-    return bool(got and list(got.values())[0] == 1)
+# def _acquire_batch_lock(cur, workflow_id: int, timeout_sec: int = 10) -> bool:
+#     lock_name = f"ensure_disks_{workflow_id}"
+#     cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, timeout_sec))
+#     got = cur.fetchone()
+#     return bool(got and list(got.values())[0] == 1)
 
-def _release_batch_lock(cur, workflow_id: int) -> None:
-    lock_name = f"ensure_disks_{workflow_id}"
-    try:
-        cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-    except Exception:
-        pass
+# def _release_batch_lock(cur, workflow_id: int) -> None:
+#     lock_name = f"ensure_disks_{workflow_id}"
+#     try:
+#         cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+#     except Exception:
+#         pass
 
 def _normalize_prov(v: str) -> str:
     v = (v or "").strip().lower()
@@ -934,40 +1071,82 @@ def is_pipeline_manual_for_workflow(db_conn, workflow_id: int) -> bool:
         cur.close()
 
 # ---------- 處理 workflow 狀態更新 ----------
+# ---------- 處理 workflow 狀態更新 ----------
 def process_workflow_status_update(db_conn, workflow_id: int, target_status: str, pipeline_id: int) -> None:
     """
     db workflow_run.status 更新及 Jira / disk 處理
     """
+    lock_cur = db_conn.cursor(dictionary=True)
+    lock_acquired = False
+    
     try:
-        logging.info(f"🎯 Processing workflow {workflow_id} status update to {target_status}")
+        # 獲取鎖
+        lock_name = f"process_workflow_{workflow_id}"
+        lock_cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 10))
+        lock_result = lock_cur.fetchone()
+        lock_cur.fetchall()
+        
+        if not (lock_result and list(lock_result.values())[0] == 1):
+            logging.info(f"⏭️ [SKIP_LOCK] Workflow {workflow_id} is being processed, skipping")
+            return
+        
+        lock_acquired = True
+        logging.info(f"🔒 [PROCESS_LOCK] Acquired processing lock for workflow {workflow_id}")
+        
+        # ✅ 優化：一次查詢同時取得 status 和 request_payload
+        cur_check = db_conn.cursor(dictionary=True)
+        try:
+            cur_check.execute(
+                "SELECT status, request_payload FROM workflow_runs WHERE workflow_id = %s",
+                (workflow_id,)
+            )
+            row = cur_check.fetchone()
+            
+            if not row:
+                logging.warning(f"⚠️ Workflow {workflow_id} not found in database")
+                return
+            
+            current_status = (row.get("status") or "").upper()
+            request_payload = row.get("request_payload")
+            
+            # 如果當前狀態 == 目標狀態，直接返回
+            if current_status == target_status.upper():
+                logging.info(f"⏭️ [SKIP_DUPLICATE] Workflow {workflow_id} already in {target_status}")
+                return
+                
+            # 如果已經是終態，不允許修改
+            final_states = ("SUCCESS", "FAILED", "CANCELED", "RETURNED")
+            if current_status in final_states:
+                logging.info(f"⏭️ [SKIP_FINAL] Workflow {workflow_id} is in final state {current_status}")
+                return
+        finally:
+            cur_check.close()
 
+        # 處理 SUCCESS 狀態
         if target_status == "SUCCESS":
-            # 檢查 action_type
-            cur = db_conn.cursor(dictionary=True)
+            if not request_payload:
+                logging.warning(f"⚠️ No request_payload for workflow {workflow_id}")
+                return
+            
             try:
-                cur.execute("SELECT request_payload FROM workflow_runs WHERE workflow_id = %s", (workflow_id,))
-                row = cur.fetchone()
-                if row and row.get("request_payload"):
-                    payload = json.loads(row["request_payload"])
-                    action_type = payload.get("action_type", "create")
+                payload = json.loads(request_payload)
+                action_type = payload.get("action_type", "create").lower()
+            except json.JSONDecodeError as e:
+                logging.error(f"❌ Invalid JSON in request_payload for workflow {workflow_id}: {e}")
+                return
 
-                    # 檢查 action_type 為 delete 刪除 db 資料
-                    if action_type == "delete":
-                        logging.info(f"🗑️ DELETE operation detected in process_workflow_status_update, skipping disk operations")
+            # DELETE 操作特殊處理
+            if action_type == "delete":
+                logging.info(f"🗑️ DELETE operation for workflow {workflow_id}")
+                delete_vm_from_database(workflow_id)
+                ensure_jira_after_success(db_conn, workflow_id)
+                update_request_status(workflow_id, target_status)
+                return
 
-                        # 刪除資料庫中的 VM 記錄
-                        delete_success = delete_vm_from_database(workflow_id)
-                        if not delete_success:
-                            logging.warning(f"⚠️ Failed to delete VM from database, but continuing with Jira creation")
+            # CREATE/UPDATE 操作: IP → Disk → Jira
+            if action_type in ("create", "update"):
+                update_vm_ip_from_vault(db_conn, workflow_id)
 
-                        ensure_jira_after_success(db_conn, workflow_id)
-                        update_request_status(workflow_id, target_status)
-                        logging.info(f"✅ Updated workflow {workflow_id} status to {target_status}")
-                        return  # 提前返回
-            finally:
-                cur.close()
-
-            # action_type 為 delete 以外的，正常處理 Jira 跟 disk
             ensure_disks_after_success(db_conn, workflow_id)
             ensure_jira_after_success(db_conn, workflow_id)
 
@@ -982,9 +1161,22 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
         logging.info(f"✅ Updated workflow {workflow_id} status to {target_status}")
 
     except Exception as e:
-        logging.error(f"❌ Error processing workflow {workflow_id} status update: {e}")
+        logging.error(f"❌ Error processing workflow {workflow_id}: {e}")
         import traceback
-        logging.error(f"❌ Full traceback: {traceback.format_exc()}")
+        logging.error(traceback.format_exc())
+    finally:
+        # 釋放鎖
+        if lock_acquired:
+            try:
+                lock_name = f"process_workflow_{workflow_id}"
+                lock_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                lock_cur.fetchone()
+                lock_cur.fetchall()
+                logging.info(f"🔓 [PROCESS_UNLOCK] Released processing lock for workflow {workflow_id}")
+            except Exception as e:
+                logging.error(f"❌ Failed to release processing lock for workflow {workflow_id}: {e}")
+        
+        lock_cur.close()
 
 # ---------- Monitor pipelines ----------
 # 檔案: pipeline_monitor.py
@@ -1104,7 +1296,31 @@ def monitor_pipelines(app):
 
                         # DELETE 操作：直接標記為 SUCCESS，不處理磁碟
                         if is_delete:
-                            print(f"[delete_skip] wf={workflow_id} is DELETE operation, skipping disk check")
+                            print(f"[delete_check] wf={workflow_id} is DELETE operation, checking pipeline status first")
+
+                            # 先確認 pipeline 狀態
+                            try:
+                                fresh_status = _refresh_pipeline_from_gitlab(db_conn, pipeline_id)
+                                print(f"[pipeline_refresh] wf={workflow_id} fresh_status={fresh_status}")
+
+                                # 優先檢查 pipeline 是否失敗或取消
+                                if fresh_status in ("failed", "canceled"):
+                                    target_status = "FAILED" if fresh_status == "failed" else "CANCELED"
+                                    update_request_status(workflow_id, target_status)
+                                    print(f"[pipeline_terminated] wf={workflow_id} pipeline {fresh_status}, marking as {target_status}")
+                                    continue  # ← Pipeline 失敗/取消後跳到下一個 workflow
+
+                                # 如果 pipeline 還沒成功，等待
+                                if fresh_status != "success":
+                                    print(f"[delete_wait] wf={workflow_id} pipeline not yet success ({fresh_status}), waiting...")
+                                    continue  # ← Pipeline 未完成，跳到下一個 workflow
+
+                            except Exception as refresh_err:
+                                print(f"[refresh_error] wf={workflow_id} pipeline refresh failed: {refresh_err}")
+                                continue  # ← 查詢失敗，跳到下一個 workflow
+
+                            # 只有 pipeline 成功後才執行刪除
+                            print(f"[delete_execute] wf={workflow_id} pipeline success, proceeding with deletion")
 
                             # 刪除資料庫中的 VM 記錄
                             try:
@@ -1128,7 +1344,7 @@ def monitor_pipelines(app):
                             update_request_status(workflow_id, "SUCCESS")
                             ensure_jira_after_success(db_conn, workflow_id)
                             print(f"[delete_complete] wf={workflow_id} DELETE completed, moving to SUCCESS")
-                            continue
+                            continue  # ← DELETE 完成後跳到下一個 workflow
 
                         # 非 DELETE 操作：正常處理磁碟
                         print(f"[disk_check] wf={workflow_id} processing pending disks")
@@ -1142,16 +1358,16 @@ def monitor_pipelines(app):
                                 target_status = "FAILED" if fresh_status == "failed" else "CANCELED"
                                 update_request_status(workflow_id, target_status)
                                 print(f"[pipeline_terminated] wf={workflow_id} pipeline {fresh_status}, marking as {target_status}")
-                                continue
+                                continue  # ← Pipeline 失敗/取消後跳到下一個 workflow
 
                             # 如果 pipeline 還沒成功，等待
                             if fresh_status != "success":
                                 print(f"[disk_wait] wf={workflow_id} pipeline not yet success ({fresh_status}), waiting...")
-                                continue
+                                continue  # ← Pipeline 未完成，跳到下一個 workflow
 
                         except Exception as refresh_err:
                             print(f"[refresh_error] wf={workflow_id} pipeline refresh failed: {refresh_err}")
-                            continue
+                            continue  # ← 查詢失敗，跳到下一個 workflow
 
                         # 只有 pipeline 成功後才執行磁碟操作
                         try:
@@ -1168,7 +1384,7 @@ def monitor_pipelines(app):
                         except Exception as state_err:
                             print(f"[state_error] wf={workflow_id} get_workflow_state_info failed: {state_err}")
                             logging.error(f"get_workflow_state_info error for workflow {workflow_id}: {state_err}")
-                            continue
+                            continue  # ← 無法取得狀態，跳到下一個 workflow
 
                         pending_disks = (
                             c['PENDING_CREATION'] + c['CREATING'] +
@@ -1180,20 +1396,22 @@ def monitor_pipelines(app):
                         # 判斷是否所有磁碟都完成
                         if pending_disks == 0 and c['FAILED'] == 0:
                             if fresh_status == "success":
-                                update_request_status(workflow_id, "SUCCESS")
-                                ensure_jira_after_success(db_conn, workflow_id)
-                                print(f"[disk_complete] wf={workflow_id} all disks done, pipeline success, moving to SUCCESS")
+                                process_workflow_status_update(db_conn, workflow_id, "SUCCESS", pipeline_id)
+                                print(f"[disk_complete] wf={workflow_id} all disks done, moving to SUCCESS")
+                                continue  # 處理完就跳出
                             else:
                                 print(f"[disk_complete] wf={workflow_id} disks done but pipeline state is {fresh_status}; remain DEPLOYING")
+                                continue
                         elif c['FAILED'] > 0:
                             update_request_status(workflow_id, "FAILED")
                             print(f"[disk_failed] wf={workflow_id} has failed disks, marking as FAILED")
+                            continue
                         else:
                             print(f"[disk_pending] wf={workflow_id} still has {pending_disks} pending disks")
-
-                        continue
+                            continue
 
                     # 統一處理所有 GitLab 狀態查詢與更新邏輯 (主要監控邏輯)
+                    # 注意：只有 current_status 不是 DEPLOYING 的 workflow 才會執行到這裡
                     print(f"🔍 [poll] wf={workflow_id} pid={pipeline_id} DB={db_status} → query GitLab")
 
                     gitlab_result = get_pipeline_status_from_gitlab(pipeline_id)
@@ -1280,7 +1498,7 @@ def monitor_pipelines(app):
                 if db_conn:
                     db_conn.close()
 
-            time.sleep(5)
+            time.sleep(30)
 
 # ---------- Scan IN_PROGRESS workflows ----------
 def monitor_workflows(app):
