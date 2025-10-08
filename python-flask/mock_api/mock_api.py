@@ -4,14 +4,18 @@ import random
 import ipaddress
 import string
 import secrets
-import hvac # 要先 pip3 install hvac ipaddress
+import hvac
+import os
+from dotenv import load_dotenv # pip3 install python-dotenv
+
+# 載入 .env 檔案
+load_dotenv()
 
 mock_app = Flask(__name__)
 
 # =========================
 # Vault 配置
 # =========================
-import os
 
 # 自動檢測：在 Docker 中用 vault，本地用 localhost
 VAULT_HOST = os.getenv('VAULT_HOST', '127.0.0.1')
