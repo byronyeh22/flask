@@ -5,6 +5,27 @@ import random
 mock_app = Flask(__name__)
 
 # =========================
+<<<<<<< HEAD
+=======
+# Vault 配置
+# =========================
+import os
+
+# 自動檢測：在 Docker 中用 vault，本地用 localhost
+VAULT_HOST = os.getenv('VAULT_HOST', '127.0.0.1')
+VAULT_ADDR = f"http://{VAULT_HOST}:8200"
+VAULT_TOKEN = os.getenv('VAULT_TOKEN', '')  # ← 從環境變數讀取
+VAULT_MOUNT = "secret"
+
+print(f"🔧 [CONFIG] Vault address: {VAULT_ADDR}")
+if not VAULT_TOKEN:
+    print("⚠️ [CONFIG] VAULT_TOKEN not set, Vault operations will fail")
+
+# IP 分配記錄
+ALLOCATED_IPS = {}
+
+# =========================
+>>>>>>> 71973f1 (update)
 # 通用 Helper
 # =========================
 def utc_now_iso():
