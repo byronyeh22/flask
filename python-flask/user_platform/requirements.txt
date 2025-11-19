@@ -16,3 +16,6 @@ pyvmomi
 
 # HashiCorp Vault
 hvac
+
+# Logging: JSON Formatter
+python-json-logger>=2.0.7

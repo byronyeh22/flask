@@ -28,6 +28,9 @@ from ..gitlab_api.run_manual_job import run_manual_job
 from ..gitlab_api.cancel_manual_jobs import cancel_manual_jobs
 from ..vsphere_api.disk_manager import get_vm_disks, remove_disk_from_vm
 
+# --- log ---
+from app.log.logging_setup import bind_context
+
 # --- 輔助函數 ---
 def _current_username():
     # 1) Flask-Login（若你有用）
@@ -245,6 +248,13 @@ def vsphere_submit_request():
             return f'<script>window.top.location="{redirect_url}"</script>'
 
         payload = json.loads(wf.get("request_payload") or "{}")
+
+        # 先嘗試從 JSON / Query / Header 取得 workflow_id，拿到就綁入 Context
+        wf_id_candidate = (payload or {}).get("workflow_id") \
+                          or request.args.get("workflow_id") \
+                          or request.headers.get("X-Workflow-ID")
+        if wf_id_candidate is not None:
+            bind_context(workflow_id=str(wf_id_candidate))
 
         # 判斷操作類型，將結構標準化
         is_update = 'new_config' in payload

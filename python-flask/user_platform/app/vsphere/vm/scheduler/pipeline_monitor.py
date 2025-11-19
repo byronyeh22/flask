@@ -1,10 +1,15 @@
 import time
 import threading
 import json
-import logging
 from datetime import datetime
 
 from app.mysql.db import get_db_connection
+
+# ---------- LOG ----------
+import logging
+from app.log.logging_setup import log_context, bind_context, new_trace_id
+logger = logging.getLogger(__name__)
+
 
 # ---------- GitLab ----------
 from app.vsphere.vm.db.update_gitlab_pipeline_details import update_gitlab_pipeline_details
@@ -66,12 +71,12 @@ def set_failed_message(db_conn, workflow_id: int, source: str, message: str) -> 
                 (json.dumps(old_json), workflow_id),
             )
             db_conn.commit()
-            logging.info(f"💾 Failed message recorded for workflow {workflow_id}: {source} - {message}")
+            logger.info(f"💾 Failed message recorded for workflow {workflow_id}: {source} - {message}")
         finally:
             cur2.close()
 
     except Exception as e:
-        logging.error(f"❌ Failed to save failed_message for workflow {workflow_id}: {str(e)}")
+        logger.error(f"❌ Failed to save failed_message for workflow {workflow_id}: {str(e)}")
     finally:
         cur.close()
 
@@ -110,16 +115,16 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
         lock_cur.fetchall()  # 清空剩餘結果
 
         if not (lock_result and list(lock_result.values())[0] == 1):
-            logging.info(f"Skip Jira creation for workflow {workflow_id}: lock busy or timeout")
+            logger.info(f"Skip Jira creation for workflow {workflow_id}: lock busy or timeout")
             return
 
         lock_acquired = True
-        logging.info(f"Acquired Jira creation lock for workflow {workflow_id}")
+        logger.info(f"Acquired Jira creation lock for workflow {workflow_id}")
 
         # 確認是否已存在 Jira ticket
         existing = get_jira_ticket_by_workflow_id(workflow_id)
         if existing and existing.get("ticket_id"):
-            logging.info(f"Jira ticket already exists for workflow {workflow_id}: {existing.get('ticket_id')}")
+            logger.info(f"Jira ticket already exists for workflow {workflow_id}: {existing.get('ticket_id')}")
             return
 
         # 獲取 request_payload
@@ -153,11 +158,11 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
             # CREATE 或其他操作：使用原有邏輯
             form_data = payload.get("new_config", payload)
 
-        logging.info(f"Creating Jira ticket for workflow {workflow_id} with action_type: {action_type}")
+        logger.info(f"Creating Jira ticket for workflow {workflow_id} with action_type: {action_type}")
 
         # 建立 Jira ticket
         jira_key = create_jira_ticket(form_data)
-        logging.info(f"Successfully created Jira ticket: {jira_key} for workflow {workflow_id}")
+        logger.info(f"Successfully created Jira ticket: {jira_key} for workflow {workflow_id}")
 
         # 給 Jira 初始化時間
         time.sleep(5)
@@ -171,9 +176,9 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
             try:
                 if attempt > 0:
                     time.sleep(retry_delay)
-                logging.info(f"Adding comment to {jira_key}, attempt {attempt + 1}/{max_retries}")
+                logger.info(f"Adding comment to {jira_key}, attempt {attempt + 1}/{max_retries}")
                 jira_add_comment(jira_key, "Auto-created by pipeline SUCCESS.")
-                logging.info(f"Successfully added comment to {jira_key}")
+                logger.info(f"Successfully added comment to {jira_key}")
                 comment_success = True
                 break
             except Exception as e:
@@ -193,9 +198,9 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
             try:
                 if attempt > 0:
                     time.sleep(retry_delay)
-                logging.info(f"Transitioning {jira_key} to Done, attempt {attempt + 1}/{max_retries}")
+                logger.info(f"Transitioning {jira_key} to Done, attempt {attempt + 1}/{max_retries}")
                 jira_transition_issue(jira_key, "Done")
-                logging.info(f"Successfully transitioned {jira_key} to Done")
+                logger.info(f"Successfully transitioned {jira_key} to Done")
                 transition_success = True
                 break
             except Exception as e:
@@ -211,20 +216,20 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
 
         # 獲取最終的 ticket 詳細資訊並插入資料庫
         try:
-            logging.info(f"Fetching final details for {jira_key}")
+            logger.info(f"Fetching final details for {jira_key}")
             ticket_data = get_jira_issue_detail(jira_key)
             insert_jira_info_to_db(workflow_id, ticket_data)
-            logging.info(f"Successfully inserted ticket {jira_key} to database for workflow {workflow_id}")
+            logger.info(f"Successfully inserted ticket {jira_key} to database for workflow {workflow_id}")
         except Exception as e:
-            logging.error(f"Insert ticket to DB failed for {jira_key}: {str(e)}")
+            logger.error(f"Insert ticket to DB failed for {jira_key}: {str(e)}")
             set_failed_message(db_conn, workflow_id, "JIRA", f"Insert ticket to DB failed: {str(e)}")
             return
 
         # 只有在 Jira ticket 完全建立並插入資料庫後，才標記為成功
-        logging.info(f"Jira ticket creation process completed successfully for workflow {workflow_id}")
+        logger.info(f"Jira ticket creation process completed successfully for workflow {workflow_id}")
 
     except Exception as e:
-        logging.error(f"Create ticket failed for workflow {workflow_id}: {str(e)}")
+        logger.error(f"Create ticket failed for workflow {workflow_id}: {str(e)}")
         set_failed_message(db_conn, workflow_id, "JIRA", f"Create ticket failed: {str(e)}")
     finally:
         # 釋放鎖
@@ -234,9 +239,9 @@ def ensure_jira_after_success(db_conn, workflow_id: int) -> None:
                 lock_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
                 lock_cur.fetchone()  # 讀取結果
                 lock_cur.fetchall()  # 清空剩餘結果
-                logging.info(f"Released Jira creation lock for workflow {workflow_id}")
+                logger.info(f"Released Jira creation lock for workflow {workflow_id}")
             except Exception as e:
-                logging.error(f"Failed to release Jira lock for workflow {workflow_id}: {e}")
+                logger.error(f"Failed to release Jira lock for workflow {workflow_id}: {e}")
 
         lock_cur.close()
 
@@ -278,31 +283,31 @@ def update_vm_ip_from_vault(db_conn, workflow_id: int) -> bool:
         lock_cur.fetchall()  # 清空剩餘結果
         
         if not (lock_result and list(lock_result.values())[0] == 1):
-            logging.info(f"⏭️ [IP_SKIP] IP update for workflow {workflow_id} is being processed, skipping")
+            logger.info(f"⏭️ [IP_SKIP] IP update for workflow {workflow_id} is being processed, skipping")
             return True  # 返回 True,因為其他線程會處理
         
         lock_acquired = True
-        logging.info(f"🔒 [IP_LOCK] Acquired IP update lock for workflow {workflow_id}")
+        logger.info(f"🔒 [IP_LOCK] Acquired IP update lock for workflow {workflow_id}")
         
         try:
-            logging.info(f"🌐 [IP_UPDATE] Starting IP update for workflow {workflow_id}")
+            logger.info(f"🌐 [IP_UPDATE] Starting IP update for workflow {workflow_id}")
 
             # 1. 取得 vm_config_id
             try:
                 vm_config_id = _get_vm_config_id_by_workflow(db_conn, workflow_id)
             except Exception as e:
-                logging.error(f"❌ [IP_UPDATE] Failed to get vm_config_id: {e}")
+                logger.error(f"❌ [IP_UPDATE] Failed to get vm_config_id: {e}")
                 set_failed_message(db_conn, workflow_id, "DB_VM_ID", f"Failed to get vm_config_id: {e}")
                 return False
 
             # 2. 取得 VM 詳細資訊
             vm_details = _get_vm_config_details_for_ip_update(db_conn, vm_config_id)
             if not vm_details:
-                logging.error(f"❌ [IP_UPDATE] Failed to retrieve VM details for vm_config_id={vm_config_id}")
+                logger.error(f"❌ [IP_UPDATE] Failed to retrieve VM details for vm_config_id={vm_config_id}")
                 set_failed_message(db_conn, workflow_id, "DB_VM_INFO", "Failed to retrieve VM details for IP update.")
                 return False
 
-            logging.info(f"🔍 [IP_UPDATE] VM: {vm_details['environment']}-{vm_details['os_type']}/{vm_details['vm_name_prefix']}")
+            logger.info(f"🔍 [IP_UPDATE] VM: {vm_details['environment']}-{vm_details['os_type']}/{vm_details['vm_name_prefix']}")
 
             # 3. 從 Vault 取得 IP (含重試機制)
             vault_manager = VaultManager()
@@ -314,7 +319,7 @@ def update_vm_ip_from_vault(db_conn, workflow_id: int) -> bool:
                 if attempt > 0:
                     time.sleep(retry_delay)
 
-                logging.info(f"🔄 [IP_UPDATE] Attempt {attempt + 1}/{max_retries}")
+                logger.info(f"🔄 [IP_UPDATE] Attempt {attempt + 1}/{max_retries}")
                 ip_address = vault_manager.get_vm_ipv4_ip(
                     environment=vm_details["environment"],
                     os_type=vm_details["os_type"],
@@ -326,34 +331,34 @@ def update_vm_ip_from_vault(db_conn, workflow_id: int) -> bool:
 
             # 4. 更新資料庫
             if ip_address:
-                logging.info(f"💾 [IP_UPDATE] Updating DB with IP={ip_address}")
+                logger.info(f"💾 [IP_UPDATE] Updating DB with IP={ip_address}")
 
                 # 🔄 重新獲取 vm_config_id 以確保使用最新的記錄
                 try:
                     vm_config_id = _get_vm_config_id_by_workflow(db_conn, workflow_id)
-                    logging.info(f"🔄 [IP_UPDATE] Re-fetched vm_config_id={vm_config_id}")
+                    logger.info(f"🔄 [IP_UPDATE] Re-fetched vm_config_id={vm_config_id}")
                 except Exception as e:
-                    logging.error(f"❌ [IP_UPDATE] Failed to re-fetch vm_config_id: {e}")
+                    logger.error(f"❌ [IP_UPDATE] Failed to re-fetch vm_config_id: {e}")
                     set_failed_message(db_conn, workflow_id, "DB_VM_ID", f"Failed to re-fetch vm_config_id: {e}")
                     return False
 
                 if update_vm_ipv4_ip(vm_config_id, ip_address):
-                    logging.info(f"✅ [IP_UPDATE] Successfully updated IP for workflow {workflow_id}")
+                    logger.info(f"✅ [IP_UPDATE] Successfully updated IP for workflow {workflow_id}")
                     return True
                 else:
-                    logging.error(f"❌ [IP_UPDATE] Failed to update DB")
+                    logger.error(f"❌ [IP_UPDATE] Failed to update DB")
                     set_failed_message(db_conn, workflow_id, "DB_IP", "Failed to update VM IPv4 IP in database.")
                     return False
             else:
                 vault_path = f"secret/{vm_details['environment']}-{vm_details['os_type']}/{vm_details['vm_name_prefix']}"
-                logging.error(f"❌ [IP_UPDATE] Failed after {max_retries} attempts. Path: {vault_path}")
+                logger.error(f"❌ [IP_UPDATE] Failed after {max_retries} attempts. Path: {vault_path}")
                 set_failed_message(db_conn, workflow_id, "VAULT_IP", f"Failed to retrieve IP after {max_retries} attempts.")
                 return False
         
         except Exception as e:
-            logging.error(f"❌ [IP_UPDATE] Exception: {e}")
+            logger.error(f"❌ [IP_UPDATE] Exception: {e}")
             import traceback
-            logging.error(traceback.format_exc())
+            logger.error(traceback.format_exc())
             set_failed_message(db_conn, workflow_id, "IP_UPDATE", f"Error during IP update: {str(e)}")
             return False
     
@@ -365,9 +370,9 @@ def update_vm_ip_from_vault(db_conn, workflow_id: int) -> bool:
                 lock_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
                 lock_cur.fetchone()
                 lock_cur.fetchall()
-                logging.info(f"🔓 [IP_UNLOCK] Released IP update lock for workflow {workflow_id}")
+                logger.info(f"🔓 [IP_UNLOCK] Released IP update lock for workflow {workflow_id}")
             except Exception as e:
-                logging.error(f"❌ Failed to release IP update lock for workflow {workflow_id}: {e}")
+                logger.error(f"❌ Failed to release IP update lock for workflow {workflow_id}: {e}")
 
         lock_cur.close()
 
@@ -391,7 +396,7 @@ def _get_vm_config_id_by_workflow(db_conn, workflow_id: int) -> int:
             environment_value = (form_data.get("environment") or "").strip()
             vm_name_prefix_value = (form_data.get("vm_name_prefix") or "").strip()
             if not environment_value or not vm_name_prefix_value:
-                logging.info(f"🗑️ [VM_CONFIG] Workflow {workflow_id} is DELETE operation with missing VM info, returning dummy ID")
+                logger.info(f"🗑️ [VM_CONFIG] Workflow {workflow_id} is DELETE operation with missing VM info, returning dummy ID")
                 return 0  # 返回特殊值 0 表示這是 DELETE 操作但缺少完整資訊
         else:
             # create 或其他操作
@@ -450,7 +455,7 @@ def _normalize_prov(v: str) -> str:
     return "thin"
 
 def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
-    logging.info(f"🔧 [DISK_DEBUG] Starting ensure_disks_after_success for workflow {workflow_id}")
+    logger.info(f"🔧 [DISK_DEBUG] Starting ensure_disks_after_success for workflow {workflow_id}")
     """
     執行 pipeline 成功後的磁碟處理（含 Create/Resize/Delete）：
       - PENDING_CREATION → CREATING → SUCCESS/FAILED
@@ -470,7 +475,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
 
                 # 如果是 DELETE 操作，直接返回，不進行後續處理
                 if action_type == "delete":
-                    logging.info(f"🗑️ [DISK_SKIP] Workflow {workflow_id} is DELETE operation, skipping disk operations")
+                    logger.info(f"🗑️ [DISK_SKIP] Workflow {workflow_id} is DELETE operation, skipping disk operations")
                     return
             except json.JSONDecodeError:
                 logging.warning(f"⚠️ Invalid JSON in request_payload for workflow {workflow_id}")
@@ -491,7 +496,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
         lock_cur.fetchall()  # 清空剩餘結果
 
         if not (lock_result and list(lock_result.values())[0] == 1):
-            logging.info(f"🧷 Skip ensure_disks_after_success for workflow {workflow_id}: lock busy")
+            logger.info(f"🧷 Skip ensure_disks_after_success for workflow {workflow_id}: lock busy")
             return
 
         lock_acquired = True
@@ -573,10 +578,10 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                     finally:
                         ok_cur.close()
 
-                    logging.info(f"✅ Disk #{disk_id} created at scsi({scsi_controller}:{unit_number}) label=Hard disk {label_number}")
+                    logger.info(f"✅ Disk #{disk_id} created at scsi({scsi_controller}:{unit_number}) label=Hard disk {label_number}")
 
                 except Exception as e:
-                    logging.error(f"❌ Failed to create disk #{disk_id} for VM '{vm_name_prefix}': {e}")
+                    logger.error(f"❌ Failed to create disk #{disk_id} for VM '{vm_name_prefix}': {e}")
                     try:
                         fail_cur = db_conn.cursor()
                         try:
@@ -594,7 +599,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                         finally:
                             fail_cur.close()
                     except Exception as write_err:
-                        logging.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
+                        logger.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
 
                     set_failed_message(db_conn, workflow_id, f"DISK:{disk_id}", f"Create disk failed: {str(e)}")
 
@@ -660,15 +665,15 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                     if not target_disk_key:
                         raise ValueError(f"Cannot find disk_key for scsi({scsi_controller}:{unit_number})")
 
-                    logging.info(f"About to call update_disk_size with vm_name={vm_name_prefix}, disk_key={target_disk_key}, new_size_gb={new_size_gb}")
-                    logging.info(f"update_disk_size function: {update_disk_size}")
+                    logger.info(f"About to call update_disk_size with vm_name={vm_name_prefix}, disk_key={target_disk_key}, new_size_gb={new_size_gb}")
+                    logger.info(f"update_disk_size function: {update_disk_size}")
 
                     # 呼叫 vSphere 調整大小
                     result = update_disk_size(vm_name_prefix, target_disk_key, new_size_gb)
-                    logging.info(f"update_disk_size result: {result}")
+                    logger.info(f"update_disk_size result: {result}")
 
                     # 更新資料庫狀態為成功
-                    logging.info(f"Now updating database status for disk #{disk_id} from RESIZING to SUCCESS")
+                    logger.info(f"Now updating database status for disk #{disk_id} from RESIZING to SUCCESS")
                     ok_cur = db_conn.cursor()
                     try:
                         ok_cur.execute(
@@ -685,12 +690,12 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                     finally:
                         ok_cur.close()
 
-                    logging.info(f"✅ Disk #{disk_id} resized to {new_size_gb} GB")
+                    logger.info(f"✅ Disk #{disk_id} resized to {new_size_gb} GB")
 
                 except Exception as e:
-                    logging.error(f"❌ Failed to resize disk #{disk_id} for VM '{vm_name_prefix}': {e}")
-                    logging.error(f"Exception type: {type(e)}")
-                    logging.error(f"Error args: {e.args}")
+                    logger.error(f"❌ Failed to resize disk #{disk_id} for VM '{vm_name_prefix}': {e}")
+                    logger.error(f"Exception type: {type(e)}")
+                    logger.error(f"Error args: {e.args}")
 
                     # 更新資料庫狀態為失敗
                     try:
@@ -710,7 +715,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                         finally:
                             fail_cur.close()
                     except Exception as write_err:
-                        logging.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
+                        logger.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
 
                     set_failed_message(db_conn, workflow_id, f"DISK:{disk_id}", f"Resize disk failed: {str(e)}")
 
@@ -780,7 +785,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                             try:
                                 ok_cur.execute("DELETE FROM vm_disks WHERE id = %s", (disk_id,))
                                 db_conn.commit()
-                                logging.info(f"✅ Disk #{disk_id} record deleted (NULL values)")
+                                logger.info(f"✅ Disk #{disk_id} record deleted (NULL values)")
                             finally:
                                 ok_cur.close()
                             disk_already_removed = True
@@ -791,7 +796,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                             try:
                                 ok_cur.execute("DELETE FROM vm_disks WHERE id = %s", (disk_id,))
                                 db_conn.commit()
-                                logging.info(f"✅ Disk #{disk_id} record cleaned up (not found in vSphere)")
+                                logger.info(f"✅ Disk #{disk_id} record cleaned up (not found in vSphere)")
                             finally:
                                 ok_cur.close()
                             disk_already_removed = True
@@ -803,7 +808,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                         try:
                             ok_cur.execute("DELETE FROM vm_disks WHERE id = %s", (disk_id,))
                             db_conn.commit()
-                            logging.info(f"✅ Disk #{disk_id} database record deleted")
+                            logger.info(f"✅ Disk #{disk_id} database record deleted")
                         finally:
                             ok_cur.close()
 
@@ -829,14 +834,14 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                                 "label_number": label_number,
                             })
                         sync_disk_labels_to_database(vm_name_prefix, sync_data)
-                        logging.info(f"✅ Synced labels after deleting disk #{disk_id}")
+                        logger.info(f"✅ Synced labels after deleting disk #{disk_id}")
                     except Exception as sync_err:
                         logging.warning(f"⚠️ Failed to sync labels after delete: {sync_err}")
 
-                    logging.info(f"✅ Disk #{disk_id} deletion process completed")
+                    logger.info(f"✅ Disk #{disk_id} deletion process completed")
 
                 except Exception as e:
-                    logging.error(f"❌ Failed to delete disk #{disk_id} for VM '{vm_name_prefix}': {e}")
+                    logger.error(f"❌ Failed to delete disk #{disk_id} for VM '{vm_name_prefix}': {e}")
                     try:
                         fail_cur = db_conn.cursor()
                         try:
@@ -854,12 +859,12 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                         finally:
                             fail_cur.close()
                     except Exception as write_err:
-                        logging.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
+                        logger.error(f"❌ Also failed to mark disk #{disk_id} as FAILED: {write_err}")
 
                     set_failed_message(db_conn, workflow_id, f"DISK:{disk_id}", f"Delete disk failed: {str(e)}")
 
         except Exception as e:
-            logging.error(f"❌ ensure_disks_after_success error for workflow {workflow_id}: {e}")
+            logger.error(f"❌ ensure_disks_after_success error for workflow {workflow_id}: {e}")
             set_failed_message(db_conn, workflow_id, "DISK", f"Batch disk ops failed: {str(e)}")
 
     finally:
@@ -871,7 +876,7 @@ def ensure_disks_after_success(db_conn, workflow_id: int) -> None:
                 lock_cur.fetchone()  # 讀取結果
                 lock_cur.fetchall()  # 清空剩餘結果
             except Exception as e:
-                logging.error(f"❌ Failed to release lock for workflow {workflow_id}: {e}")
+                logger.error(f"❌ Failed to release lock for workflow {workflow_id}: {e}")
 
         lock_cur.close()
 
@@ -953,7 +958,7 @@ def get_workflow_state_info(db_conn, workflow_id: int) -> dict:
         if pipeline_status in ("failed", "canceled"):
             for k in ("PENDING_CREATION","CREATING","PENDING_RESIZE","RESIZING","PENDING_DELETE","DELETING"):
                 effective_counts[k] = 0
-            logging.info(f"🚫 Pipeline {pipeline_status} for workflow {workflow_id}, ignoring pending jobs")
+            logger.info(f"🚫 Pipeline {pipeline_status} for workflow {workflow_id}, ignoring pending jobs")
 
         return {
             'vm_configuration_id': vmc_id,
@@ -963,7 +968,7 @@ def get_workflow_state_info(db_conn, workflow_id: int) -> dict:
         }
 
     except Exception as e:
-        logging.error(f"❌ Error getting workflow state info for workflow {workflow_id}: {e}")
+        logger.error(f"❌ Error getting workflow state info for workflow {workflow_id}: {e}")
         return {
             'vm_configuration_id': 0,
             'actual_counts': {k:0 for k in ('PENDING_CREATION','CREATING','PENDING_RESIZE','RESIZING','PENDING_DELETE','DELETING','SUCCESS','FAILED')},
@@ -977,14 +982,16 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
     根據 pipeline_status 和建立額外硬碟狀態回傳 workflow 狀態
     """
     ps = (pipeline_status or "").strip().lower()
-    logging.info(f"🔍 Determining status for workflow {workflow_id}, pipeline_status={ps}")
+    with log_context(component="pipeline", workflow_id=str(workflow_id), trace_id=new_trace_id()):
+        logger.info("Determining status for workflow %s, pipeline_status=%s", workflow_id, pipeline_status, stacklevel=2)
+
 
     # 先檢查 workflow 當前狀態，如果已經是 RETURNED，保持不變
     status_result = get_workflow_status(workflow_id)
     if status_result.get("success"):
         current_status = (status_result.get("status") or "").upper()
         if current_status == "RETURNED":
-            logging.info(f"⭐️ Workflow {workflow_id} is RETURNED, preserving status despite pipeline={ps}")
+            logger.info(f"⭐️ Workflow {workflow_id} is RETURNED, preserving status despite pipeline={ps}")
             return "RETURNED"
     else:
         logging.warning(f"⚠️ Failed to get status for workflow {workflow_id}: {status_result.get('error')}")
@@ -1008,7 +1015,7 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
 
                 #  如果 action_type 為 delete 時跳過檢查硬碟建立邏輯直接返回 SUCCESS
                 if action_type == "delete":
-                    logging.info(f"🗑️ Workflow {workflow_id} is DELETE operation, returning SUCCESS directly")
+                    logger.info(f"🗑️ Workflow {workflow_id} is DELETE operation, returning SUCCESS directly")
                     return "SUCCESS"
         except Exception as e:
             logging.warning(f"⚠️ Failed to check action_type for workflow {workflow_id}: {e}")
@@ -1026,14 +1033,14 @@ def determine_workflow_status_after_pipeline(db_conn, workflow_id: int, pipeline
         )
         failed = c['FAILED']
 
-        logging.info(f"📊 Workflow {workflow_id} effective disk counts: {c}")
-        logging.info(f"📊 Total pending disks: {pending}, failed: {failed}")
+        logger.info(f"📊 Workflow {workflow_id} effective disk counts: {c}")
+        logger.info(f"📊 Total pending disks: {pending}, failed: {failed}")
 
         # 檢查磁碟統計狀態，如有 pending → 回傳 DEPLOYING，沒有 pending → 回傳 SUCCESS
         if failed > 0:
             return "FAILED"
         elif pending > 0:
-            logging.info(f"📊 Workflow {workflow_id} has {pending} pending disks, returning DEPLOYING")
+            logger.info(f"📊 Workflow {workflow_id} has {pending} pending disks, returning DEPLOYING")
             return "DEPLOYING"
         else:
             return "SUCCESS"
@@ -1087,11 +1094,11 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
         lock_cur.fetchall()
         
         if not (lock_result and list(lock_result.values())[0] == 1):
-            logging.info(f"⏭️ [SKIP_LOCK] Workflow {workflow_id} is being processed, skipping")
+            logger.info(f"⏭️ [SKIP_LOCK] Workflow {workflow_id} is being processed, skipping")
             return
         
         lock_acquired = True
-        logging.info(f"🔒 [PROCESS_LOCK] Acquired processing lock for workflow {workflow_id}")
+        logger.info(f"🔒 [PROCESS_LOCK] Acquired processing lock for workflow {workflow_id}")
         
         # ✅ 優化：一次查詢同時取得 status 和 request_payload
         cur_check = db_conn.cursor(dictionary=True)
@@ -1111,13 +1118,13 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
             
             # 如果當前狀態 == 目標狀態，直接返回
             if current_status == target_status.upper():
-                logging.info(f"⏭️ [SKIP_DUPLICATE] Workflow {workflow_id} already in {target_status}")
+                logger.info(f"⏭️ [SKIP_DUPLICATE] Workflow {workflow_id} already in {target_status}")
                 return
                 
             # 如果已經是終態，不允許修改
             final_states = ("SUCCESS", "FAILED", "CANCELED", "RETURNED")
             if current_status in final_states:
-                logging.info(f"⏭️ [SKIP_FINAL] Workflow {workflow_id} is in final state {current_status}")
+                logger.info(f"⏭️ [SKIP_FINAL] Workflow {workflow_id} is in final state {current_status}")
                 return
         finally:
             cur_check.close()
@@ -1132,12 +1139,12 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
                 payload = json.loads(request_payload)
                 action_type = payload.get("action_type", "create").lower()
             except json.JSONDecodeError as e:
-                logging.error(f"❌ Invalid JSON in request_payload for workflow {workflow_id}: {e}")
+                logger.error(f"❌ Invalid JSON in request_payload for workflow {workflow_id}: {e}")
                 return
 
             # DELETE 操作特殊處理
             if action_type == "delete":
-                logging.info(f"🗑️ DELETE operation for workflow {workflow_id}")
+                logger.info(f"🗑️ DELETE operation for workflow {workflow_id}")
                 delete_vm_from_database(workflow_id)
                 ensure_jira_after_success(db_conn, workflow_id)
                 update_request_status(workflow_id, target_status)
@@ -1152,18 +1159,18 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
 
         # pipeline success 但仍有 pending disk
         elif target_status == "DEPLOYING":
-            logging.info(f"Workflow {workflow_id} marked as DEPLOYING, waiting for pipeline to complete before disk operations")
+            logger.info(f"Workflow {workflow_id} marked as DEPLOYING, waiting for pipeline to complete before disk operations")
 
         elif target_status in ("FAILED", "CANCELED"):
             set_failed_message(db_conn, workflow_id, "GITLAB", f"Pipeline {pipeline_id} status is {target_status.lower()}")
 
         update_request_status(workflow_id, target_status)
-        logging.info(f"✅ Updated workflow {workflow_id} status to {target_status}")
+        logger.info(f"✅ Updated workflow {workflow_id} status to {target_status}")
 
     except Exception as e:
-        logging.error(f"❌ Error processing workflow {workflow_id}: {e}")
+        logger.error(f"❌ Error processing workflow {workflow_id}: {e}")
         import traceback
-        logging.error(traceback.format_exc())
+        logger.error(traceback.format_exc())
     finally:
         # 釋放鎖
         if lock_acquired:
@@ -1172,9 +1179,9 @@ def process_workflow_status_update(db_conn, workflow_id: int, target_status: str
                 lock_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
                 lock_cur.fetchone()
                 lock_cur.fetchall()
-                logging.info(f"🔓 [PROCESS_UNLOCK] Released processing lock for workflow {workflow_id}")
+                logger.info(f"🔓 [PROCESS_UNLOCK] Released processing lock for workflow {workflow_id}")
             except Exception as e:
-                logging.error(f"❌ Failed to release processing lock for workflow {workflow_id}: {e}")
+                logger.error(f"❌ Failed to release processing lock for workflow {workflow_id}: {e}")
         
         lock_cur.close()
 
@@ -1336,7 +1343,7 @@ def monitor_pipelines(app):
                                     continue
                             except Exception as del_err:
                                 print(f"[delete_db_error] wf={workflow_id} error deleting VM: {del_err}")
-                                logging.error(f"Error deleting VM from database for workflow {workflow_id}: {del_err}")
+                                logger.error(f"Error deleting VM from database for workflow {workflow_id}: {del_err}")
                                 update_request_status(workflow_id, "FAILED")
                                 set_failed_message(db_conn, workflow_id, "DB_DELETE", f"Error deleting VM: {str(del_err)}")
                                 continue
@@ -1374,7 +1381,7 @@ def monitor_pipelines(app):
                             ensure_disks_after_success(db_conn, workflow_id)
                         except Exception as disk_err:
                             print(f"[disk_error] wf={workflow_id} ensure_disks_after_success failed: {disk_err}")
-                            logging.error(f"ensure_disks_after_success error for workflow {workflow_id}: {disk_err}")
+                            logger.error(f"ensure_disks_after_success error for workflow {workflow_id}: {disk_err}")
 
                         # 取得磁碟狀態
                         try:
@@ -1383,7 +1390,7 @@ def monitor_pipelines(app):
                             print(f"[disk_state] wf={workflow_id} effective_counts={c}")
                         except Exception as state_err:
                             print(f"[state_error] wf={workflow_id} get_workflow_state_info failed: {state_err}")
-                            logging.error(f"get_workflow_state_info error for workflow {workflow_id}: {state_err}")
+                            logger.error(f"get_workflow_state_info error for workflow {workflow_id}: {state_err}")
                             continue  # ← 無法取得狀態，跳到下一個 workflow
 
                         pending_disks = (
@@ -1433,7 +1440,7 @@ def monitor_pipelines(app):
                         target_status = determine_workflow_status_after_pipeline(db_conn, workflow_id, fresh_status)
 
                         if target_status is None:
-                            logging.error(f"❗ determine_workflow_status_after_pipeline returned None (wf={workflow_id}, fresh_status={fresh_status})")
+                            logger.error(f"❗ determine_workflow_status_after_pipeline returned None (wf={workflow_id}, fresh_status={fresh_status})")
 
                         final_states = ("SUCCESS", "FAILED", "CANCELED", "RETURNED")
                         if current_workflow_status in final_states:

@@ -11,4 +11,10 @@ from app import create_app
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=16888, debug=True)
+    # app.run(host="0.0.0.0", port=16888, debug=True, use_reloader=True)
+	app.run(
+	    host="0.0.0.0",
+	    port=16888,
+	    debug=False,         # 顯示帶 console 的錯誤頁（Werkzeug debugger）、更詳細的日誌
+	    use_reloader=True   # 監看程式檔案變動，自動重啟（關閉可避免雙進程/重複 thread）
+	)

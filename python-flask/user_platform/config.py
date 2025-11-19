@@ -14,6 +14,12 @@ class Config:
     if not FERNET_KEY:
         raise ValueError("No FERNET_KEY set for Flask application. Please set it as an environment variable on docker-compose.yml file.")
 
+    # --- Logging Configuration (New) ---
+    # 預設 INFO；可用 DEBUG/INFO/WARN/ERROR
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+    # 若設定，會同時把 JSON 日誌寫入此檔案（Fluent Bit 會 tail 這個檔）
+    LOG_FILE_PATH = os.environ.get("LOG_FILE_PATH")
+
 # --- 動態設定，根據 API_MODE 的值載入不同的連線資訊 ---
 
 if Config.API_MODE == 'dev':
